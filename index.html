@@ -1260,15 +1260,49 @@ function movePhase(hero) {
     }
   }
 
-  // Pick up dropped equipment from dungeon floor
-  const maxSlotsDungeon = hero.followers.find(f => f.effect === 'inventory_+1') ? 3 : 2;
-  while (G.dungeonFloorEquipment.length > 0 && hero.equipment.length < maxSlotsDungeon) {
-    G.dungeonFloorEquipment.sort((a,b) => (b.str||0) - (a.str||0));
-    const item = G.dungeonFloorEquipment[0];
-    if (item.effect === 'cannot_remove_blocks_talent' && hero.equipment.length > 0) break;
-    G.dungeonFloorEquipment.shift();
-    hero.equipment.push(item);
-    log(`  📦 ${hero.name} picks up ${item.name} from the dungeon floor!`, 'legendary');
+  // Encounter dropped equipment on dungeon floor (guarded by enemy)
+  if (G.dungeonFloorEquipment.length > 0 && !hero.ko) {
+    const maxSlotsDungeon = hero.followers.find(f => f.effect === 'inventory_+1') ? 3 : 2;
+    // Simplified spatial model: ~30% chance per move to stumble on a drop pile
+    if (hero.equipment.length < maxSlotsDungeon && Math.random() < 0.3) {
+      const pile = G.dungeonFloorEquipment[0];
+      if (pile.guardian) {
+        const guardStr = pile.guardian.str || 0;
+        const heroStr = totalStr(hero);
+        // AI decision: is the loot worth fighting for?
+        // Calculate loot value (total STR of dropped items)
+        const lootValue = pile.items.reduce((s,e) => s + (e.str || 0), 0);
+        // Fight if: hero is stronger than enemy AND loot is worth it
+        // OR: hero already has no equipment (nothing to lose from KO)
+        const worthFighting = (heroStr >= guardStr + 1) || // can likely win
+          (hero.equipment.length === 0 && lootValue >= 2); // nothing to lose, good loot
+        if (worthFighting) {
+          log(`  📦 ${hero.name} finds dropped equipment guarded by ${pile.guardian.name} (STR ${guardStr})!`, 'legendary');
+          combat(hero, {...pile.guardian}, pile.guardian.str >= 4 ? 'misfortune' : 'mishap');
+          if (!hero.ko && !G.gameOver) {
+            pile.items.forEach(item => {
+              if (hero.equipment.length < maxSlotsDungeon) {
+                hero.equipment.push(item);
+                log(`    📦 Claimed ${item.name}!`, 'legendary');
+              }
+            });
+            G.dungeonFloorEquipment.shift();
+          }
+          if (hero.ko || G.gameOver) return;
+        } else {
+          log(`  📦 ${hero.name} sees dropped equipment but ${pile.guardian.name} (STR ${guardStr}) is too dangerous. Walks away.`, 'system');
+        }
+      } else {
+        // No guardian (KO from trap) — free pickup
+        pile.items.forEach(item => {
+          if (hero.equipment.length < maxSlotsDungeon) {
+            hero.equipment.push(item);
+            log(`  📦 ${hero.name} picks up ${item.name} from the dungeon floor!`, 'legendary');
+          }
+        });
+        G.dungeonFloorEquipment.shift();
+      }
+    }
   }
 
   // Room resolution
@@ -2320,6 +2354,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
     return;
   }
 
+  hero._lastKOEnemy = enemyCard;  // Store which enemy caused KO, for dungeon floor guardian
   applyKO(hero);
 }
 
@@ -2518,14 +2553,19 @@ function applyKO(hero) {
   const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
   const droppedEquip = droppedItems.map(e => e.name).join(', ') || 'nothing';
   if (parasiteSword) trackEquip(parasiteSword.name, 'survivedKO');
-  // Drop equipment on dungeon floor — other heroes can pick it up
-  droppedItems.forEach(e => G.dungeonFloorEquipment.push(e));
+  // Drop equipment on dungeon floor, guarded by the enemy that caused KO
+  // hero._lastEnemy is set by handleCombatLoss before calling applyKO
+  if (droppedItems.length > 0) {
+    const guardian = hero._lastKOEnemy || null;
+    G.dungeonFloorEquipment.push({ items: droppedItems, guardian: guardian ? {...guardian} : null });
+  }
+  hero._lastKOEnemy = null;
   hero.equipment = parasiteSword ? [parasiteSword] : [];
   removeFollowers(hero);
   hero.stalkers = [];
   hero.pos = 'entrance';
   hero.ko = true;
-  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}${droppedItems.length > 0 ? ' (left on dungeon floor)' : ''}. Respawned at Entrance.`, 'ko');
+  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}${droppedItems.length > 0 ? (hero._lastKOEnemy ? ' (guarded by enemy)' : ' (on dungeon floor)') : ''}. Respawned at Entrance.`, 'ko');
 }
 
 // ========== TALENTS ==========
