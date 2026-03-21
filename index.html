@@ -3051,8 +3051,8 @@ function generateReport(results) {
   html += `</div>`;
 
   // === TRAP ANALYSIS ===
-  html += `<div class="report-section"><h3>Trap Lethality</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Traps that never KO anyone are "free" cards that don't create real danger. Consider adding teeth, or accept them as breather cards.</p>`;
+  html += `<div class="report-section"><h3>Trap Analysis</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px"><b>Lethal</b> = directly KOs heroes. <b>Fun</b> = creates setbacks that add drama (lose resources, tempo). <b>Frustrating</b> = punishing with no counterplay, just feels bad. <b>Useless</b> = effect doesn't meaningfully change anything.</p>`;
   const trapAgg = {};
   results.forEach(r => {
     Object.entries(r.tracker.traps).forEach(([name, data]) => {
@@ -3060,31 +3060,47 @@ function generateReport(results) {
       Object.keys(data).forEach(k => trapAgg[name][k] += (data[k] || 0));
     });
   });
-  const trapComments = {
-    'Hall of Mirrors': 'You fight yourself with 4 dice but no STR. Since the "enemy" has 0 STR and heroes have equipment + base STR, the hero almost always wins. Consider: the mirror copies your full STR, or rolls 4 dice AND adds your base STR.',
-    'Spike Trap': 'Roll 1-3 = KO. That\'s 50% lethality on paper, but heroes have Skill Burn and talents to survive. If it never KOs, heroes may be too strong at the point it appears. Check if it appears early enough.',
-    'The Tribute': 'Exhaust all OR go KO. Heroes always choose exhaust since they have skills. It\'s a resource drain, not a KO threat. Working as designed if you want resource pressure. Add "exhaust all AND lose 1 equipment" to add real teeth.',
-    'Guillotine': 'KO if fewer than 2 ready skills. By the time this triggers, heroes usually have 2+ ready. Consider: KO if fewer than 3, or KO if no equipment.',
-    'Static Fog': 'Blocks movement through a room. In simulation this barely matters (no real spatial board). In real play this could be more impactful.',
-    'Spectral Theft': 'Discard 1 equipment. Never KOs directly but losing equipment hurts. Working as designed as resource pressure.',
-    'Trap Alarm': 'Triggers a full Dread encounter (Legendary + Misfortune). Can lead to KO from the Misfortune, but the Legendary reward softens the blow.',
-    'Magnetic Field': 'All heroes roll Flame or lose equipment. With 50% Flame chance and multiple heroes, someone usually loses something. This is group pressure, not individual lethality.',
-    'Trap Door': 'Send back to entrance. No KO, just tempo loss. Consider: also exhaust 1 skill, or lose followers.',
-    'Crumbling Floor': 'Roll 1-2 = KO (33% chance). If 0% in practice, heroes are rerolling with Skill Burn. Working as intended pressure.',
-    'Giant Web': 'Exhaust 1 skill or KO. Usually a skill exhaust. Resource drain trap.'
+  // Trap categories: what kind of pressure does each trap create?
+  // - 'lethal': directly KOs heroes at a meaningful rate
+  // - 'fun': creates a setback that feels fair and adds drama (lose resources, tempo, etc.)
+  // - 'frustrating': punishing but doesn't advance the game — just feels bad
+  // - 'useless': effect doesn't meaningfully change anything
+  const trapMeta = {
+    'Hall of Mirrors': { vibe:'useless', comment:'You fight yourself with 4 dice but no STR. Heroes have equipment + base STR, so they almost always win. The trap creates zero tension. Fix: the mirror copies your full STR, or rolls 4 dice AND adds your base STR.' },
+    'Spike Trap': { vibe:'lethal', comment:'Roll 1-3 = KO. 50% chance on paper. When it KOs, it feels fair because the player rolled the dice. When it doesn\'t, Skill Burn saved them — good tension.' },
+    'The Tribute': { vibe:'fun', comment:'Exhaust all skills OR go KO. Heroes always choose exhaust. It drains resources without killing, which creates interesting downstream decisions (no skills for next fight). Good design.' },
+    'Guillotine': { vibe:'useless', comment:'KO if fewer than 2 ready skills. By the time this triggers, heroes usually have 2+ ready. The condition is too easy to meet. Fix: KO if fewer than 3 ready skills, or KO if no equipment.' },
+    'Static Fog': { vibe:'fun', comment:'Blocks movement through a room. In real play this forces detours and creates board tension. Simulation can\'t capture this but it likely works well on the table.' },
+    'Spectral Theft': { vibe:'fun', comment:'Discard 1 equipment. Losing a weapon hurts but isn\'t devastating. Creates a "do I keep my best weapon or risk it" tension. Good design.' },
+    'Trap Alarm': { vibe:'fun', comment:'Triggers a full Dread encounter (Legendary + Misfortune). High risk, high reward. Can lead to KO from the Misfortune but the Legendary makes it exciting, not frustrating.' },
+    'Magnetic Field': { vibe:'fun', comment:'All heroes roll Flame or lose equipment. Group pressure that hits the whole party. Creates shared tension and makes Flame faces feel meaningful outside combat.' },
+    'Trap Door': { vibe:'frustrating', comment:'Back to entrance. No resource loss, just wasted tempo. In a game where turns matter, losing a turn with zero interaction feels bad. Fix: add a choice (exhaust 1 skill to resist, or lose followers too).' },
+    'Crumbling Floor': { vibe:'lethal', comment:'Roll 1-2 = KO (33% chance). Clean design — pure dice risk. Heroes can Skill Burn to reroll, spending resources to survive. Good tension.' },
+    'Giant Web': { vibe:'fun', comment:'Exhaust 1 skill or KO. Usually costs a skill. Quick decision, fair cost. Works as designed.' },
+    'Stink Bomb': { vibe:'frustrating', comment:'Lose all followers. If you have 2-3 followers this is devastating with no counterplay. Pure loss, no decision. Fix: lose 1 follower of your choice, or roll to save each one.' },
+    'Magnetic Field': { vibe:'fun', comment:'All heroes with Equipment roll Flame or discard. Group pressure that hits the whole party. Makes Flame faces feel meaningful outside combat.' }
+  };
+  const vibeStyles = {
+    'lethal': { cls:'op', tag:'<span class="tag op-tag">Lethal</span>' },
+    'fun': { cls:'insight', tag:'<span class="tag insight-tag">Fun</span>' },
+    'frustrating': { cls:'need', tag:'<span class="tag need-tag">Frustrating</span>' },
+    'useless': { cls:'weak', tag:'<span class="tag weak-tag">Useless</span>' }
   };
   Object.entries(trapAgg).filter(([,d]) => d.triggered >= 2).sort((a,b) => {
-    const lA = a[1].ko / Math.max(1, a[1].triggered);
-    const lB = b[1].ko / Math.max(1, b[1].triggered);
-    return lB - lA;
+    // Sort by: lethal first, then frustrating, then useless, then fun
+    const order = {lethal:0, frustrating:1, useless:2, fun:3};
+    const va = (trapMeta[a[0]] || {}).vibe || 'fun';
+    const vb = (trapMeta[b[0]] || {}).vibe || 'fun';
+    return (order[va] || 3) - (order[vb] || 3);
   }).forEach(([name, d]) => {
     const lethality = ((d.ko / Math.max(1, d.triggered)) * 100).toFixed(0);
-    const isLethal = lethality >= 50;
-    const isHarmless = d.ko === 0 && d.triggered >= 3;
-    const cls = isLethal ? 'op' : isHarmless ? 'weak' : '';
-    const tag = isLethal ? '<span class="tag op-tag">Lethal</span>' : isHarmless ? '<span class="tag weak-tag">Harmless</span>' : '';
-    const comment = trapComments[name] || '';
-    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — ${d.triggered} triggers, ${d.ko} KOs (${lethality}%)${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
+    const meta = trapMeta[name] || { vibe:'fun', comment:'' };
+    // Override vibe based on actual data: if it actually KOs at 40%+, it's lethal regardless
+    let vibe = meta.vibe;
+    if (d.ko > 0 && lethality >= 40) vibe = 'lethal';
+    if (d.ko === 0 && d.triggered >= 5 && (vibe === 'lethal')) vibe = 'useless'; // supposed to be lethal but never KOs
+    const style = vibeStyles[vibe] || vibeStyles['fun'];
+    html += `<div class="report-card ${style.cls}">${style.tag}<b>${name}</b> — ${d.triggered} triggers, ${d.ko} KOs (${lethality}%)${meta.comment ? `<br><i style="color:var(--dim)">${meta.comment}</i>` : ''}</div>`;
   });
   html += `</div>`;
 
