@@ -383,6 +383,7 @@ input[type=range] {
     <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Hero Skills (OFF = solo Skill Burn, niente abilità)</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_prepareFirst"><label for="tw_prepareFirst">Prepare before Hydra (wait until fully equipped)</label></div>
     <h4>Batch Size</h4>
     <div class="tweak-row" id="tw_batchRow"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
     <div class="tweaks-actions">
@@ -571,7 +572,7 @@ const TWEAK_DEFAULTS = {
     return m;
   })(),
   mishapEnemyStrMod: 0, misfortuneEnemyStrMod: 0,
-  skillsEnabled: true, followersEnabled: true, overflowGameOver: true,
+  skillsEnabled: true, followersEnabled: true, overflowGameOver: true, prepareFirst: false,
   batchSize: 50
 };
 
@@ -637,6 +638,7 @@ function resetTweaks() {
   document.getElementById('tw_skills').checked = true;
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
+  document.getElementById('tw_prepareFirst').checked = false;
   document.getElementById('tw_batchSize').value = 50;
   // Reset per-equipment
   LEGENDARY_EQUIPMENT.forEach(function(e, i) {
@@ -694,6 +696,7 @@ function readTweaks() {
     skillsEnabled: document.getElementById('tw_skills').checked,
     followersEnabled: document.getElementById('tw_followers').checked,
     overflowGameOver: document.getElementById('tw_overflow').checked,
+    prepareFirst: document.getElementById('tw_prepareFirst').checked,
     batchSize: parseInt(document.getElementById('tw_batchSize').value) || 50
   };
 }
@@ -724,6 +727,7 @@ function getTweaksDiff(tweaks) {
   if (!tweaks.skillsEnabled) diffs.push('Skills: DISABLED (Skill Burn only)');
   if (!tweaks.followersEnabled) diffs.push('Followers: DISABLED');
   if (!tweaks.overflowGameOver) diffs.push('Hydra Overflow: NOT game over (heads just stop growing)');
+  if (tweaks.prepareFirst) diffs.push('Prepare First: Heroes wait until fully equipped (2 equip + followers) before entering Hydra');
   return diffs;
 }
 
@@ -3136,8 +3140,24 @@ function nextHero() {
       G.heroes.forEach(h => {
         if (!G.heroesInHydraArea.has(h.id) && !h.runningToHydra) {
           if (G.relicsCollected >= 4) {
-            h.runningToHydra = true;
-            log(`  ${h.name} begins running to the Hydra!`, 'hydra');
+            const prepare = G._tweaks && G._tweaks.prepareFirst;
+            if (prepare) {
+              // Wait until hero is equipped: 2 equipment AND (has follower OR is not Gigi)
+              const hasEnoughEquip = h.equipment.length >= 2;
+              const hasFollower = h.followers.length >= 1;
+              const isReady = hasEnoughEquip && (hasFollower || h.id !== 'gigi');
+              // But don't wait forever — go after 10 extra turns of waiting
+              const waitingTooLong = G.turn > 40;
+              if (isReady || waitingTooLong) {
+                h.runningToHydra = true;
+                log(`  ${h.name} is prepared (STR ${totalStr(h)}, ${h.equipment.length} equip, ${h.followers.length} followers) — running to the Hydra!`, 'hydra');
+              } else {
+                log(`  ${h.name} stays in dungeon to prepare (${h.equipment.length}/2 equip, ${h.followers.length} followers)`, 'system');
+              }
+            } else {
+              h.runningToHydra = true;
+              log(`  ${h.name} begins running to the Hydra!`, 'hydra');
+            }
           }
         }
       });
