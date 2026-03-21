@@ -399,7 +399,7 @@ const HEROES = [
     talent:'Unwavering Power', talentDesc:'+2 to combat total',
     skills:[
       {name:'Rallying Blow',kind:'Combat',effect:'Roll 2 dice keep worst. If you win, all heroes recharge 1 Skill.'},
-      {name:'Shield Wall',kind:'Reactive',effect:'Prevent the KO.'},
+      {name:'Shield Wall',kind:'Reactive',effect:'Prevent a KO on you or an ally.'},
       {name:'TBD Slot 3',kind:'TBD',effect:'Design pending.'},
       {name:'Taunt',kind:'Combat',effect:'Fight any enemy on the board. At Hydra: extra attack this turn.'}
     ]},
@@ -417,7 +417,7 @@ const HEROES = [
       {name:'Reality Warp',kind:'Utility',effect:'Move yourself or any ally to any revealed tile.'},
       {name:'Siphon',kind:'Combat',effect:'Give -2 STR to an enemy.'},
       {name:'Spell Mirror',kind:'Reactive',effect:'Cancel special effect of Encounter, Trap, or Hydra Head.'},
-      {name:'Fireball',kind:'Combat',effect:'Add +1 to your attack for each of your exhausted Skills.'}
+      {name:'TBD Slot 4',kind:'TBD',effect:'Design pending. Arcane control theme.'}
     ]},
   { id:'eggo', name:'Eggo', title:'The Rogue', str:2, flameFaces:[1,2,3], color:'var(--eggo)',
     talent:'Dodge', talentDesc:'Cannot be KO this turn',
@@ -2250,12 +2250,14 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   // Strategic AI: evaluate whether to spend resources preventing this KO
   const preventKO = shouldPreventKO(hero);
 
-  // === SKILL: Shield Wall (Juju) — prevent KO ===
-  if (hero.id === 'juju' && preventKO && shouldUseSkill(hero, 'Shield Wall', { atHydra: false, enemyStr: enemyCard.str || 0 })) {
-    useSkill(hero, 'Shield Wall');
-    trackSkill(hero.id, 'Shield Wall', 'activated');
-    trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
-    log(`    🛡 Shield Wall! KO prevented!`, 'flame');
+  // === SKILL: Shield Wall (Juju) — prevent KO on self OR any ally ===
+  const jujuForShield = G.heroes.find(h => h.id === 'juju');
+  if (jujuForShield && isSkillReady(jujuForShield, 'Shield Wall') && preventKO) {
+    useSkill(jujuForShield, 'Shield Wall');
+    trackSkill('juju', 'Shield Wall', 'activated');
+    trackSkill('juju', 'Shield Wall', 'savedFromKO');
+    const who = hero.id === 'juju' ? '' : ` (saving ${hero.name})`;
+    log(`    🛡 Shield Wall! Juju${who} prevents KO!`, 'flame');
     return;
   }
 
@@ -2979,12 +2981,14 @@ function hydraAttack(hero) {
     // At Hydra, always prevent KO (costs a relic otherwise)
     let hydraKOPrevented = false;
 
-    // Shield Wall (Juju)
-    if (!hydraKOPrevented && hero.id === 'juju' && shouldUseSkill(hero, 'Shield Wall', { atHydra: true })) {
-      useSkill(hero, 'Shield Wall');
-      trackSkill(hero.id, 'Shield Wall', 'activated');
-      trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
-      log(`    🛡 Shield Wall! KO prevented at Hydra!`, 'flame');
+    // Shield Wall (Juju) — can save ANY hero at Hydra
+    const jujuShieldHydra = G.heroes.find(h => h.id === 'juju');
+    if (!hydraKOPrevented && jujuShieldHydra && isSkillReady(jujuShieldHydra, 'Shield Wall')) {
+      useSkill(jujuShieldHydra, 'Shield Wall');
+      trackSkill('juju', 'Shield Wall', 'activated');
+      trackSkill('juju', 'Shield Wall', 'savedFromKO');
+      const who = hero.id === 'juju' ? '' : ` (saving ${hero.name})`;
+      log(`    🛡 Shield Wall! Juju${who} prevents KO at Hydra!`, 'flame');
       hydraKOPrevented = true;
     }
     // Soothe (Gigi) — heads are always STR 4+
