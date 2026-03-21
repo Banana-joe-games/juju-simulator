@@ -3059,7 +3059,6 @@ function generateReport(results) {
 
   // === EQUIPMENT BALANCE ===
   html += `<div class="report-section"><h3>Equipment Balance</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Win rate = % of combats won while holding this item. High win rates are expected for high-STR weapons, but 100% means the item removes all combat risk.</p>`;
   const equipAgg = {};
   results.forEach(r => {
     Object.entries(r.tracker.equipment).forEach(([name, data]) => {
@@ -3070,6 +3069,11 @@ function generateReport(results) {
       equipAgg[name].survivedKO += data.survivedKO;
     });
   });
+  // Calculate average win rate across all equipment to compare relatively
+  const allEquipFights = Object.values(equipAgg).reduce((s,d) => s + d.wonWith + d.lostWith, 0);
+  const allEquipWins = Object.values(equipAgg).reduce((s,d) => s + d.wonWith, 0);
+  const avgEquipWR = allEquipFights > 0 ? (allEquipWins / allEquipFights * 100) : 50;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Win rate = combats won while holding this item. Average across all equipment: ${avgEquipWR.toFixed(0)}%. Most dungeon enemies are STR 1-3, so high win rates are normal — the real question is whether the item helps at the Hydra. Items flagged "Strong" are above average; "Weak" are below.</p>`;
   const equipData = LEGENDARY_EQUIPMENT.reduce((m,e) => { m[e.name] = e; return m; }, {});
   Object.entries(equipAgg).filter(([,d]) => d.equipped >= 2).sort((a,b) => {
     const wrA = a[1].wonWith / Math.max(1, a[1].wonWith + a[1].lostWith);
@@ -3078,33 +3082,25 @@ function generateReport(results) {
   }).forEach(([name, d]) => {
     const total = d.wonWith + d.lostWith;
     const wr = total > 0 ? ((d.wonWith / total) * 100).toFixed(0) : 'N/A';
-    const isOP = total >= 5 && wr >= 85;
-    const isWeak = total >= 5 && wr <= 30;
-    const cls = isOP ? 'op' : isWeak ? 'weak' : '';
-    const tag = isOP ? '<span class="tag op-tag">OP</span>' : isWeak ? '<span class="tag weak-tag">Weak</span>' : '';
+    // Relative classification: compare to average, not absolute 85%
+    const wrNum = total > 0 ? (d.wonWith / total * 100) : 50;
+    const isStrong = total >= 3 && wrNum > avgEquipWR + 10;
+    const isWeak = total >= 3 && d.lostWith > d.wonWith;
+    const cls = isStrong ? 'insight' : isWeak ? 'need' : '';
+    const tag = isStrong ? '<span class="tag insight-tag">Strong</span>' : isWeak ? '<span class="tag need-tag">Weak</span>' : '';
     const eq = equipData[name] || {};
     let comment = '';
-    if (isOP) {
-      if ((eq.str || 0) >= 2 && eq.type === 'weapon') {
-        comment = ` The +${eq.str} STR alone makes most Mishap enemies trivial (STR 1-3). Combined with base hero STR, the hero rarely faces a real threat. Consider: lower STR to +1, or add a drawback/condition.`;
-      }
-      if (eq.effect === 'roll_3_keep_best') comment = ` Rolling 3 dice and keeping best nearly guarantees a 5-6 roll. The variance reduction is too strong. Consider: roll 2 keep best, or 3 dice but you must use the middle value.`;
-      if (eq.effect === 'roll_gamble') comment = ` KO on 1-2 (1/3 chance) is a serious risk. Ranges: 1-2 KO, 3-4 +1, 5+ +3. High variance weapon.`;
-      if (eq.effect === 'roll_1_auto_win') comment = ` Auto-win on 1 is a 1/6 chance per fight on top of +2 STR. It's a win-more weapon. Consider: auto-win but with 0 STR, or auto-win only against enemies of STR 3 or less.`;
-      if (eq.effect === 'dd_+1') comment = ` +2 base plus +1 in Dread Dungeons means +3 total. Solid but not overwhelming in Dread.`;
-      if (eq.effect === 'exhaust_skill_+1') comment = ` The +2 STR base is already strong. The exhaust-for-+1 is just gravy. Consider: lower base to +1, making the exhaust decision more meaningful.`;
-      if (eq.effect === 'win_roll_6_clear') comment = ` +2 STR is standard strong, but the "roll 6 clear all enemies" effect barely triggers. Not OP for the effect, just for the raw STR. Consider: lower to +1 STR, or make the clear effect trigger on 5-6.`;
-      if (eq.effect === '+1_per_ready_skill') comment = ` +3 base plus +1 per ready skill means +7 with all skills ready. That's higher than most Misfortune enemies. Consider: +1 base with the scaling, or cap the bonus at +2 from skills.`;
-      if (eq.effect === 'wonder_draw_legendary') comment = ` +2 STR is already strong. The Vanga effect (draw legendary on Wonder) accelerates equipment stacking. Consider: +1 STR, or the effect only triggers once per game.`;
-      if (eq.effect === 'drain_1') comment = ` Drain is a +2 swing (+1 hero, -1 enemy). Combined with +1 base that's effectively +3. Consider: drain only applies to enemies STR 3+, or base STR 0.`;
-      if (eq.effect === 'cannot_remove_blocks_talent') comment = ` Surviving KO is powerful since KO strips all equipment. +3 STR is strong but the talent block is a real cost. Cannot be removed and blocks Flame talent activation.`;
-      if (eq.effect === 'peek_adjacent') comment = ` Not OP due to its effect (peek is spatial and barely matters in sim). High win rate is from other equipment. May show differently in real play.`;
-      if (!comment && isOP) comment = ` High win rate likely from raw STR bonus stacking with hero base. Consider lowering STR or adding a conditional drawback.`;
-    }
-    if (isWeak) {
-      comment = ` Heroes still lose fights despite having this. The benefit may be too situational or the STR too low to matter.`;
-    }
-    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> (STR ${eq.str >= 0 ? '+' : ''}${eq.str || 0}) — equipped ${d.equipped}x, win rate ${wr}% (${d.wonWith}W/${d.lostWith}L)${d.survivedKO ? `, survived ${d.survivedKO} KOs` : ''}${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
+    // Only give specific comments for notable items
+    if (eq.effect === 'roll_3_keep_best') comment = ` Rolls 3 dice, keeps best. Reduces variance, nearly guarantees 5-6.`;
+    else if (eq.effect === 'roll_gamble') comment = ` KO on 1-2 (33% risk), +1 on 3-4, +3 on 5+. High risk/reward.`;
+    else if (eq.effect === 'roll_1_auto_win') comment = ` Auto-win on roll 1 (1/6 chance) plus +2 STR base.`;
+    else if (eq.effect === 'cannot_remove_blocks_talent') comment = ` +3 STR is the highest, but blocks your Innate Talent and can't be removed. Tradeoff weapon.`;
+    else if (eq.effect === 'drain_1') comment = ` +1 hero, -1 enemy = effective +3 swing.`;
+    else if (eq.effect === 'win_recharge_all') comment = ` Recharges all skills on win. Synergizes with skill-heavy heroes.`;
+    else if (eq.effect === '+1_per_ready_skill') comment = ` +1 STR per ready skill (max +2). Best when skills are full.`;
+    else if (eq.effect === 'exhaust_all_recharge_1') comment = ` -1 STR penalty, but auto-recharges 1 skill when all are exhausted.`;
+    if (d.survivedKO > 0) comment += ` Survived ${d.survivedKO} KOs.`;
+    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> (STR ${eq.str >= 0 ? '+' : ''}${eq.str || 0}) — equipped ${d.equipped}x, win rate ${wr}% (${d.wonWith}W/${d.lostWith}L)${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
   });
   html += `</div>`;
 
@@ -3246,15 +3242,34 @@ function generateReport(results) {
     'The Fangs': (d, ref) => `STR ${ref.str}. When targeted: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. The on-attack trigger means heroes LOSE skills just for trying. At STR 9 it\'s also hard to kill. This head punishes aggression too much. Consider: lower to STR 7, or change to "attacker only exhaust 1" instead of all heroes.' : `Destroyed ${d.destroyed}x. Punishing but fair if killable.`}`,
     'The Maw': (d, ref) => `STR ${ref.str}. When targeted: discard 1 Equipment or -2. ${d.destroyed === 0 ? 'Never destroyed. Heroes must sacrifice equipment just to attempt an attack. At STR 8 with Nest bonus (+2 = 10), heroes need 10+ after losing equipment. Consider: lower to STR 6, or change to "discard OR -1" instead of -2.' : `Destroyed ${d.destroyed}x. Equipment sacrifice adds an interesting cost.`}`
   };
-  Object.entries(headAgg).sort((a,b) => b[1].spawned - a[1].spawned).forEach(([name, d]) => {
+  // Classify heads by danger: consider KOs caused AND kill difficulty relative to game outcome
+  const totalHeadKOs = Object.values(headAgg).reduce((s,d) => s + d.causedKO, 0);
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Tags reflect actual danger, not just kill rate. A head that's "destroyed often" but also causes many KOs is <b>Dangerous</b> (high cost to kill). "Manageable" = heroes handle it. "Wall" = rarely killed, blocks progress.</p>`;
+  Object.entries(headAgg).sort((a,b) => {
+    // Sort by danger: most KOs first, then lowest kill rate
+    return (b[1].causedKO / Math.max(1,b[1].spawned)) - (a[1].causedKO / Math.max(1,a[1].spawned));
+  }).forEach(([name, d]) => {
     const killRate = d.spawned > 0 ? ((d.destroyed / d.spawned) * 100).toFixed(0) : 'N/A';
-    const isHard = d.spawned >= 3 && killRate <= 30;
-    const isEasy = d.spawned >= 3 && killRate >= 80;
-    const cls = isHard ? 'op' : isEasy ? 'weak' : '';
-    const tag = isHard ? '<span class="tag op-tag">Hard</span>' : isEasy ? '<span class="tag weak-tag">Easy</span>' : '';
+    const koPerSpawn = d.spawned > 0 ? (d.causedKO / d.spawned) : 0;
+    const killRateNum = d.spawned > 0 ? (d.destroyed / d.spawned * 100) : 0;
+    // Classification logic:
+    // Wall: rarely killed (kill rate < 30%) — blocks progress
+    // Dangerous: high KO rate (>0.3 KOs per spawn) regardless of kill rate — costly fights
+    // Manageable: high kill rate AND low KO rate — heroes handle it fine
+    // Balanced: everything else
+    let cls = '', tag = '';
+    if (killRateNum < 30 && d.spawned >= 3) {
+      cls = 'op'; tag = '<span class="tag op-tag">Wall</span>';
+    } else if (koPerSpawn > 0.3 && d.spawned >= 3) {
+      cls = 'need'; tag = '<span class="tag need-tag">Dangerous</span>';
+    } else if (killRateNum >= 80 && koPerSpawn < 0.1 && d.spawned >= 3) {
+      cls = 'insight'; tag = '<span class="tag insight-tag">Manageable</span>';
+    } else {
+      cls = ''; tag = '<span class="tag" style="background:#2a2a3a;color:var(--text)">Balanced</span>';
+    }
     const ref = hydraRef[name] || {};
     const comment = headComments[name] ? headComments[name](d, ref) : '';
-    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — spawned ${d.spawned}x, destroyed ${d.destroyed}x (${killRate}%), caused ${d.causedKO} KOs${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
+    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — spawned ${d.spawned}x, destroyed ${d.destroyed}x (${killRate}%), caused ${d.causedKO} KOs (${(koPerSpawn).toFixed(1)}/spawn)${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
   });
   html += `</div>`;
 
