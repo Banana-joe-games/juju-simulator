@@ -401,7 +401,7 @@ const HEROES = [
     skills:[
       {name:'Rallying Blow',kind:'Combat',effect:'Roll 2 dice keep worst. If you win, all heroes recharge 1 Skill.'},
       {name:'Shield Wall',kind:'Reactive',effect:'Prevent a KO on you or an ally.'},
-      {name:'TBD Slot 3',kind:'TBD',effect:'Design pending.'},
+      {name:'Not Today!',kind:'Combat',effect:'If you or ally lose by 1-2, turn into a win.'},
       {name:'Taunt',kind:'Combat',effect:'Fight any enemy on the board. At Hydra: extra attack this turn.'}
     ]},
   { id:'gigi', name:'Gigi', title:'The Elf', str:2, flameFaces:[2,3,4], color:'var(--gigi)',
@@ -418,7 +418,7 @@ const HEROES = [
       {name:'Reality Warp',kind:'Utility',effect:'Move yourself or any ally to any revealed tile.'},
       {name:'Siphon',kind:'Combat',effect:'Give -2 STR to an enemy.'},
       {name:'Spell Mirror',kind:'Reactive',effect:'Cancel special effect of Encounter, Trap, or Hydra Head.'},
-      {name:'TBD Slot 4',kind:'TBD',effect:'Design pending. Arcane control theme.'}
+      {name:'Overload',kind:'Combat',effect:'Exhaust all remaining Ready Skills. Gain +2 STR for each.'}
     ]},
   { id:'eggo', name:'Eggo', title:'The Rogue', str:2, flameFaces:[1,2,3], color:'var(--eggo)',
     talent:'Dodge', talentDesc:'Cannot be KO this turn',
@@ -1816,14 +1816,29 @@ function combat(hero, enemyCard, tier) {
     log(`    🐺 Pack Leader! +${packLeaderBonus} STR (${hero.followers.length} followers)`, 'flame');
   }
 
-  // === SKILL: Fireball (Lulu) — +1 per exhausted skill ===
-  let fireballBonus = 0;
-  if (hero.id === 'lulu' && shouldUseSkill(hero, 'Fireball', skillCtx)) {
-    const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
-    useSkill(hero, 'Fireball');
-    fireballBonus = exhaustedCount;
-    trackSkill(hero.id, 'Fireball', 'activated');
-    log(`    🔥 Fireball! +${fireballBonus} STR (${exhaustedCount} exhausted skills)`, 'flame');
+  // === SKILL: Overload (Lulu) — exhaust all remaining skills, +2 per each ===
+  let fireballBonus = 0; // reusing variable name for compatibility
+  if (hero.id === 'lulu' && isSkillReady(hero, 'Overload')) {
+    // AI: use Overload at Hydra when needed, or against strong enemies (STR 5+)
+    const atHydra = G.heroesInHydraArea.has(hero.id);
+    const strongEnemy = enemyStr >= 5;
+    const readyCount = hero.skillStates.filter(s => s === 'ready').length;
+    // Overload exhausts itself too, so count = readyCount - 1 (Overload itself)
+    // But Overload says "exhaust all remaining" which includes Overload getting exhausted via useSkill
+    // So: use Overload, it exhausts. Then exhaust all OTHER ready skills. Bonus = number of others exhausted + 0 (Overload itself doesn't count since it's the cost)
+    // Actually re-reading: "Exhaust all your remaining Ready Skills. Gain +2 STR for each Skill exhausted this way."
+    // Overload is exhausted by useSkill. Then remaining ready skills are exhausted. Each one gives +2.
+    // So bonus = readyCount - 1 (minus Overload itself) * 2
+    if ((atHydra || strongEnemy) && readyCount >= 2) { // at least 1 other skill to exhaust for +2
+      useSkill(hero, 'Overload'); // exhausts Overload
+      const othersToExhaust = hero.skillStates.filter(s => s === 'ready').length;
+      for (let oi = 0; oi < othersToExhaust; oi++) {
+        exhaustOneSkill(hero, 'Overload sacrifice');
+      }
+      fireballBonus = othersToExhaust * 2;
+      trackSkill(hero.id, 'Overload', 'activated');
+      log(`    ⚡ Overload! Exhausted ${othersToExhaust} skills for +${fireballBonus} STR!`, 'flame');
+    }
   }
 
   // === SKILL: Heist (Eggo) — -1 STR but win = draw legendary ===
@@ -2242,14 +2257,37 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     ht.damageTaken += margin;
     trackEncounter(enemyCard.name, 'lost');
     G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, won:false, margin:-margin, tier, turn:G.turn });
-    hero.equipment.forEach(e => trackEquip(e.name, 'lostWith'));
-    // Skill gap: what would have saved them?
+    // === NOT TODAY! (Juju) — turn close loss (margin 1-2) into a win ===
     if (margin <= 2) {
-      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: 'A +2 ATK skill or Skill Burn would have won this fight', type: 'close_loss' });
+      const jujuForNT = G.heroes.find(h => h.id === 'juju' && isSkillReady(h, 'Not Today!'));
+      if (jujuForNT) {
+        useSkill(jujuForNT, 'Not Today!');
+        trackSkill('juju', 'Not Today!', 'activated');
+        trackSkill('juju', 'Not Today!', 'turnedFight');
+        const who = hero.id === 'juju' ? '' : ` for ${hero.name}`;
+        log(`    ⚔ NOT TODAY! Juju${who} turns a loss (margin ${margin}) into a win!`, 'flame');
+        // Treat as win
+        hero.equipment.forEach(e => trackEquip(e.name, 'wonWith'));
+        G.stats.monstersKilled++;
+        trackEncounter(enemyCard.name, 'won');
+        if (frogmanSwallowed) { hero.equipment.push(frogmanSwallowed); log(`    Recovered ${frogmanSwallowed.name}!`, 'wonder'); }
+        // Post-win effects
+        if (hero.equipment.find(e => e.effect === 'win_recharge_all')) {
+          hero.skillStates = hero.skillStates.map(() => 'ready');
+          log(`    Mystic Wand: all skills recharged!`, 'wonder');
+        }
+        return 'win';
+      }
+    }
+
+    hero.equipment.forEach(e => trackEquip(e.name, 'lostWith'));
+    // Skill gap tracking
+    if (margin <= 2) {
+      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: 'Close loss by ' + margin, type: 'close_loss' });
     } else if (margin <= 4 && hero.equipment.length === 0) {
-      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: 'Had no equipment — a weapon would have helped', type: 'no_equip' });
+      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: 'Had no equipment', type: 'no_equip' });
     } else if (margin > 4) {
-      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: `Outmatched by ${margin} — needed STR buff, damage reduction, or avoidance skill`, type: 'outmatched' });
+      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: `Outmatched by ${margin}`, type: 'outmatched' });
     }
     log(`  ✗ ${hero.name} loses to ${enemyCard.name}! (${heroTotal} vs ${enemyTotal}${beatMargin ? '+' + beatMargin : ''})`, 'ko');
     handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed);
@@ -2453,11 +2491,13 @@ function shouldUseSkill(hero, skillName, context) {
       // In dungeon: use if bonus is meaningful (1+ followers and enemy is not trivial)
       return hero.followers.length > 0 && enemyStr >= 2;
 
-    case 'Fireball': {
-      const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
-      if (atHydra) return exhaustedCount >= 1;
-      // In dungeon: use if bonus is 2+ and enemy is a real threat
-      return exhaustedCount >= 2 && enemyStr >= 3;
+    case 'Overload': {
+      const readyCount = hero.skillStates.filter(s => s === 'ready').length;
+      // Need at least 2 ready (Overload + 1 other) for any bonus
+      if (readyCount < 2) return false;
+      if (atHydra) return true; // Always worth it at Hydra
+      // In dungeon: only against very strong enemies, since you lose ALL skills
+      return readyCount >= 3 && enemyStr >= 5;
     }
 
     case 'Rallying Blow':
@@ -2846,13 +2886,19 @@ function hydraAttack(hero) {
     log(`    🐺 Pack Leader! +${hero.followers.length} STR (${hero.followers.length} followers)`, 'flame');
   }
 
-  // 4. Fireball (Lulu) — +1 per exhausted skill
-  if (hero.id === 'lulu' && shouldUseSkill(hero, 'Fireball', hydraSkillCtx)) {
-    const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
-    useSkill(hero, 'Fireball');
-    skillBonus += exhaustedCount;
-    trackSkill(hero.id, 'Fireball', 'activated');
-    log(`    🔥 Fireball! +${exhaustedCount} STR (${exhaustedCount} exhausted skills)`, 'flame');
+  // 4. Overload (Lulu) — exhaust all remaining skills, +2 per each
+  if (hero.id === 'lulu' && isSkillReady(hero, 'Overload')) {
+    const readyCount = hero.skillStates.filter(s => s === 'ready').length;
+    if (readyCount >= 2) { // at least 1 other to sacrifice
+      useSkill(hero, 'Overload');
+      const othersToExhaust = hero.skillStates.filter(s => s === 'ready').length;
+      for (let oi = 0; oi < othersToExhaust; oi++) {
+        exhaustOneSkill(hero, 'Overload sacrifice');
+      }
+      skillBonus += othersToExhaust * 2;
+      trackSkill(hero.id, 'Overload', 'activated');
+      log(`    ⚡ Overload! Exhausted ${othersToExhaust} skills for +${othersToExhaust * 2} STR!`, 'flame');
+    }
   }
 
   // 5. Cheap Shot (Eggo) — roll extra die, keep best
