@@ -4248,7 +4248,7 @@ function generateReport(results) {
 
   // --- Equipment improvement suggestions ---
   const equipImprovements = [];
-  const equipData = LEGENDARY_EQUIPMENT.reduce((m,e) => { m[e.name] = e; return m; }, {});
+  // equipData already declared above in Equipment Balance section
   Object.entries(equipAgg).filter(([,d]) => d.equipped >= n * 0.1).forEach(([name, d]) => {
     const total = d.wonWith + d.lostWith;
     if (total < 3) return;
