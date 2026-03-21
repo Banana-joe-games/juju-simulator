@@ -379,6 +379,10 @@ input[type=range] {
     <h4>Enemies</h4>
     <div class="tweak-row"><label>Mishap enemy STR</label><input type="range" id="tw_mishapEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_mishapEnemy_v">0</span></div>
     <div class="tweak-row"><label>Misfortune enemy STR</label><input type="range" id="tw_misfortuneEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_misfortuneEnemy_v">0</span></div>
+    <h4>Room Distribution</h4>
+    <div class="tweak-row"><label>Wonder %</label><input type="range" id="tw_wonderPct" min="10" max="50" value="30" oninput="twVal(this)"><span class="tweak-val" id="tw_wonderPct_v">30</span></div>
+    <div class="tweak-row"><label>Dread %</label><input type="range" id="tw_dreadPct" min="5" max="40" value="25" oninput="twVal(this)"><span class="tweak-val" id="tw_dreadPct_v">25</span></div>
+    <div style="font-size:9px;color:var(--dim);padding:2px 0">Common % = remaining (100 - Wonder - Dread)</div>
     <h4>Toggles</h4>
     <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Hero Skills (ON = tutte le skill attive, OFF = solo Skill Burn)</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
@@ -642,6 +646,8 @@ function resetTweaks() {
   document.getElementById('tw_eggo').value = 2; document.getElementById('tw_eggo_v').textContent = '2';
   document.getElementById('tw_mishapEnemy').value = 0; document.getElementById('tw_mishapEnemy_v').textContent = '0';
   document.getElementById('tw_misfortuneEnemy').value = 0; document.getElementById('tw_misfortuneEnemy_v').textContent = '0';
+  document.getElementById('tw_wonderPct').value = 30; document.getElementById('tw_wonderPct_v').textContent = '30';
+  document.getElementById('tw_dreadPct').value = 25; document.getElementById('tw_dreadPct_v').textContent = '25';
   document.getElementById('tw_skills').checked = true;
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
@@ -703,6 +709,8 @@ function readTweaks() {
     },
     equipment: equipment,
     hydraHeads: hydraHeads,
+    wonderPct: parseInt(document.getElementById('tw_wonderPct').value) || 30,
+    dreadPct: parseInt(document.getElementById('tw_dreadPct').value) || 25,
     mishapEnemyStrMod: parseInt(document.getElementById('tw_mishapEnemy').value),
     misfortuneEnemyStrMod: parseInt(document.getElementById('tw_misfortuneEnemy').value),
     skillsEnabled: document.getElementById('tw_skills').checked,
@@ -738,6 +746,8 @@ function getTweaksDiff(tweaks) {
       diffs.push(h.name + ' STR: ' + h.str + ' \u2192 ' + tweakedStr);
     }
   });
+  if (tweaks.wonderPct !== 30) diffs.push('Wonder room %: 30 → ' + tweaks.wonderPct);
+  if (tweaks.dreadPct !== 25) diffs.push('Dread room %: 25 → ' + tweaks.dreadPct);
   if (tweaks.mishapEnemyStrMod !== 0) diffs.push('Mishap enemy STR: ' + (tweaks.mishapEnemyStrMod > 0 ? '+' : '') + tweaks.mishapEnemyStrMod);
   if (tweaks.misfortuneEnemyStrMod !== 0) diffs.push('Misfortune enemy STR: ' + (tweaks.misfortuneEnemyStrMod > 0 ? '+' : '') + tweaks.misfortuneEnemyStrMod);
   if (!tweaks.skillsEnabled) diffs.push('Skills: DISABLED (Skill Burn only)');
@@ -857,10 +867,13 @@ function trackHydraHead(name, field) {
 }
 
 function initState() {
+  const tw = (typeof currentTweaks !== 'undefined' && currentTweaks) || {};
+  const wonderPct = (tw.wonderPct || 30) / 100;
+  const dreadPct = (tw.dreadPct || 25) / 100;
   const tileDeck = [];
   for (let i = 0; i < 36; i++) {
     const r = Math.random();
-    tileDeck.push(r < 0.3 ? 'wonder' : r < 0.75 ? 'common' : 'dread');
+    tileDeck.push(r < wonderPct ? 'wonder' : r < wonderPct + (1 - wonderPct - dreadPct) ? 'common' : 'dread');
   }
   shuffle(tileDeck);
   return {
@@ -913,7 +926,8 @@ function initState() {
     log: [],
     waitingForChoice: null,
     stats: { turns:0, combats:0, ko:0, monstersKilled:0, skillBurns:0, relicsSpent:0 },
-    tracker: freshTracker()
+    tracker: freshTracker(),
+    roomsVisited: { wonder: 0, common: 0, dread: 0 }
   };
 }
 
@@ -1428,6 +1442,7 @@ function movePhase(hero) {
 }
 
 function resolveRoom(hero, roomType) {
+  if (G.roomsVisited) G.roomsVisited[roomType]++;
   if (roomType === 'wonder') {
     drawWonder(hero);
   } else if (roomType === 'common') {
@@ -4324,6 +4339,173 @@ function generateReport(results) {
   }
 
   html += `</div>`;
+
+  // === WIN CONDITION ANALYSIS ===
+  html += `<div class="report-section"><h3>What Winners Had vs Losers</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Average hero loadout at game end. Compare winners vs losers to see what you need to win.</p>`;
+
+  const winGames = results.filter(r => r.victory);
+  const loseGames = results.filter(r => !r.victory);
+
+  function avgHeroStat(games, statFn) {
+    if (games.length === 0) return 0;
+    return games.reduce((s, r) => s + r.heroes.reduce((s2, h) => s2 + statFn(h), 0) / 4, 0) / games.length;
+  }
+
+  const wcStats = [
+    { label: 'Total STR', win: avgHeroStat(winGames, h => h.totalStr), lose: avgHeroStat(loseGames, h => h.totalStr) },
+    { label: 'Equipment', win: avgHeroStat(winGames, h => h.equipCount || h.equipment.length), lose: avgHeroStat(loseGames, h => h.equipCount || h.equipment.length) },
+    { label: 'Followers', win: avgHeroStat(winGames, h => h.followerCount || h.followers.length), lose: avgHeroStat(loseGames, h => h.followerCount || h.followers.length) },
+    { label: 'Ready Skills', win: avgHeroStat(winGames, h => h.readySkills), lose: avgHeroStat(loseGames, h => h.readySkills) },
+    { label: 'Relics', win: avgHeroStat(winGames, h => h.relics), lose: avgHeroStat(loseGames, h => h.relics) },
+  ];
+
+  html += `<table style="width:100%;font-size:11px;border-collapse:collapse">`;
+  html += `<tr style="color:var(--dim);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:4px">Stat (avg per hero)</th><th style="text-align:center;padding:4px;color:var(--heal)">Winners</th><th style="text-align:center;padding:4px;color:var(--ko)">Losers</th><th style="text-align:center;padding:4px">Difference</th></tr>`;
+  wcStats.forEach(s => {
+    const diff = s.win - s.lose;
+    const diffColor = diff > 0.5 ? 'var(--heal)' : diff < -0.5 ? 'var(--ko)' : 'var(--dim)';
+    html += `<tr style="border-bottom:1px solid #1a1a2a"><td style="padding:4px">${s.label}</td><td style="text-align:center;padding:4px;color:var(--heal)">${s.win.toFixed(1)}</td><td style="text-align:center;padding:4px;color:var(--ko)">${s.lose.toFixed(1)}</td><td style="text-align:center;padding:4px;color:${diffColor}">${diff > 0 ? '+' : ''}${diff.toFixed(1)}</td></tr>`;
+  });
+  html += `</table>`;
+
+  const strDiff = wcStats[0].win - wcStats[0].lose;
+  const equipDiff = wcStats[1].win - wcStats[1].lose;
+  const skillDiff = wcStats[3].win - wcStats[3].lose;
+  let wcInsight = 'To win, heroes need on average: ';
+  wcInsight += `<b>${wcStats[0].win.toFixed(1)} total STR</b>, `;
+  wcInsight += `<b>${wcStats[1].win.toFixed(1)} equipment</b>, `;
+  wcInsight += `<b>${wcStats[3].win.toFixed(1)} ready skills</b>. `;
+  if (strDiff > 1) wcInsight += `STR is the biggest differentiator (${strDiff.toFixed(1)} higher in wins). Equipment and followers matter most. `;
+  if (skillDiff > 0.5) wcInsight += `Ready skills matter a lot — winners have ${skillDiff.toFixed(1)} more ready skills. Saving skills for Hydra is key. `;
+  html += `<div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Recipe for Victory</span>${wcInsight}</div>`;
+  html += `</div>`;
+
+  // === ROOM DISTRIBUTION ===
+  html += `<div class="report-section"><h3>Room Distribution</h3>`;
+  const totalWonder = results.reduce((s,r) => s + (r.roomsVisited ? r.roomsVisited.wonder : 0), 0);
+  const totalCommon = results.reduce((s,r) => s + (r.roomsVisited ? r.roomsVisited.common : 0), 0);
+  const totalDread = results.reduce((s,r) => s + (r.roomsVisited ? r.roomsVisited.dread : 0), 0);
+  const totalRooms = totalWonder + totalCommon + totalDread;
+  if (totalRooms > 0) {
+    const wPct = (totalWonder/totalRooms*100).toFixed(1);
+    const cPct = (totalCommon/totalRooms*100).toFixed(1);
+    const dPct = (totalDread/totalRooms*100).toFixed(1);
+    html += `<div class="report-card">`;
+    html += `<div style="display:flex;gap:16px;margin-bottom:6px">`;
+    html += `<span style="color:var(--wonder)">Wonder: <b>${wPct}%</b> (${(totalWonder/n).toFixed(1)}/game)</span>`;
+    html += `<span style="color:var(--mishap)">Common: <b>${cPct}%</b> (${(totalCommon/n).toFixed(1)}/game)</span>`;
+    html += `<span style="color:var(--misfortune)">Dread: <b>${dPct}%</b> (${(totalDread/n).toFixed(1)}/game)</span>`;
+    html += `</div>`;
+    html += `<div style="display:flex;height:12px;border-radius:3px;overflow:hidden">`;
+    html += `<div style="width:${wPct}%;background:var(--wonder)" title="Wonder ${wPct}%"></div>`;
+    html += `<div style="width:${cPct}%;background:var(--mishap)" title="Common ${cPct}%"></div>`;
+    html += `<div style="width:${dPct}%;background:var(--misfortune)" title="Dread ${dPct}%"></div>`;
+    html += `</div>`;
+    let roomNote = '';
+    if (parseFloat(dPct) > 30) roomNote = 'High Dread % means more Misfortune encounters and Legendary Equipment. Heroes get stronger weapons but face tougher enemies. ';
+    if (parseFloat(wPct) > 35) roomNote += 'High Wonder % provides more followers, skill recharges, and support. Heroes arrive better prepared. ';
+    if (parseFloat(wPct) < 25) roomNote += 'Low Wonder % means fewer support cards. Heroes rely more on equipment and raw STR. ';
+    if (roomNote) html += `<div style="margin-top:6px;font-size:10px;color:var(--dim)">${roomNote}</div>`;
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  // === FOLLOWER IMPACT ===
+  html += `<div class="report-section"><h3>Follower Impact</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">How often each follower appears, who carries them, and their impact on combat.</p>`;
+  const followerAgg = {};
+  results.forEach(r => {
+    if (r.tracker.followers) {
+      Object.entries(r.tracker.followers).forEach(([name, data]) => {
+        if (!followerAgg[name]) followerAgg[name] = { drawn:0, helpedWin:0, lost:0 };
+        Object.keys(data).forEach(k => { if (followerAgg[name][k] !== undefined) followerAgg[name][k] += data[k]; });
+      });
+    }
+  });
+  const followerEndCount = {};
+  results.forEach(r => {
+    r.heroes.forEach(h => {
+      (h.followerNames || h.followers || []).forEach(fname => {
+        const name = typeof fname === 'string' ? fname : fname.name;
+        if (!followerEndCount[name]) followerEndCount[name] = 0;
+        followerEndCount[name]++;
+      });
+    });
+  });
+  const allFollowerNames = new Set([...Object.keys(followerAgg), ...Object.keys(followerEndCount)]);
+  if (allFollowerNames.size > 0) {
+    html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+    html += `<tr style="color:var(--dim);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:3px">Follower</th><th style="text-align:center;padding:3px">Drawn</th><th style="text-align:center;padding:3px">Helped Win</th><th style="text-align:center;padding:3px">Lost</th><th style="text-align:center;padding:3px">Held at End</th></tr>`;
+    [...allFollowerNames].sort().forEach(name => {
+      const d = followerAgg[name] || { drawn:0, helpedWin:0, lost:0 };
+      const endCount = followerEndCount[name] || 0;
+      html += `<tr style="border-bottom:1px solid #1a1a2a"><td style="padding:3px">${name}</td><td style="text-align:center;padding:3px">${d.drawn}</td><td style="text-align:center;padding:3px;color:${d.helpedWin>0?'var(--heal)':'var(--dim)'}">${d.helpedWin||'-'}</td><td style="text-align:center;padding:3px;color:${d.lost>0?'var(--ko)':'var(--dim)'}">${d.lost||'-'}</td><td style="text-align:center;padding:3px">${endCount}</td></tr>`;
+    });
+    html += `</table>`;
+    const avgFollowers = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.followerCount || (h.followers||[]).length), 0), 0) / n / 4).toFixed(1);
+    html += `<div style="margin-top:6px;font-size:10px;color:var(--dim)">Average followers per hero at game end: <b>${avgFollowers}</b>. ${parseFloat(avgFollowers) < 0.3 ? 'Very few followers survive to end. They are either dying to KO/Stink Bomb or not being drawn.' : parseFloat(avgFollowers) > 1 ? 'Healthy follower count. Pack Leader and follower-dependent strategies are viable.' : 'Moderate follower presence.'}</div>`;
+  }
+  html += `</div>`;
+
+  // === DIFFICULTY PRESETS ===
+  html += `<div class="report-section"><h3>Difficulty Presets</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Suggested parameter combinations for different play experiences. These are starting points — run batches to fine-tune.</p>`;
+
+  html += `<div class="report-card" style="border-left:3px solid var(--heal)">`;
+  html += `<b style="color:var(--heal)">EASY MODE</b> — for families and casual groups`;
+  html += `<div style="font-size:10px;margin-top:4px;color:var(--dim)">Target: ~75-85% win rate. Heroes feel powerful, losses are rare.</div>`;
+  html += `<ul style="font-size:10px;margin:4px 0 0 16px;padding:0">`;
+  html += `<li>All Hydra heads: -2 STR</li>`;
+  html += `<li>Wonder rooms: 35%</li>`;
+  html += `<li>Dread rooms: 20%</li>`;
+  html += `<li>Skills: ON</li>`;
+  html += `<li>Gil system: ON (cost 2 for skill, 4 for equip)</li>`;
+  html += `</ul></div>`;
+
+  html += `<div class="report-card" style="border-left:3px solid var(--accent)">`;
+  html += `<b style="color:var(--accent)">NORMAL MODE</b> — balanced challenge`;
+  html += `<div style="font-size:10px;margin-top:4px;color:var(--dim)">Target: ~60-70% win rate. If you play well and prepare, you win. Bad luck or bad decisions cost you.</div>`;
+  html += `<ul style="font-size:10px;margin:4px 0 0 16px;padding:0">`;
+  html += `<li>All Hydra heads: default STR</li>`;
+  html += `<li>Wonder rooms: 30%</li>`;
+  html += `<li>Dread rooms: 25%</li>`;
+  html += `<li>Skills: ON</li>`;
+  html += `<li>Gil system: OFF (or ON with default costs)</li>`;
+  html += `</ul></div>`;
+
+  html += `<div class="report-card" style="border-left:3px solid var(--ko)">`;
+  html += `<b style="color:var(--ko)">HARD MODE</b> — for experienced players who want real tension`;
+  html += `<div style="font-size:10px;margin-top:4px;color:var(--dim)">Target: ~40-55% win rate. Every fight matters. Preparation is mandatory.</div>`;
+  html += `<ul style="font-size:10px;margin:4px 0 0 16px;padding:0">`;
+  html += `<li>All Hydra heads: +1 STR</li>`;
+  html += `<li>Wonder rooms: 25%</li>`;
+  html += `<li>Dread rooms: 30%</li>`;
+  html += `<li>Skills: ON</li>`;
+  html += `<li>Gil system: OFF</li>`;
+  html += `</ul></div>`;
+
+  html += `<div class="report-card insight"><span class="tag insight-tag">Current Game</span>`;
+  if (winRate > 80) {
+    html += `Your current settings play like <b>Easy Mode</b>. To reach Normal, try: increase Hydra heads STR by +1 or reduce Wonder rooms to 25%.`;
+  } else if (winRate > 65) {
+    html += `Your current settings play like <b>Normal Mode</b>. Good balance for most groups. Fine-tune Hydra STR +/-1 to adjust.`;
+  } else if (winRate > 45) {
+    html += `Your current settings play like <b>Hard Mode</b>. Experienced players will enjoy this. Casual groups may want Hydra heads -1 STR.`;
+  } else {
+    html += `Your current settings are <b>harder than Hard Mode</b>. Consider: reduce Hydra STR by 2, increase Wonder rooms to 35%, or add Gil system.`;
+  }
+  html += `</div></div>`;
+
+  html += `<div class="report-card insight"><span class="tag insight-tag">Preparation Tip</span>`;
+  const prepState = currentTweaks && currentTweaks.prepareFirst;
+  if (prepState) {
+    html += `This batch ran with <b>Prepare First ON</b> — heroes wait until equipped before entering Hydra. Run again with it OFF to compare unprepared win rate. The difference shows how much preparation matters.`;
+  } else {
+    html += `This batch ran <b>without preparation</b> — heroes rush to Hydra as soon as relics are collected. Run again with Prepare First ON to see how much preparation helps. If prepared win rate is 70%+ but unprepared is 40%, the game rewards smart play.`;
+  }
+  html += `</div>`;
+
   return html;
 }
 
@@ -4445,6 +4627,9 @@ function runSilentGame() {
       relics:h.heldRelics.length,
       relicNames:h.heldRelics.map(r=>r.name),
       stalkers:h.stalkers.map(s=>s.name),
+      followerCount: h.followers.length,
+      followerNames: h.followers.map(f => f.name),
+      equipCount: h.equipment.length,
       totalStr:totalStr(h),
       readySkills:readySkillCount(h),
       ko:initHeroTracker(G.tracker,h.id).ko,
@@ -4453,7 +4638,8 @@ function runSilentGame() {
       gilSpentSkill:h.gilSpentSkill||0,
       gilSpentEquip:h.gilSpentEquip||0
     })),
-    defeatCause: !G.victory ? classifyDefeat(G) : null
+    defeatCause: !G.victory ? classifyDefeat(G) : null,
+    roomsVisited: G.roomsVisited
   };
 }
 
