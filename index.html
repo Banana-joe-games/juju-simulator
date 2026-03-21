@@ -849,6 +849,7 @@ function initState() {
     hydraMaxHeads: 6,
     hydraDestroyedCount: 0,
     hydraFloorEquipment: [],  // Equipment dropped at the Hydra, available for pickup
+    dungeonFloorEquipment: [],  // Equipment dropped in the dungeon, available for pickup
     heroesInHydraArea: new Set(),
     wonderDeck: shuffle([...Array(WONDER_CARDS.length).keys()]),
     mishapDeck: shuffle([...Array(MISHAP_CARDS.length).keys()]),
@@ -1257,6 +1258,17 @@ function movePhase(hero) {
       log(`  🌀 Reality Warp: ${hero.name} warps to a safe room!`, 'wonder');
       return;
     }
+  }
+
+  // Pick up dropped equipment from dungeon floor
+  const maxSlotsDungeon = hero.followers.find(f => f.effect === 'inventory_+1') ? 3 : 2;
+  while (G.dungeonFloorEquipment.length > 0 && hero.equipment.length < maxSlotsDungeon) {
+    G.dungeonFloorEquipment.sort((a,b) => (b.str||0) - (a.str||0));
+    const item = G.dungeonFloorEquipment[0];
+    if (item.effect === 'cannot_remove_blocks_talent' && hero.equipment.length > 0) break;
+    G.dungeonFloorEquipment.shift();
+    hero.equipment.push(item);
+    log(`  📦 ${hero.name} picks up ${item.name} from the dungeon floor!`, 'legendary');
   }
 
   // Room resolution
@@ -2503,14 +2515,17 @@ function applyKO(hero) {
   G.stats.ko++;
   initHeroTracker(G.tracker, hero.id).ko++;
   const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
-  const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').map(e => e.name).join(', ') || 'nothing';
+  const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
+  const droppedEquip = droppedItems.map(e => e.name).join(', ') || 'nothing';
   if (parasiteSword) trackEquip(parasiteSword.name, 'survivedKO');
+  // Drop equipment on dungeon floor — other heroes can pick it up
+  droppedItems.forEach(e => G.dungeonFloorEquipment.push(e));
   hero.equipment = parasiteSword ? [parasiteSword] : [];
   removeFollowers(hero);
   hero.stalkers = [];
   hero.pos = 'entrance';
   hero.ko = true;
-  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}. Respawned at Entrance.`, 'ko');
+  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}${droppedItems.length > 0 ? ' (left on dungeon floor)' : ''}. Respawned at Entrance.`, 'ko');
 }
 
 // ========== TALENTS ==========
