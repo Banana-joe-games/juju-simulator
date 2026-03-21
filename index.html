@@ -4413,6 +4413,180 @@ function generateSingleGameReport() {
   });
   if (gapCount > 0) html += `</div>`;
 
+  // === AI GAME ANALYSIS ===
+  html += `<div class="report-section"><h3>Game Analysis</h3>`;
+  html += generateGameAnalysis();
+  html += `</div>`;
+
+  return html;
+}
+
+function generateGameAnalysis() {
+  const heroNames = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'};
+  const arrivals = G.tracker.hydraArrivals || [];
+  const hydraLog = G.tracker.hydraCombatLog || [];
+  const combatLog = G.tracker.combatLog || [];
+  const deaths = G.tracker.deathMoments || [];
+  let paragraphs = [];
+
+  // 1. Overall narrative
+  if (G.victory) {
+    const avgHydraWR = hydraLog.length > 0 ? (hydraLog.filter(a=>a.won).length / hydraLog.length * 100).toFixed(0) : 0;
+    paragraphs.push(`The party won in ${G.turn} turns. ${hydraLog.length > 0 ? `They attacked the Hydra ${hydraLog.length} times with a ${avgHydraWR}% success rate.` : ''} ${G.stats.ko === 0 ? 'Remarkably, no hero was KO\'d the entire game.' : `The party suffered ${G.stats.ko} KO${G.stats.ko>1?'s':''} along the way, but recovered.`}`);
+  } else {
+    const cause = deaths.length > 0 ? deaths[deaths.length-1] : null;
+    if (cause && cause.context.includes('overflow')) {
+      const aliveHeads = G.hydraHeads ? G.hydraHeads.filter(h=>!h.destroyed).length : '?';
+      paragraphs.push(`The party lost at turn ${G.turn} due to Hydra overflow. Despite destroying ${G.hydraDestroyedCount} heads, new heads kept growing after failed attacks. The max head limit shrank to ${G.hydraMaxHeads} and ${aliveHeads} heads were alive when overflow triggered.`);
+    } else if (cause && cause.context.includes('relics')) {
+      paragraphs.push(`The party lost at turn ${G.turn} because all relics were spent. ${cause.hero} was KO\'d at the Hydra with no relics left to save them. The party burned through ${G.stats.relicsSpent} relics during the Hydra fight.`);
+    } else {
+      paragraphs.push(`The party lost at turn ${G.turn}.`);
+    }
+  }
+
+  // 2. Dungeon phase analysis
+  const dungeonKOs = G.stats.ko;
+  const dungeonCombats = combatLog.length;
+  const dungeonLosses = combatLog.filter(c => !c.won).length;
+  if (dungeonCombats > 0) {
+    let dungeonNote = `During the dungeon phase, the party fought ${dungeonCombats} enemies and lost ${dungeonLosses} fights.`;
+    if (dungeonLosses === 0) {
+      dungeonNote += ` A clean dungeon run — all enemies defeated without any combat losses.`;
+    } else {
+      const lostTo = combatLog.filter(c => !c.won).map(c => `${c.enemy} (STR ${c.enemyStr})`);
+      dungeonNote += ` Lost to: ${lostTo.join(', ')}.`;
+    }
+    // Equipment status
+    const heroesWithEquip = G.heroes.filter(h => h.equipment.length > 0).length;
+    if (heroesWithEquip <= 1) {
+      dungeonNote += ` Only ${heroesWithEquip} hero had equipment by the time the Hydra fight started — the party was underequipped.`;
+    }
+    paragraphs.push(dungeonNote);
+  }
+
+  // 3. Hydra arrival analysis
+  if (arrivals.length > 0) {
+    const firstArrivals = {};
+    arrivals.forEach(a => { if (!firstArrivals[a.heroId]) firstArrivals[a.heroId] = a; });
+    const avgReadySkills = Object.values(firstArrivals).reduce((s,a) => s + a.readySkills, 0) / Object.keys(firstArrivals).length;
+    const avgStr = Object.values(firstArrivals).reduce((s,a) => s + a.totalStr, 0) / Object.keys(firstArrivals).length;
+    const firstRelics = Object.values(firstArrivals)[0]?.partyRelics || 0;
+
+    let arrivalNote = `Heroes arrived at the Hydra with an average of ${avgReadySkills.toFixed(1)} ready skills and ${avgStr.toFixed(0)} total STR.`;
+    if (avgReadySkills < 1.5) {
+      arrivalNote += ` This is low — most skills were already exhausted from the dungeon. The party entered the boss fight without their key abilities.`;
+    } else if (avgReadySkills >= 3) {
+      arrivalNote += ` Well-prepared, with most skills available for the Hydra fight.`;
+    }
+
+    // Who arrived weakest
+    const weakest = Object.values(firstArrivals).sort((a,b) => a.totalStr - b.totalStr)[0];
+    if (weakest && weakest.totalStr <= 2) {
+      arrivalNote += ` ${weakest.hero} arrived particularly weak (STR ${weakest.totalStr}) — essentially dead weight at the Hydra.`;
+    }
+
+    // Returns after KO
+    const returns = arrivals.filter((a,i) => {
+      const prevCount = arrivals.slice(0,i).filter(p => p.heroId === a.heroId).length;
+      return prevCount > 0;
+    });
+    if (returns.length > 0) {
+      const returnHeroes = [...new Set(returns.map(r => r.hero))];
+      arrivalNote += ` ${returnHeroes.join(' and ')} ${returnHeroes.length > 1 ? 'were' : 'was'} KO'd and had to run back — arriving stripped of equipment and skills.`;
+    }
+    paragraphs.push(arrivalNote);
+  }
+
+  // 4. Hydra fight analysis
+  if (hydraLog.length > 0) {
+    const hydraWins = hydraLog.filter(a => a.won).length;
+    const hydraLosses = hydraLog.filter(a => !a.won).length;
+    const avgGap = (hydraLog.reduce((s,a) => s + a.finalHeroTotal - a.headStr, 0) / hydraLog.length).toFixed(1);
+
+    let hydraNote = `The Hydra fight lasted ${hydraLog.length} attacks (${hydraWins}W/${hydraLosses}L).`;
+    if (Number(avgGap) < 0) {
+      hydraNote += ` On average, heroes were ${Math.abs(avgGap)} points BELOW the heads — they needed lucky rolls to win any attack. The STR gap was the core problem.`;
+    } else if (Number(avgGap) < 2) {
+      hydraNote += ` The margin was razor-thin (avg ${avgGap} above heads). Every roll mattered and a bad streak was enough to cascade into defeat.`;
+    } else {
+      hydraNote += ` Heroes had a comfortable ${avgGap}-point average advantage over the heads.`;
+    }
+
+    // Per-hero performance at Hydra
+    const heroPerf = {};
+    hydraLog.forEach(a => {
+      if (!heroPerf[a.heroId]) heroPerf[a.heroId] = {w:0,l:0,total:0};
+      heroPerf[a.heroId].total++;
+      if (a.won) heroPerf[a.heroId].w++; else heroPerf[a.heroId].l++;
+    });
+    const mvp = Object.entries(heroPerf).sort((a,b) => b[1].w - a[1].w)[0];
+    const weakLink = Object.entries(heroPerf).sort((a,b) => (a[1].w/a[1].total) - (b[1].w/b[1].total))[0];
+    if (mvp) hydraNote += ` ${heroNames[mvp[0]]} was the MVP with ${mvp[1].w} wins.`;
+    if (weakLink && weakLink[1].total >= 3 && (weakLink[1].w/weakLink[1].total) < 0.4) {
+      hydraNote += ` ${heroNames[weakLink[0]]} struggled, winning only ${((weakLink[1].w/weakLink[1].total)*100).toFixed(0)}% of attacks.`;
+    }
+
+    // Hardest head
+    const headStats = {};
+    hydraLog.forEach(a => {
+      if (!headStats[a.head]) headStats[a.head] = {w:0,l:0,str:a.headStr};
+      if (a.won) headStats[a.head].w++; else headStats[a.head].l++;
+    });
+    const hardestHead = Object.entries(headStats).sort((a,b) => (a[1].w/(a[1].w+a[1].l)) - (b[1].w/(b[1].w+b[1].l)))[0];
+    if (hardestHead && hardestHead[1].l > 0) {
+      hydraNote += ` ${hardestHead[0]} (STR ${hardestHead[1].str}) was the toughest matchup (${hardestHead[1].w}W/${hardestHead[1].l}L).`;
+    }
+    paragraphs.push(hydraNote);
+  }
+
+  // 5. Key insight / what to change
+  let insight = '';
+  if (!G.victory) {
+    // Diagnose the root cause
+    const firstArrivals = {};
+    (arrivals || []).forEach(a => { if (!firstArrivals[a.heroId]) firstArrivals[a.heroId] = a; });
+    const avgArrivalStr = Object.values(firstArrivals).length > 0
+      ? Object.values(firstArrivals).reduce((s,a) => s + a.totalStr, 0) / Object.values(firstArrivals).length : 0;
+    const avgArrivalSkills = Object.values(firstArrivals).length > 0
+      ? Object.values(firstArrivals).reduce((s,a) => s + a.readySkills, 0) / Object.values(firstArrivals).length : 0;
+    const hydraWinRate = hydraLog.length > 0 ? (hydraLog.filter(a=>a.won).length / hydraLog.length * 100) : 0;
+
+    if (avgArrivalStr < 4) {
+      insight += `Root cause: heroes arrived at the Hydra too weak (avg STR ${avgArrivalStr.toFixed(0)}). They need more equipment from the dungeon. `;
+      insight += `Fix options: add more Dread Dungeons (more legendary draws), reduce KOs in dungeon (so they keep their gear), or increase base hero STR.`;
+    } else if (avgArrivalSkills < 1) {
+      insight += `Root cause: heroes arrived with almost no ready skills (avg ${avgArrivalSkills.toFixed(1)}/4). All their key abilities were exhausted. `;
+      insight += `Fix options: add more skill recharge opportunities (Wonder encounters), make Lulu\'s Arcane Recharge more reliable, or reduce skill costs during dungeon phase.`;
+    } else if (hydraWinRate < 50) {
+      insight += `Root cause: even with skills and equipment, heroes couldn\'t consistently beat the Hydra heads (${hydraWinRate.toFixed(0)}% attack win rate). `;
+      insight += `Fix options: lower Hydra head STR by 1-2, add a skill that gives a bigger combat bonus at the Hydra, or increase the overflow max head limit.`;
+    } else {
+      insight += `The party was close to winning (${hydraWinRate.toFixed(0)}% Hydra attack win rate) but the overflow/relic mechanic punished the failed attacks too harshly. `;
+      insight += `Fix options: increase max heads from 6 to 7, give heroes 5 relics instead of 4, or add a way to prevent head growth after KO.`;
+    }
+  } else {
+    const hydraWinRate = hydraLog.length > 0 ? (hydraLog.filter(a=>a.won).length / hydraLog.length * 100) : 0;
+    if (hydraWinRate > 80) {
+      insight += `The party dominated. They may have been overpowered for this run — good equipment draws and skill management made the Hydra fight easy.`;
+    } else if (hydraWinRate > 60) {
+      insight += `A solid, balanced win. The party was well-prepared and fought efficiently. This feels like the intended experience.`;
+    } else {
+      insight += `A hard-fought victory. The party barely scraped through with ${hydraWinRate.toFixed(0)}% Hydra attack success. This is the kind of tense win that makes the game exciting.`;
+    }
+    if (G.stats.relicsSpent > 0) {
+      insight += ` ${G.stats.relicsSpent} relic${G.stats.relicsSpent>1?'s were':' was'} spent to survive — the margin of victory was thin.`;
+    }
+  }
+  paragraphs.push(insight);
+
+  // Format as styled card
+  let html = `<div class="report-card" style="border-left:3px solid var(--accent);background:#14141e">`;
+  html += `<b style="color:var(--accent)">🤖 Game Analysis</b><br><br>`;
+  paragraphs.forEach(p => {
+    html += `<p style="margin:6px 0;line-height:1.6">${p}</p>`;
+  });
+  html += `</div>`;
   return html;
 }
 
