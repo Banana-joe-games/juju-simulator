@@ -374,12 +374,13 @@ input[type=range] {
     <h4>Legendary Equipment</h4>
     <div id="tw_equipList" class="tweak-equip-list"></div>
     <h4>Hydra Heads</h4>
+    <div class="tweak-row"><label>All Heads STR</label><input type="range" id="tw_hydraGlobal" min="-4" max="4" value="0" oninput="twVal(this); applyHydraGlobal(this.value)"><span class="tweak-val" id="tw_hydraGlobal_v">0</span></div>
     <div id="tw_hydraList" class="tweak-hydra-list"></div>
     <h4>Enemies</h4>
     <div class="tweak-row"><label>Mishap enemy STR</label><input type="range" id="tw_mishapEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_mishapEnemy_v">0</span></div>
     <div class="tweak-row"><label>Misfortune enemy STR</label><input type="range" id="tw_misfortuneEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_misfortuneEnemy_v">0</span></div>
     <h4>Toggles</h4>
-    <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Skills (Skill Burn still active when OFF)</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Hero Skills (OFF = solo Skill Burn, niente abilità)</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <h4>Batch Size</h4>
     <div class="tweak-row"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
@@ -640,9 +641,20 @@ function resetTweaks() {
     if (label) { label.className = 'eq-name'; }
   });
   // Reset per-hydra
+  document.getElementById('tw_hydraGlobal').value = 0;
+  document.getElementById('tw_hydraGlobal_v').textContent = '0';
   HYDRA_HEADS.forEach(function(h, i) {
     var inp = document.getElementById('tw_hd_' + i + '_str');
     if (inp) { inp.value = h.str; }
+  });
+}
+
+function applyHydraGlobal(offset) {
+  // Apply global offset to all hydra head inputs relative to their defaults
+  var off = parseInt(offset) || 0;
+  HYDRA_HEADS.forEach(function(h, i) {
+    var inp = document.getElementById('tw_hd_' + i + '_str');
+    if (inp) { inp.value = Math.max(1, h.str + off); }
   });
 }
 
