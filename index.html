@@ -1694,12 +1694,15 @@ function combat(hero, enemyCard, tier) {
     return;
   }
 
-  // === SKILL: Siphon (Lulu) — -2 STR to enemy ===
-  if (hero.id === 'lulu' && isSkillReady(hero, 'Siphon') && enemyStr >= 3) {
-    useSkill(hero, 'Siphon');
+  // === SKILL: Siphon (Lulu) — -2 STR to ANY enemy in combat ===
+  // Lulu can use Siphon to help ANY hero fighting, not just herself
+  const luluForSiphon = G.heroes.find(h => h.id === 'lulu');
+  if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon') && enemyStr >= 3) {
+    useSkill(luluForSiphon, 'Siphon');
     enemyStr -= 2;
-    trackSkill(hero.id, 'Siphon', 'activated');
-    log(`    🔮 Siphon! Enemy STR reduced by 2 (now ${enemyStr})`, 'flame');
+    trackSkill('lulu', 'Siphon', 'activated');
+    const who = hero.id === 'lulu' ? '' : ` (helping ${hero.name})`;
+    log(`    🔮 Siphon! Lulu${who} reduces enemy STR by 2 (now ${enemyStr})`, 'flame');
   }
 
   // === SKILL: Pack Leader (Gigi) — +1 per follower ===
@@ -2592,6 +2595,7 @@ function hydraAttack(hero) {
     head.destroyed = true;
     G.hydraDestroyedCount++;
     G.hydraMaxHeads--;
+    trackHydraHead(head.name, 'destroyed');
     log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max now ${G.hydraMaxHeads})`, 'victory');
 
     // On Defeat effects
@@ -2647,6 +2651,7 @@ function hydraAttack(hero) {
         head.destroyed = true;
         G.hydraDestroyedCount++;
         G.hydraMaxHeads--;
+        trackHydraHead(head.name, 'destroyed');
         recalcHydraStr();
         log(`    Berserker Helmet wins! ${head.name} DESTROYED!`, 'victory');
         hero._berserkerUsed = false;
@@ -2661,6 +2666,7 @@ function hydraAttack(hero) {
     }
 
     log(`    ${hero.name} is KO'd at the Hydra!`, 'ko');
+    trackHydraHead(head.name, 'causedKO');
     applyKO(hero);
     if (G.gameOver) return;
     growHydraHead();
@@ -2896,10 +2902,10 @@ function generateReport(results) {
   html += `<div class="report-stat"><span class="rl">Avg Relics Spent</span><span class="rv">${avgRelicsSpent}</span></div>`;
   // Overview commentary
   let overviewNote = '';
-  if (winRate > 70) overviewNote = `Win rate is high (${winRate}%). Without skills this means the base stats + equipment are already strong enough to win consistently. When you add skills the win rate will go even higher. Consider making the dungeon or Hydra harder to compensate.`;
-  else if (winRate > 50) overviewNote = `Win rate is balanced (${winRate}%). Adding skills should push it higher, so current difficulty is a good baseline.`;
-  else if (winRate > 30) overviewNote = `Win rate is low-ish (${winRate}%). Skills will be important to make the game winnable. This is a good baseline if you want skills to feel impactful.`;
-  else overviewNote = `Win rate is very low (${winRate}%). Even with skills, winning will be hard. Consider reducing enemy density or Hydra STR.`;
+  if (winRate > 70) overviewNote = `Win rate is high (${winRate}%). Heroes are winning too easily. Consider: buff Hydra heads, increase Dread room %, or nerf equipment.`;
+  else if (winRate > 50) overviewNote = `Win rate is balanced (${winRate}%). Games feel winnable but not guaranteed. Good target range is 45-65%.`;
+  else if (winRate > 30) overviewNote = `Win rate is low (${winRate}%). Heroes struggle. Consider: lower Hydra STR, buff equipment, or reduce Dread room %.`;
+  else overviewNote = `Win rate is very low (${winRate}%). Heroes get crushed. Something is too punishing — check Hydra heads STR vs hero total STR in the Defeat Analysis below.`;
   if (avgKO > 3) overviewNote += ` Heroes average ${avgKO} KOs/game which is high and will feel punishing.`;
   if (avgSkillBurns > 5) overviewNote += ` High Skill Burn usage (${avgSkillBurns}/game) means heroes rely heavily on rerolls. Skills that provide alternatives to Skill Burn would feel meaningful.`;
   html += `</div><div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Analysis</span>${overviewNote}</div></div>`;
@@ -3116,7 +3122,7 @@ function generateReport(results) {
     html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]} Skills</b><br>`;
     heroSkills.sort((a,b) => b[1].activated - a[1].activated).forEach(([key, d]) => {
       const sname = key.substring(hid.length + 1);
-      if (sname === 'Skill Burn' || sname === 'Dodge (Talent)') return;
+      if (sname === 'Skill Burn' || sname === 'Dodge (Talent)' || sname === 'Warden Angel') return;
       const perGame = (d.activated / n).toFixed(1);
       let impact = '';
       if (d.savedFromKO > 0) impact += ` Prevented ${d.savedFromKO} KOs.`;
