@@ -2567,9 +2567,10 @@ function hydraAttack(hero) {
   if (heroTotal >= effectiveHeadStr) {
     head.destroyed = true;
     G.hydraDestroyedCount++;
-    G.hydraMaxHeads--;
+    // NOTE: hydraMaxHeads does NOT decrease on destroy. Max stays fixed at 6.
+    // Overflow = too many heads alive, not "you killed too many."
     trackHydraHead(head.name, 'destroyed');
-    log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max now ${G.hydraMaxHeads})`, 'victory');
+    log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max ${G.hydraMaxHeads})`, 'victory');
 
     // On Defeat effects
     if (head.skillType === 'onDefeat') {
@@ -2623,7 +2624,6 @@ function hydraAttack(hero) {
       if (retryTotal >= effectiveHeadStr) {
         head.destroyed = true;
         G.hydraDestroyedCount++;
-        G.hydraMaxHeads--;
         trackHydraHead(head.name, 'destroyed');
         recalcHydraStr();
         log(`    Berserker Helmet wins! ${head.name} DESTROYED!`, 'victory');
@@ -2679,12 +2679,14 @@ function growHydraHead() {
     var headBaseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[picked.name] !== undefined) ? G._tweaks.hydraHeads[picked.name] : picked.str;
     const newHead = {...picked, str: headBaseStr, destroyed: false};
     G.hydraHeads.push(newHead);
+    trackHydraHead(newHead.name, 'spawned');
     recalcHydraStr();
     log(`    New head grows: ${newHead.name} (STR ${newHead.effectiveStr})`, 'misfortune');
   } else {
     const dead = G.hydraHeads.find(h => h.destroyed);
     if (dead) {
       dead.destroyed = false;
+      trackHydraHead(dead.name, 'spawned');  // count regeneration as a spawn
       recalcHydraStr();
       log(`    ${dead.name} regenerates!`, 'misfortune');
     }
