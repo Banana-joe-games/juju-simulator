@@ -415,7 +415,7 @@ const HEROES = [
       {name:'Reality Warp',kind:'Utility',effect:'Move yourself or any ally to any revealed tile.'},
       {name:'Siphon',kind:'Combat',effect:'Give -2 STR to an enemy.'},
       {name:'Spell Mirror',kind:'Reactive',effect:'Cancel special effect of Encounter, Trap, or Hydra Head.'},
-      {name:'TBD Slot 4',kind:'TBD',effect:'Design pending.'}
+      {name:'Fireball',kind:'Combat',effect:'Add +1 to your attack for each of your exhausted Skills.'}
     ]},
   { id:'eggo', name:'Eggo', title:'The Rogue', str:2, flameFaces:[1,2,3], color:'var(--eggo)',
     talent:'Dodge', talentDesc:'Cannot be KO this turn',
@@ -1716,6 +1716,19 @@ function combat(hero, enemyCard, tier) {
     log(`    🐺 Pack Leader! +${packLeaderBonus} STR (${hero.followers.length} followers)`, 'flame');
   }
 
+  // === SKILL: Fireball (Lulu) — +1 per exhausted skill ===
+  let fireballBonus = 0;
+  if (hero.id === 'lulu' && isSkillReady(hero, 'Fireball')) {
+    const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
+    // AI: use when bonus is 2+ (worth more than a Skill Burn reroll)
+    if (exhaustedCount >= 2) {
+      useSkill(hero, 'Fireball'); // this exhausts Fireball, but we count BEFORE exhausting
+      fireballBonus = exhaustedCount;
+      trackSkill(hero.id, 'Fireball', 'activated');
+      log(`    🔥 Fireball! +${fireballBonus} STR (${exhaustedCount} exhausted skills)`, 'flame');
+    }
+  }
+
   // === SKILL: Heist (Eggo) — -1 STR but win = draw legendary ===
   let heistActive = false;
   if (hero.id === 'eggo' && isSkillReady(hero, 'Heist') && enemyStr <= 3) {
@@ -2038,7 +2051,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   const heistPenalty = heistActive ? -1 : 0;
   let heroTotal = heroRoll.val + heroStrValue + combatBonus + doomhammerBonus + firebaneBonus
     + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
-    + (packLeaderBonus || 0) + heistPenalty;
+    + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty;
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus + (packLeaderBonus || 0) ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty + heistPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
 
@@ -2564,6 +2577,17 @@ function hydraAttack(hero) {
     skillBonus += hero.followers.length;
     trackSkill(hero.id, 'Pack Leader', 'activated');
     log(`    🐺 Pack Leader! +${hero.followers.length} STR (${hero.followers.length} followers)`, 'flame');
+  }
+
+  // Fireball (Lulu) — +1 per exhausted skill
+  if (hero.id === 'lulu' && isSkillReady(hero, 'Fireball')) {
+    const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
+    if (exhaustedCount >= 1) { // At Hydra, use even with 1 exhausted (every point counts)
+      useSkill(hero, 'Fireball');
+      skillBonus += exhaustedCount;
+      trackSkill(hero.id, 'Fireball', 'activated');
+      log(`    🔥 Fireball! +${exhaustedCount} STR (${exhaustedCount} exhausted skills)`, 'flame');
+    }
   }
 
   // Cheap Shot (Eggo) — roll extra die, keep best
