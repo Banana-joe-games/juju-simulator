@@ -1005,10 +1005,13 @@ function equipItem(hero, item) {
   log(`    ${hero.name} equips ${item.name} (${item.type}, STR ${item.str >= 0 ? '+' : ''}${item.str})`, 'legendary');
 }
 
-function exhaustOneSkill(hero) {
+function exhaustOneSkill(hero, reason) {
   const idx = hero.skillStates.findIndex(s => s === 'ready');
   if (idx >= 0) {
     hero.skillStates[idx] = 'exhausted';
+    // Track why this skill was exhausted
+    if (!hero._skillExhaustLog) hero._skillExhaustLog = [];
+    hero._skillExhaustLog.push({ skill: hero.skills[idx].name, reason: reason || 'unknown', turn: G ? G.turn : 0 });
     checkCursedArmour(hero);
   }
 }
@@ -1525,7 +1528,7 @@ function resolveTrap(hero, card) {
     }
     case 'exhaust_or_ko': {
       if (readySkillCount(hero) > 0) {
-        exhaustOneSkill(hero);
+        exhaustOneSkill(hero, "Skill Burn (reroll)");
         log(`    ${hero.name} escapes the web!`, 'mishap');
       } else {
         log(`    No skills to exhaust — KO!`, 'ko');
@@ -1728,14 +1731,14 @@ function combat(hero, enemyCard, tier) {
 
   // === PRE-COMBAT EFFECTS ===
   if (!spellMirrored && enemyCard.effect === 'exhaust_1_skill') {
-    exhaustOneSkill(hero);
+    exhaustOneSkill(hero, "Snakerogue pre-combat");
     log(`    Snakerogue exhausts a skill before combat!`, 'misfortune');
   }
 
   if (!spellMirrored && enemyCard.effect === 'aoe_skill_drain') {
     G.heroes.forEach(h => {
       const r = heroRollDie(h);
-      if (r.val <= 2) { exhaustOneSkill(h); log(`    Stormcaller: ${h.name} loses a skill!`, 'misfortune'); }
+      if (r.val <= 2) { exhaustOneSkill(h, "Stormcaller AoE"); log(`    Stormcaller: ${h.name} loses a skill!`, 'misfortune'); }
     });
   }
 
@@ -1743,8 +1746,8 @@ function combat(hero, enemyCard, tier) {
   let manaLeechPenalty = 0;
   if (!spellMirrored && enemyCard.effect === 'exhaust_2_or_minus2') {
     if (readySkillCount(hero) >= 2) {
-      exhaustOneSkill(hero);
-      exhaustOneSkill(hero);
+      exhaustOneSkill(hero, "Mana Leech drain");
+      exhaustOneSkill(hero, "Mana Leech drain");
       log(`    Mana Leech: ${hero.name} exhausts 2 skills!`, 'misfortune');
     } else {
       manaLeechPenalty = -2;
@@ -1858,7 +1861,7 @@ function combat(hero, enemyCard, tier) {
   // === FIREBANE: exhaust skill for +1 ===
   let firebaneBonus = 0;
   if (hero.equipment.find(e => e.effect === 'exhaust_skill_+1') && readySkillCount(hero) > 1 && enemyStr >= 4) {
-    exhaustOneSkill(hero);
+    exhaustOneSkill(hero, "Firebane weapon");
     firebaneBonus = 1;
     log(`    Firebane: exhausted a skill for +1 STR`, 'legendary');
   }
@@ -2122,7 +2125,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   // Arcane Parrot: exhaust skill for +1
   let parrotBonus = 0;
   if (hero.followers.find(f => f.effect === 'exhaust_skill_str+1') && readySkillCount(hero) > 1 && enemyStr >= 4) {
-    exhaustOneSkill(hero);
+    exhaustOneSkill(hero, "Skill Burn (reroll)");
     parrotBonus = 1;
     log(`    Arcane Parrot: exhausted a skill for +1 STR`, 'wonder');
   }
@@ -2192,7 +2195,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     else if (totalA > heroTotal || newEnemyTotal < enemyTotal) burnChoice = (totalA - heroTotal) >= (enemyTotal - newEnemyTotal) ? 'hero' : 'enemy';
 
     if (burnChoice === 'hero' && (totalA > heroTotal || wouldWinA)) {
-      exhaustOneSkill(hero);
+      exhaustOneSkill(hero, "Skill Burn (reroll)");
       G.stats.skillBurns++;
       initHeroTracker(G.tracker, hero.id).skillsBurned++;
       heroRoll = { val: rerollHeroVal, isFlame: rerollHeroFlame };
@@ -2207,7 +2210,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
       }
       log(`    ⟲ Skill Burn! Rerolled own die to ${rerollHeroVal}${rerollHeroFlame ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
     } else if (burnChoice === 'enemy' && newEnemyTotal < enemyTotal) {
-      exhaustOneSkill(hero);
+      exhaustOneSkill(hero, "Skill Burn (reroll)");
       G.stats.skillBurns++;
       initHeroTracker(G.tracker, hero.id).skillsBurned++;
       const oldEnemyTotal = enemyTotal;
@@ -2708,7 +2711,7 @@ function hydraAttack(hero) {
   // On Attack effects
   if (!hydraSpellMirrored && head.skillType === 'onAttack') {
     if (head.name === 'The Fangs') {
-      G.heroes.forEach(h => { if (G.heroesInHydraArea.has(h.id)) exhaustOneSkill(h); });
+      G.heroes.forEach(h => { if (G.heroesInHydraArea.has(h.id)) exhaustOneSkill(h, "The Fangs on-attack"); });
       log(`    The Fangs: all heroes exhaust 1 Skill!`, 'misfortune');
     }
     if (head.name === 'The Maw') {
@@ -2776,7 +2779,7 @@ function hydraAttack(hero) {
   // Firebane at Hydra
   let firebaneBonus = 0;
   if (hero.equipment.find(e => e.effect === 'exhaust_skill_+1') && readySkillCount(hero) > 1) {
-    exhaustOneSkill(hero);
+    exhaustOneSkill(hero, "Skill Burn (reroll)");
     firebaneBonus = 1;
     log(`    Firebane: +1 STR`, 'legendary');
   }
@@ -2891,7 +2894,7 @@ function hydraAttack(hero) {
     const newBonusA = (hero.id === 'juju' && newFlameA && !hero.talentUsedThisTurn) ? 2 : combatBonus;
     const totalA = rerollH.val + totalStr(hero) + newBonusA + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
     if (totalA > heroTotal) {
-      exhaustOneSkill(hero);
+      exhaustOneSkill(hero, "Skill Burn (reroll)");
       G.stats.skillBurns++;
       heroTotal = totalA;
       isFlame = newFlameA;
@@ -2917,7 +2920,7 @@ function hydraAttack(hero) {
     // On Defeat effects
     if (head.skillType === 'onDefeat') {
       if (head.name === 'The Wail') {
-        G.heroes.forEach(h => { if (G.heroesInHydraArea.has(h.id)) exhaustOneSkill(h); });
+        G.heroes.forEach(h => { if (G.heroesInHydraArea.has(h.id)) exhaustOneSkill(h, "The Wail on-defeat"); });
         log(`    The Wail's death cry! All heroes exhaust 1 Skill`, 'misfortune');
       }
       if (head.growOnDefeat) {
@@ -4319,7 +4322,34 @@ function generateSingleGameReport() {
     html += `<br>Followers: ${hero.followers.length > 0 ? hero.followers.map(f => f.name).join(', ') : 'none'}`;
     html += `<br>Relics: ${hero.heldRelics.length > 0 ? hero.heldRelics.map(r => r.name + (r.owner === hid ? ' ★' : '')).join(', ') : 'none'}`;
     html += `<br>Stalkers: ${hero.stalkers.length > 0 ? hero.stalkers.map(s => s.name).join(', ') : 'none'}`;
-    html += `<br>Skills at end: ${hero.skills.map((s,i) => '<span style="padding:1px 4px;border-radius:2px;background:' + (hero.skillStates[i]==='ready'?'#1a3a2a':'#2a1a1a') + ';color:' + (hero.skillStates[i]==='ready'?'var(--heal)':'#884444') + '">' + s.name + (hero.skillStates[i]==='ready'?' ✓':' ✗') + '</span>').join(' ')}`;
+    const exhaustLog = hero._skillExhaustLog || [];
+    html += `<br>Skills at end: `;
+    hero.skills.forEach(function(s, i) {
+      const ready = hero.skillStates[i] === 'ready';
+      const bg = ready ? '#1a3a2a' : '#2a1a1a';
+      const color = ready ? 'var(--heal)' : '#884444';
+      let label = s.name;
+      if (ready) {
+        label += ' ✓';
+      } else {
+        // Find why exhausted: activated as skill, or burned/drained?
+        const skillKey = hid + '_' + s.name;
+        const used = G.tracker.skills[skillKey];
+        const wasActivated = used && (used.activated > 0 || used.savedFromKO > 0);
+        if (wasActivated) {
+          label += ' ✗ used';
+        } else {
+          // Check exhaust log for reason
+          const entry = exhaustLog.filter(e => e.skill === s.name);
+          if (entry.length > 0) {
+            label += ' ✗ ' + entry[entry.length-1].reason;
+          } else {
+            label += ' ✗ burned';
+          }
+        }
+      }
+      html += '<span style="padding:1px 4px;border-radius:2px;margin:1px;display:inline-block;background:' + bg + ';color:' + color + '">' + label + '</span>';
+    });
     html += `</div>`;
 
     // Combat record
