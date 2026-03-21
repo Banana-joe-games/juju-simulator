@@ -407,7 +407,7 @@ const HEROES = [
   { id:'gigi', name:'Gigi', title:'The Elf', str:2, flameFaces:[2,3,4], color:'var(--gigi)',
     talent:"Nature's Gift", talentDesc:'Gift Flame to another player next turn',
     skills:[
-      {name:'Herbalist',kind:'Support',effect:'Any ally recharges 1 Skill.'},
+      {name:'Herbalist',kind:'Support',effect:'Choose any hero: they recharge 1 Skill.'},
       {name:'Wild Call',kind:'Support',effect:'Draw Wonder cards until you find a Follower. Take it.'},
       {name:'Soothe',kind:'Combat',effect:'STR 3 or less: discard enemy. STR 4+: if defeated, prevent KO.'},
       {name:'Pack Leader',kind:'Combat',effect:'+1 STR per Follower for this combat.'}
@@ -424,7 +424,7 @@ const HEROES = [
     talent:'Dodge', talentDesc:'Cannot be KO this turn',
     skills:[
       {name:'Cheap Shot',kind:'Utility',effect:'Roll an additional die. Keep the result you prefer.'},
-      {name:'Copycat',kind:'Utility',effect:'Use any ally Ready Skill effect. Theirs stays Ready.'},
+      {name:'Copycat',kind:'Utility',effect:'Use any other Ready Skill in play. That Skill stays Ready. Exhaust Copycat.'},
       {name:'Heist',kind:'Combat',effect:'Fight with -1 STR. If you win, draw 1 Legendary Equipment.'},
       {name:'Shadowstep',kind:'Utility',effect:'End turn immediately. Begin a new turn from scratch.'}
     ]}
@@ -1075,16 +1075,20 @@ function runTurn() {
 
   // === SKILL ACTIVATIONS (turn start) ===
 
-  // Herbalist (Gigi): recharge ally skill
+  // Herbalist (Gigi): recharge any hero's skill (including self)
   if (hero.id === 'gigi' && shouldUseSkill(hero, 'Herbalist', { atHydra: G.heroesInHydraArea.has(hero.id) })) {
-    const allies = G.heroes.filter(h => h.id !== hero.id);
-    const neediest = allies.filter(h => h.skillStates.some(s => s === 'exhausted'))
-        .sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
+    const candidates = G.heroes.filter(h => h.skillStates.some(s => s === 'exhausted'));
+    const neediest = candidates.sort((a,b) => {
+      // Prioritize self if at Hydra and has key skills exhausted
+      const aScore = b.skillStates.filter(s => s === 'exhausted').length + (b.id === hero.id ? 0.5 : 0);
+      const bScore = a.skillStates.filter(s => s === 'exhausted').length + (a.id === hero.id ? 0.5 : 0);
+      return aScore - bScore;
+    })[0];
     if (neediest) {
       useSkill(hero, 'Herbalist');
       rechargeOneSkill(neediest);
       trackSkill(hero.id, 'Herbalist', 'activated');
-      log(`  🌿 Herbalist: ${hero.name} recharges a skill for ${neediest.name}!`, 'wonder');
+      log(`  🌿 Herbalist: ${hero.name} recharges a skill for ${neediest.name}${neediest.id === hero.id ? ' (self)' : ''}!`, 'wonder');
     }
   }
 
@@ -4010,11 +4014,14 @@ function runSilentGame() {
     if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
       if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero);
     }
-    // Herbalist (Gigi): recharge ally skill (batch sim)
+    // Herbalist (Gigi): recharge any hero's skill including self (batch sim)
     if (hero.id === 'gigi' && shouldUseSkill(hero, 'Herbalist', { atHydra: G.heroesInHydraArea.has(hero.id) })) {
-      const allies = G.heroes.filter(h => h.id !== hero.id);
-      const neediest = allies.filter(h => h.skillStates.some(s => s === 'exhausted'))
-          .sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
+      const candidates = G.heroes.filter(h => h.skillStates.some(s => s === 'exhausted'));
+      const neediest = candidates.sort((a,b) => {
+        const aScore = b.skillStates.filter(s => s === 'exhausted').length + (b.id === hero.id ? 0.5 : 0);
+        const bScore = a.skillStates.filter(s => s === 'exhausted').length + (a.id === hero.id ? 0.5 : 0);
+        return aScore - bScore;
+      })[0];
       if (neediest) {
         useSkill(hero, 'Herbalist');
         rechargeOneSkill(neediest);
