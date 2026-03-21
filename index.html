@@ -755,6 +755,8 @@ function freshTracker() {
     skills: {},
     // Hydra head tracking
     hydraHeads: {},
+    // Combat log: every fight { hero, enemy, enemyStr, heroTotal, enemyTotal, won, margin, tier, turn }
+    combatLog: [],
     // Hydra combat log: each attack attempt
     hydraCombatLog: [],
     // Moments where a hero died and nothing could save them
@@ -1721,6 +1723,7 @@ function combat(hero, enemyCard, tier) {
     G.stats.monstersKilled++;
     initHeroTracker(G.tracker, hero.id).wins++;
     trackEncounter(enemyCard.name, 'won');
+    G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr, won:true, tier, turn:G.turn, skill:'Soothe' });
     if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
     return;
   }
@@ -1846,6 +1849,7 @@ function combat(hero, enemyCard, tier) {
   G.stats.monstersKilled++;
   ht.wins++;
   trackEncounter(enemyCard.name, 'won');
+  G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, won:true, tier, turn:G.turn });
   log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
 
   // === ON-WIN EFFECTS ===
@@ -2179,6 +2183,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     ht.losses++;
     ht.damageTaken += margin;
     trackEncounter(enemyCard.name, 'lost');
+    G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, won:false, margin:-margin, tier, turn:G.turn });
     hero.equipment.forEach(e => trackEquip(e.name, 'lostWith'));
     // Skill gap: what would have saved them?
     if (margin <= 2) {
@@ -4253,6 +4258,44 @@ function generateSingleGameReport() {
     html += `</div>`;
   });
   html += `</div>`;
+
+  // Dungeon combat log
+  const combatLog = G.tracker.combatLog || [];
+  if (combatLog.length > 0) {
+    html += `<div class="report-section"><h3>Dungeon Combat Log</h3>`;
+    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:6px">Every enemy fight in the dungeon, in order. Shows who fought whom and the result.</p>`;
+
+    // Per-hero combat table
+    heroIds.forEach(hid => {
+      const heroCombats = combatLog.filter(c => c.heroId === hid);
+      if (heroCombats.length === 0) return;
+      const wins = heroCombats.filter(c => c.won);
+      const losses = heroCombats.filter(c => !c.won);
+      html += `<div class="report-card" style="border-left:3px solid var(--${hid})">`;
+      html += `<b style="color:var(--${hid})">${heroNames[hid]}</b> — ${heroCombats.length} fights (${wins.length}W/${losses.length}L)<br>`;
+      if (wins.length > 0) {
+        html += `<div style="margin:4px 0"><span style="color:var(--heal)">Victories:</span> `;
+        html += wins.map(c => `${c.enemy}${c.skill ? ' ('+c.skill+')' : ''}`).join(', ');
+        html += `</div>`;
+      }
+      if (losses.length > 0) {
+        html += `<div style="margin:4px 0"><span style="color:var(--ko)">Defeats:</span> `;
+        html += losses.map(c => `<b>${c.enemy}</b> (STR ${c.enemyStr}, lost by ${-c.margin})`).join(', ');
+        html += `</div>`;
+      }
+      html += `</div>`;
+    });
+
+    // Full timeline
+    html += `<div class="report-card" style="font-size:11px;max-height:200px;overflow-y:auto">`;
+    html += `<b>Full Timeline</b><br>`;
+    combatLog.forEach(c => {
+      const icon = c.won ? '✓' : '✗';
+      const color = c.won ? 'var(--heal)' : 'var(--ko)';
+      html += `<div style="padding:1px 0;color:${color}">${icon} T${c.turn} <b style="color:var(--${c.heroId})">${c.hero}</b> vs ${c.enemy} (STR ${c.enemyStr}) [${c.tier}]${c.skill ? ' — ' + c.skill : ''}</div>`;
+    });
+    html += `</div></div>`;
+  }
 
   // Hydra combat timeline
   const hydraLog = G.tracker.hydraCombatLog || [];
