@@ -806,8 +806,17 @@ function trackEncounter(name, field) {
 
 function trackSkill(heroId, skillName, field) {
   const key = `${heroId}_${skillName}`;
-  if (!G.tracker.skills[key]) G.tracker.skills[key] = { activated:0, burned:0, savedFromKO:0, turnedFight:0 };
+  if (!G.tracker.skills[key]) G.tracker.skills[key] = {
+    activated:0, burned:0, savedFromKO:0, turnedFight:0,
+    activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0
+  };
   G.tracker.skills[key][field]++;
+  // Auto-track context for activated/burned
+  const atHydra = G.heroesInHydraArea && G.heroesInHydraArea.has(heroId);
+  if (field === 'activated') {
+    if (atHydra) G.tracker.skills[key].activatedHydra++;
+    else G.tracker.skills[key].activatedDungeon++;
+  }
 }
 
 function trackTrap(name, field) {
@@ -1011,7 +1020,21 @@ function exhaustOneSkill(hero, reason) {
     hero.skillStates[idx] = 'exhausted';
     // Track why this skill was exhausted
     if (!hero._skillExhaustLog) hero._skillExhaustLog = [];
-    hero._skillExhaustLog.push({ skill: hero.skills[idx].name, reason: reason || 'unknown', turn: G ? G.turn : 0 });
+    const skillName = hero.skills[idx].name;
+    const r = reason || 'unknown';
+    hero._skillExhaustLog.push({ skill: skillName, reason: r, turn: G ? G.turn : 0 });
+    // Track burns per specific skill in the tracker
+    if (r.includes('Skill Burn') || r === 'Firebane weapon' || r === 'Overload sacrifice' || r.includes('Stormcaller') || r.includes('Fangs') || r.includes('Wail') || r.includes('Snakerogue') || r.includes('Mana Leech')) {
+      const atHydra = G && G.heroesInHydraArea && G.heroesInHydraArea.has(hero.id);
+      const key = `${hero.id}_${skillName}`;
+      if (!G.tracker.skills[key]) G.tracker.skills[key] = {
+        activated:0, burned:0, savedFromKO:0, turnedFight:0,
+        activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0
+      };
+      G.tracker.skills[key].burned++;
+      if (atHydra) G.tracker.skills[key].burnedHydra++;
+      else G.tracker.skills[key].burnedDungeon++;
+    }
     checkCursedArmour(hero);
   }
 }
@@ -3616,39 +3639,81 @@ function generateReport(results) {
 
   // === SKILL ANALYSIS ===
   html += `<div class="report-section"><h3>Skill Analysis</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">How often each skill was used and its impact. Skills that never activate may need a lower activation threshold or a redesign.</p>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">For each skill: how many times it was activated (with its effect) vs burned (exhausted for Skill Burn reroll or by enemy effects), and whether in Dungeon or at Hydra.</p>`;
 
   const skillAgg = {};
   results.forEach(r => {
     Object.entries(r.tracker.skills).forEach(([key, data]) => {
-      if (!skillAgg[key]) skillAgg[key] = { activated:0, burned:0, savedFromKO:0, turnedFight:0 };
+      if (!skillAgg[key]) skillAgg[key] = {
+        activated:0, burned:0, savedFromKO:0, turnedFight:0,
+        activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0
+      };
       Object.keys(data).forEach(k => { if (skillAgg[key][k] !== undefined) skillAgg[key][k] += data[k]; });
     });
   });
 
   heroIds.forEach(hid => {
-    const heroSkills = Object.entries(skillAgg).filter(([k]) => k.startsWith(hid + '_'));
-    if (heroSkills.length === 0) return;
-    html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]} Skills</b><br>`;
-    heroSkills.sort((a,b) => b[1].activated - a[1].activated).forEach(([key, d]) => {
-      const sname = key.substring(hid.length + 1);
-      if (sname === 'Skill Burn' || sname === 'Dodge (Talent)' || sname === 'Warden Angel') return;
+    const heroSkillDefs = HEROES.find(h => h.id === hid).skills;
+    html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]} Skills</b>`;
+    html += `<table style="width:100%;margin-top:6px;font-size:10px;border-collapse:collapse">`;
+    html += `<tr style="color:var(--dim);border-bottom:1px solid var(--border)">`;
+    html += `<th style="text-align:left;padding:2px 4px">Skill</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Used</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Dungeon</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Hydra</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Burned</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Burn D</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Burn H</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">KO Saved</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Fights Won</th>`;
+    html += `<th style="text-align:left;padding:2px 4px">Verdict</th></tr>`;
+
+    heroSkillDefs.forEach(skillDef => {
+      const key = hid + '_' + skillDef.name;
+      const d = skillAgg[key] || { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
+      const total = d.activated + d.burned;
       const perGame = (d.activated / n).toFixed(1);
-      let impact = '';
-      if (d.savedFromKO > 0) impact += ` Prevented ${d.savedFromKO} KOs.`;
-      if (d.turnedFight > 0) impact += ` Turned ${d.turnedFight} fights.`;
 
-      let comment = '';
-      if (d.activated === 0) comment = ' \u2192 Never used. AI conditions may be too strict, or situations never arise. Consider broadening the trigger.';
-      else if (perGame < 0.3) comment = ' \u2192 Rarely used. Situational \u2014 may feel like a dead card in real play.';
-      else if (perGame >= 1.5) comment = ' \u2192 Very active. Core part of this hero\'s gameplay loop.';
-      else comment = ' \u2192 Moderate usage. Feels like a real choice.';
+      let verdict = '';
+      let verdictColor = 'var(--dim)';
+      if (d.activated === 0 && d.burned === 0) {
+        verdict = 'Never touched';
+        verdictColor = '#884444';
+      } else if (d.activated === 0 && d.burned > 0) {
+        verdict = 'Only burned, never used';
+        verdictColor = '#cc8833';
+      } else if (d.burned > d.activated * 2) {
+        verdict = 'Burned more than used (' + Math.round(d.burned/(d.burned+d.activated)*100) + '% burn rate)';
+        verdictColor = '#cc8833';
+      } else if (d.activatedHydra > d.activatedDungeon && d.activatedHydra > 0) {
+        verdict = 'Mostly Hydra (' + d.activatedHydra + 'H/' + d.activatedDungeon + 'D)';
+        verdictColor = 'var(--hydra)';
+      } else if (d.activatedDungeon > d.activatedHydra && d.activatedDungeon > 0) {
+        verdict = 'Mostly Dungeon (' + d.activatedDungeon + 'D/' + d.activatedHydra + 'H)';
+        verdictColor = 'var(--wonder)';
+      } else if (d.activated > 0) {
+        verdict = 'Mixed use';
+        verdictColor = 'var(--text)';
+      }
+      if (d.savedFromKO > 0) verdict += ' | Life saver!';
+      if (d.turnedFight > 0) verdict += ' | Fight turner';
+      if (perGame >= 1.5) verdict = 'Core skill | ' + verdict;
 
-      html += `<div style="margin:4px 0;padding:3px 6px;background:#0e0e16;border-radius:3px;font-size:11px">`;
-      html += `<b>${sname}</b> \u2014 used ${d.activated}x (${perGame}/game)${impact}`;
-      html += `<br><i style="color:var(--dim)">${comment}</i></div>`;
+      const rowBg = d.activated === 0 && d.burned === 0 ? '#1a1015' : '#0e0e16';
+      html += `<tr style="border-bottom:1px solid #1a1a2a;background:${rowBg}">`;
+      html += `<td style="padding:3px 4px;font-weight:600">${skillDef.name}</td>`;
+      html += `<td style="text-align:center;padding:3px 4px;color:${d.activated>0?'var(--heal)':'#884444'}">${d.activated} (${perGame}/g)</td>`;
+      html += `<td style="text-align:center;padding:3px 4px">${d.activatedDungeon}</td>`;
+      html += `<td style="text-align:center;padding:3px 4px">${d.activatedHydra}</td>`;
+      html += `<td style="text-align:center;padding:3px 4px;color:${d.burned>0?'#cc8833':'var(--dim)'}">${d.burned}</td>`;
+      html += `<td style="text-align:center;padding:3px 4px">${d.burnedDungeon}</td>`;
+      html += `<td style="text-align:center;padding:3px 4px">${d.burnedHydra}</td>`;
+      html += `<td style="text-align:center;padding:3px 4px;color:${d.savedFromKO>0?'var(--heal)':'var(--dim)'}">${d.savedFromKO || '-'}</td>`;
+      html += `<td style="text-align:center;padding:3px 4px;color:${d.turnedFight>0?'var(--heal)':'var(--dim)'}">${d.turnedFight || '-'}</td>`;
+      html += `<td style="padding:3px 4px;color:${verdictColor};font-size:9px">${verdict}</td>`;
+      html += `</tr>`;
     });
-    html += `</div>`;
+    html += `</table></div>`;
   });
   html += `</div>`;
 
@@ -4413,24 +4478,44 @@ function generateSingleGameReport() {
     html += ` | 💎 Relics Spent: <b>${ht.relicsSpent || 0}</b>`;
     html += `</div>`;
 
-    // Skills used
-    const heroSkills = Object.entries(G.tracker.skills).filter(([k]) => k.startsWith(hid + '_'));
-    if (heroSkills.length > 0) {
-      html += `<div style="margin:4px 0;font-size:11px"><b>Skills Used:</b><br>`;
-      heroSkills.filter(([k]) => !k.includes('Skill Burn') && !k.includes('Dodge') && !k.includes('Warden')).forEach(([key, d]) => {
-        const sname = key.substring(hid.length + 1);
-        let info = `${sname}: <b>${d.activated || 0}x</b>`;
-        if (d.savedFromKO > 0) info += ` (saved ${d.savedFromKO} KOs)`;
-        if (d.turnedFight > 0) info += ` (turned ${d.turnedFight} fights)`;
-        html += `<span style="display:inline-block;margin:1px 8px 1px 0;padding:1px 4px;background:#1a1a2a;border-radius:2px">${info}</span>`;
-      });
-      // Skill Burn separately
-      const sb = heroSkills.find(([k]) => k.includes('Skill Burn'));
-      if (sb && sb[1].activated > 0) {
-        html += `<span style="display:inline-block;margin:1px 8px 1px 0;padding:1px 4px;background:#2a1a1a;border-radius:2px">Skill Burn: <b>${sb[1].activated}x</b>${sb[1].turnedFight ? ' (turned ' + sb[1].turnedFight + ' fights)' : ''}</span>`;
-      }
-      html += `</div>`;
+    // Skills used — detailed breakdown
+    const heroSkillDefs = HEROES.find(h => h.id === hid).skills;
+    const exhausLog = hero._skillExhaustLog || [];
+    html += `<div style="margin:4px 0;font-size:11px"><b>Skill Breakdown:</b>`;
+    html += `<table style="width:100%;margin-top:4px;font-size:10px;border-collapse:collapse">`;
+    html += `<tr style="color:var(--dim);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:2px">Skill</th><th style="text-align:center;padding:2px">Used</th><th style="text-align:center;padding:2px">Where</th><th style="text-align:center;padding:2px">Burned</th><th style="text-align:center;padding:2px">By What</th><th style="text-align:center;padding:2px">Impact</th></tr>`;
+    heroSkillDefs.forEach(sd => {
+      const key = hid + '_' + sd.name;
+      const d = G.tracker.skills[key] || { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
+      // Burn reasons from exhaust log
+      const burnReasons = exhausLog.filter(e => e.skill === sd.name && e.reason !== 'unknown')
+        .map(e => e.reason).filter((v,i,a) => a.indexOf(v) === i);
+      const burnBy = burnReasons.length > 0 ? burnReasons.join(', ') : (d.burned > 0 ? 'Skill Burn' : '-');
+      const where = d.activated > 0 ? (d.activatedDungeon > 0 && d.activatedHydra > 0 ? `${d.activatedDungeon}D/${d.activatedHydra}H` : d.activatedHydra > 0 ? 'Hydra' : 'Dungeon') : '-';
+      let impact = [];
+      if (d.savedFromKO > 0) impact.push(`saved ${d.savedFromKO} KO`);
+      if (d.turnedFight > 0) impact.push(`turned ${d.turnedFight} fight`);
+      const impactStr = impact.length > 0 ? impact.join(', ') : '-';
+      const usedColor = d.activated > 0 ? 'var(--heal)' : 'var(--dim)';
+      const burnColor = d.burned > 0 ? '#cc8833' : 'var(--dim)';
+      html += `<tr style="border-bottom:1px solid #1a1a2a"><td style="padding:2px 4px">${sd.name}</td>`;
+      html += `<td style="text-align:center;padding:2px;color:${usedColor}">${d.activated || 0}x</td>`;
+      html += `<td style="text-align:center;padding:2px;color:var(--dim)">${where}</td>`;
+      html += `<td style="text-align:center;padding:2px;color:${burnColor}">${d.burned || 0}x</td>`;
+      html += `<td style="text-align:center;padding:2px;color:var(--dim);font-size:9px">${burnBy}</td>`;
+      html += `<td style="text-align:center;padding:2px;color:${impact.length>0?'var(--heal)':'var(--dim)'};font-size:9px">${impactStr}</td></tr>`;
+    });
+    // Skill Burn total
+    const sb = Object.entries(G.tracker.skills).find(([k]) => k === hid + '_Skill Burn');
+    if (sb && sb[1].activated > 0) {
+      html += `<tr style="border-top:1px solid var(--border);background:#1a1015"><td style="padding:2px 4px;color:#cc8833">Skill Burn (reroll)</td>`;
+      html += `<td style="text-align:center;padding:2px;color:#cc8833">${sb[1].activated}x</td>`;
+      const sbWhere = (sb[1].activatedDungeon||0) > 0 && (sb[1].activatedHydra||0) > 0 ? `${sb[1].activatedDungeon}D/${sb[1].activatedHydra}H` : (sb[1].activatedHydra||0) > 0 ? 'Hydra' : 'Dungeon';
+      html += `<td style="text-align:center;padding:2px;color:var(--dim)">${sbWhere}</td>`;
+      html += `<td colspan="2" style="padding:2px"></td>`;
+      html += `<td style="text-align:center;padding:2px;color:${sb[1].turnedFight>0?'var(--heal)':'var(--dim)'}">turned ${sb[1].turnedFight||0} fight</td></tr>`;
     }
+    html += `</table></div>`;
 
     // Talent info
     const talent = G.tracker.talents[hid];
