@@ -2547,47 +2547,20 @@ function hydraAttack(hero) {
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${totalStr(hero)} + bonuses = ${heroTotal} vs ${effectiveHeadStr}`, 'combat');
 
-  // Skill Burn (can reroll YOUR die OR ENEMY/HEAD die)
+  // Skill Burn at Hydra: reroll YOUR die only (Hydra heads don't roll dice)
   if (heroTotal < effectiveHeadStr && readySkillCount(hero) > 0) {
-    // Option A: Reroll hero die
     const rerollH = heroRollDie(hero);
     const newFlameA = (rerollH.isFlame) && !broodAlive;
     const newBonusA = (hero.id === 'juju' && newFlameA && !hero.talentUsedThisTurn) ? 2 : combatBonus;
     const totalA = rerollH.val + totalStr(hero) + newBonusA + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
-
-    // Option B: Reroll head die (head gets new roll, hero keeps current)
-    const rerollE = rollDie(hero);
-    const newHeadTotal = rerollE.val + head.effectiveStr - siphonDrain;
-
-    const wouldWinA = totalA >= effectiveHeadStr;
-    const wouldWinB = heroTotal >= newHeadTotal;
-    let burnChoice = 'none';
-    if (wouldWinA && !wouldWinB) burnChoice = 'hero';
-    else if (wouldWinB && !wouldWinA) burnChoice = 'enemy';
-    else if (wouldWinA && wouldWinB) burnChoice = (totalA - effectiveHeadStr) >= (heroTotal - newHeadTotal) ? 'hero' : 'enemy';
-    else if (totalA > heroTotal || newHeadTotal < effectiveHeadStr) burnChoice = (totalA - heroTotal) >= (effectiveHeadStr - newHeadTotal) ? 'hero' : 'enemy';
-
-    if (burnChoice === 'hero' && (totalA > heroTotal || wouldWinA)) {
+    if (totalA > heroTotal) {
       exhaustOneSkill(hero);
       G.stats.skillBurns++;
       heroTotal = totalA;
       isFlame = newFlameA;
       if (hero.id === 'eggo' && newFlameA) hero.dodgeActive = true;
       if (hero.id === 'eggo' && !newFlameA) hero.dodgeActive = false;
-      log(`    ⟲ Skill Burn! Rerolled own die: ${rerollH.val}${newFlameA ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
-    } else if (burnChoice === 'enemy' && newHeadTotal < effectiveHeadStr) {
-      exhaustOneSkill(hero);
-      G.stats.skillBurns++;
-      const oldHead = effectiveHeadStr;
-      // Note: we update the effective target for this fight only
-      // Using a local variable to track the new head target
-      log(`    ⟲ Skill Burn! Rerolled HEAD die: ${head.name} target ${oldHead} → ${newHeadTotal}`, 'flame');
-      // Adjust comparison: check win vs new head total
-      if (heroTotal >= newHeadTotal) {
-        // We need to proceed to victory below, so we lower effectiveHeadStr locally
-        // Hack: set heroTotal high enough to win vs original effectiveHeadStr
-        heroTotal = effectiveHeadStr; // exactly enough to win
-      }
+      log(`    ⟲ Skill Burn! Rerolled: ${rerollH.val}${newFlameA ? ' 🔥' : ''} = ${heroTotal} vs ${effectiveHeadStr}`, 'flame');
     }
   }
 
