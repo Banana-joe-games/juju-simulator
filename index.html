@@ -4293,12 +4293,17 @@ function generateReport(results) {
     }
   });
 
-  if (winRate < 30) {
-    html += `<div class="report-card op"><span class="tag op-tag">Too Hard</span>Win rate ${winRate}% WITH all skills active. The game is too punishing. <b>Likely causes:</b> Hydra heads are too strong (STR 7-12 vs heroes averaging 5-8 total), equipment nerfs hit too hard (Firebane 2→1, Virtuous 3→1), Doomhammer now KOs on 1-2 instead of 1. <b>Suggested fixes:</b> lower Hydra head STR by 2 across the board, reduce Dread room % from 25% to 15%, or buff base hero STR by 1. Target: 45-60% win rate.</div>`;
-  } else if (winRate > 70) {
-    html += `<div class="report-card weak"><span class="tag weak-tag">Too Easy</span>Win rate ${winRate}% with skills. The game is too forgiving. <b>Action items:</b> Increase Hydra head STR by 1-2, add more Misfortune enemies, or increase Dread room %. Target: 45-60% win rate.</div>`;
+  const isPrepare = results[0] && results[0].tracker && results[0].tracker.prepareFirst;
+  if (winRate < 40) {
+    html += `<div class="report-card op"><span class="tag op-tag">Too Hard</span>Win rate ${winRate}% with all skills active. ${isPrepare ? 'Even with preparation, heroes struggle.' : ''} <b>Likely causes:</b> Hydra heads are too strong relative to hero STR, or heroes arrive depleted (check Hydra Arrival above). <b>Suggested fixes:</b> lower Hydra head STR by 1-2, or buff base hero STR by 1. Target: 55-75% win rate for a fun cooperative game.</div>`;
+  } else if (winRate > 85) {
+    html += `<div class="report-card weak"><span class="tag weak-tag">Too Easy</span>Win rate ${winRate}% with skills. ${isPrepare ? 'Preparation makes the game trivial.' : ''} Players win almost every game, which reduces tension. <b>Consider:</b> increase Hydra head STR by 1-2, or add more dangerous dungeon encounters. Target: 65-75% for prepared players, 55-65% for casual play.</div>`;
+  } else if (winRate > 75) {
+    html += `<div class="report-card insight"><span class="tag insight-tag">Comfortable</span>Win rate ${winRate}%. ${isPrepare ? 'Prepared players win consistently, which feels rewarding.' : ''} Players will feel strong and capable. Good for a casual cooperative experience. If you want more tension, nudge Hydra STR up by 1.</div>`;
+  } else if (winRate >= 55) {
+    html += `<div class="report-card insight"><span class="tag insight-tag">Sweet Spot</span>Win rate ${winRate}%. This is the sweet spot for cooperative games: players win more than they lose, but every victory feels earned. Losses are rare enough to not feel punishing, frequent enough to keep tension.</div>`;
   } else {
-    html += `<div class="report-card insight"><span class="tag insight-tag">Good Balance</span>Win rate ${winRate}% with all skills active is in a healthy range. Players will feel challenged but capable. Skills make a real difference in outcomes.</div>`;
+    html += `<div class="report-card insight"><span class="tag insight-tag">Challenging</span>Win rate ${winRate}%. On the harder side — players lose about half the time. Good if you want a "dark souls" feel, but casual groups may find it frustrating. ${isPrepare ? 'Even prepared players struggle, which suggests Hydra STR is high.' : 'Consider adding the Prepare First option to see if preparation helps.'}</div>`;
   }
 
   // Skill Burn summary
