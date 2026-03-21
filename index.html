@@ -4319,7 +4319,7 @@ function generateSingleGameReport() {
     html += `<br>Followers: ${hero.followers.length > 0 ? hero.followers.map(f => f.name).join(', ') : 'none'}`;
     html += `<br>Relics: ${hero.heldRelics.length > 0 ? hero.heldRelics.map(r => r.name + (r.owner === hid ? ' ★' : '')).join(', ') : 'none'}`;
     html += `<br>Stalkers: ${hero.stalkers.length > 0 ? hero.stalkers.map(s => s.name).join(', ') : 'none'}`;
-    html += `<br>Skills: ${hero.skills.map((s,i) => '<span style="color:' + (hero.skillStates[i]==='ready'?'var(--heal)':'#884444') + '">' + s.name + '</span>').join(', ')}`;
+    html += `<br>Skills at end: ${hero.skills.map((s,i) => '<span style="padding:1px 4px;border-radius:2px;background:' + (hero.skillStates[i]==='ready'?'#1a3a2a':'#2a1a1a') + ';color:' + (hero.skillStates[i]==='ready'?'var(--heal)':'#884444') + '">' + s.name + (hero.skillStates[i]==='ready'?' ✓':' ✗') + '</span>').join(' ')}`;
     html += `</div>`;
 
     // Combat record
