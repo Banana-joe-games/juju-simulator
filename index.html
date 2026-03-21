@@ -338,34 +338,34 @@ const HEROES = [
   { id:'juju', name:'Juju', title:'The Hero', str:3, flameFaces:[4,5,6], color:'var(--juju)',
     talent:'Unwavering Power', talentDesc:'+2 to combat total',
     skills:[
-      {name:'Deadly Strike',kind:'ATK',effect:'Gain +2 to Fate Die in combat'},
-      {name:'Paladin Resolve',kind:'MOV',effect:'Move 1 tile in any direction'},
-      {name:"Hero's Resolve",kind:'UTL',effect:'Defeat a Mishap enemy or remove a Stalker'},
-      {name:'Imagination Shield',kind:'UTL',effect:'If KO in fight, ignore it and fight again'}
+      {name:'Rallying Blow',kind:'Combat',effect:'Roll 2 dice keep worst. If you win, all heroes recharge 1 Skill.'},
+      {name:'Shield Wall',kind:'Reactive',effect:'Prevent the KO.'},
+      {name:'TBD Slot 3',kind:'TBD',effect:'Design pending.'},
+      {name:'Taunt',kind:'Combat',effect:'Fight any enemy on the board. At Hydra: extra attack this turn.'}
     ]},
   { id:'gigi', name:'Gigi', title:'The Elf', str:2, flameFaces:[2,3,4], color:'var(--gigi)',
     talent:"Nature's Gift", talentDesc:'Gift Flame to another player next turn',
     skills:[
-      {name:'Aimed Shot',kind:'ATK',effect:'Gain +2 to Fate Die in combat'},
-      {name:'Little Helper',kind:'MOV',effect:'Move up to 2 tiles in any direction'},
-      {name:'Soft Steps',kind:'UTL',effect:'Ignore room if not Wonder'},
-      {name:'Elven Wisdom',kind:'UTL',effect:'Put drawn card at bottom, draw again'}
+      {name:'Herbalist',kind:'Support',effect:'Any ally recharges 1 Skill.'},
+      {name:'Wild Call',kind:'Support',effect:'Draw Wonder cards until you find a Follower. Take it.'},
+      {name:'Soothe',kind:'Combat',effect:'STR 3 or less: discard enemy. STR 4+: if defeated, prevent KO.'},
+      {name:'Pack Leader',kind:'Combat',effect:'+1 STR per Follower for this combat.'}
     ]},
   { id:'lulu', name:'Lulu', title:'The Mage', str:1, flameFaces:[1,3,6], color:'var(--lulu)',
     talent:'Arcane Recharge', talentDesc:'Recharge 1 exhausted Skill',
     skills:[
-      {name:'Fireball',kind:'ATK',effect:'+2 to any hero Fate Die in combat'},
-      {name:'Reality Door',kind:'MOV',effect:'Teleport self or hero to revealed room'},
-      {name:'Forbidden Knowledge',kind:'UTL',effect:'Recharge 1 skill (yours or ally)'},
-      {name:'Farsight',kind:'UTL',effect:'Draw Wonder instead of Misfortune'}
+      {name:'Reality Warp',kind:'Utility',effect:'Move yourself or any ally to any revealed tile.'},
+      {name:'Siphon',kind:'Combat',effect:'Give -2 STR to an enemy.'},
+      {name:'Spell Mirror',kind:'Reactive',effect:'Cancel special effect of Encounter, Trap, or Hydra Head.'},
+      {name:'TBD Slot 4',kind:'TBD',effect:'Design pending.'}
     ]},
   { id:'eggo', name:'Eggo', title:'The Rogue', str:2, flameFaces:[1,2,3], color:'var(--eggo)',
     talent:'Dodge', talentDesc:'Cannot be KO this turn',
     skills:[
-      {name:'Lowblow',kind:'ATK',effect:'Gain +2 to Fate Die in combat'},
-      {name:'Expert Looter',kind:'MOV',effect:'Roll before choosing direction, peek rooms'},
-      {name:'Eggroll',kind:'UTL',effect:'If you lose, move 2 tiles instead of KO'},
-      {name:'Halfboiled',kind:'UTL',effect:'Reroll a die (identical to Skill Burn)'}
+      {name:'Cheap Shot',kind:'Utility',effect:'Roll an additional die. Keep the result you prefer.'},
+      {name:'Copycat',kind:'Utility',effect:'Use any ally Ready Skill effect. Theirs stays Ready.'},
+      {name:'Heist',kind:'Combat',effect:'Fight with -1 STR. If you win, draw 1 Legendary Equipment.'},
+      {name:'Shadowstep',kind:'Utility',effect:'End turn immediately. Begin a new turn from scratch.'}
     ]}
 ];
 
@@ -455,14 +455,14 @@ const MISFORTUNE_CARDS = [
 
 const LEGENDARY_EQUIPMENT = [
   {name:'Triple Axe',type:'weapon',str:2,effect:'roll_3_keep_best'},
-  {name:'Firebane',type:'weapon',str:2,effect:'exhaust_skill_+1'},
-  {name:'Demon Sword',type:'weapon',str:2,effect:'dd_+2'},
+  {name:'Firebane',type:'weapon',str:1,effect:'exhaust_skill_+1'},
+  {name:'Demon Sword',type:'weapon',str:2,effect:'dd_+1'},
   {name:'Wooden Spoon',type:'weapon',str:2,effect:'roll_1_auto_win'},
   {name:'Doomhammer',type:'weapon',str:2,effect:'roll_gamble'},
-  {name:'Virtuous Sword',type:'weapon',str:3,effect:'+1_per_ready_skill'},
+  {name:'Virtuous Sword',type:'weapon',str:1,effect:'+1_per_ready_skill'},
   {name:'Siphon Blade',type:'weapon',str:1,effect:'drain_1'},
   {name:'Vanga',type:'weapon',str:2,effect:'wonder_draw_legendary'},
-  {name:'Parasite Sword',type:'weapon',str:2,effect:'cannot_remove'},
+  {name:'Parasite Sword',type:'weapon',str:3,effect:'cannot_remove_blocks_talent'},
   {name:'Mystic Wand',type:'weapon',str:1,effect:'win_recharge_all'},
   {name:'Supernova Gun',type:'weapon',str:2,effect:'win_roll_6_clear'},
   {name:'Cursed Armour',type:'armour',str:-1,effect:'exhaust_all_recharge_1'},
@@ -711,7 +711,7 @@ function totalStr(hero, opts = {}) {
     if (st.effect === '-2_combat') s -= 2;
   });
   if (!opts.noWeapons && hero.equipment.find(e => e.effect === '+1_per_ready_skill')) {
-    s += readySkillCount(hero);
+    s += Math.min(readySkillCount(hero), 2);
   }
   hero.heldRelics.forEach(r => {
     s += (r.owner === hero.id) ? 2 : 1;
@@ -735,7 +735,7 @@ function maxEquipSlots(hero) {
 function equipItem(hero, item) {
   const max = maxEquipSlots(hero);
   while (hero.equipment.length >= max) {
-    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
     if (removable.length === 0) {
       log(`    Cannot equip ${item.name} — all slots locked!`, 'misfortune');
       return;
@@ -816,8 +816,23 @@ function runTurn() {
     }
   }
 
-  // NOTE: Skills are NOT activated by AI — they're still being designed.
-  // Only Skill Burn (reroll) is used, as it's a core mechanic.
+  // === SKILL ACTIVATIONS (turn start) ===
+
+  // Herbalist (Gigi): recharge ally skill
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Herbalist')) {
+    const allies = G.heroes.filter(h => h.id !== hero.id);
+    const neediest = allies.filter(h => h.skillStates.some(s => s === 'exhausted'))
+        .sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
+    if (neediest) {
+      useSkill(hero, 'Herbalist');
+      rechargeOneSkill(neediest);
+      trackSkill(hero.id, 'Herbalist', 'activated');
+      log(`  🌿 Herbalist: ${hero.name} recharges a skill for ${neediest.name}!`, 'wonder');
+    }
+  }
+
+  // NOTE: Wild Call (Gigi), Reality Warp (Lulu), Spell Mirror (Lulu), Copycat (Eggo),
+  // Shadowstep (Eggo), Taunt extra attack at Hydra (Juju) — not simulated yet (spatial/complex)
 
   // Hound following from previous turn
   if (hero.houndFollowing) {
@@ -1033,7 +1048,7 @@ function resolveWonderCard(hero, card) {
         }
       } else if (card.effect === 'swap_equipment') {
         if (hero.equipment.length > 0 && G.legendaryDeck.length > 0) {
-          const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+          const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
           if (removable.length > 0) {
             removable.sort((a, b) => (a.str || 0) - (b.str || 0));
             const removed = removable[0];
@@ -1191,7 +1206,7 @@ function resolveTrap(hero, card) {
           if (r.isFlame) {
             log(`    ${h.name} rolls ${r.val} 🔥 — equipment safe!`, 'wonder');
           } else {
-            const removable = h.equipment.filter(e => e.effect !== 'cannot_remove');
+            const removable = h.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
             if (removable.length > 0) {
               const removed = removable[removable.length - 1];
               h.equipment = h.equipment.filter(e => e !== removed);
@@ -1203,7 +1218,7 @@ function resolveTrap(hero, card) {
       break;
     }
     case 'discard_1_equip': {
-      const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+      const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
       if (removable.length > 0) {
         removable.sort((a, b) => (a.str || 0) - (b.str || 0));
         const removed = removable[0];
@@ -1273,7 +1288,7 @@ function combat(hero, enemyCard, tier) {
 
   // Bandit: discard 1 equipment to avoid fight
   if (enemyCard.effect === 'discard_equip_or_fight') {
-    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
     if (removable.length > 0 && totalStr(hero) < enemyStr + 3) {
       removable.sort((a, b) => (a.str || 0) - (b.str || 0));
       const removed = removable[0];
@@ -1313,7 +1328,7 @@ function combat(hero, enemyCard, tier) {
   // FROGman: swallows 1 equipment
   let frogmanSwallowed = null;
   if (enemyCard.effect === 'swallows_equip' && hero.equipment.length > 0) {
-    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
     if (removable.length > 0) {
       frogmanSwallowed = removable[removable.length - 1];
       hero.equipment = hero.equipment.filter(e => e !== frogmanSwallowed);
@@ -1321,12 +1336,59 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
+  // === SKILL: Soothe (Gigi) — STR 3- discard enemy, skip fight ===
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && enemyStr <= 3) {
+    useSkill(hero, 'Soothe');
+    trackSkill(hero.id, 'Soothe', 'activated');
+    log(`    🌿 Soothe! ${enemyCard.name} (STR ${enemyStr}) calmed and discarded!`, 'flame');
+    G.stats.monstersKilled++;
+    initHeroTracker(G.tracker, hero.id).wins++;
+    trackEncounter(enemyCard.name, 'won');
+    if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
+    return;
+  }
+
+  // === SKILL: Siphon (Lulu) — -2 STR to enemy ===
+  if (hero.id === 'lulu' && isSkillReady(hero, 'Siphon') && enemyStr >= 3) {
+    useSkill(hero, 'Siphon');
+    enemyStr -= 2;
+    trackSkill(hero.id, 'Siphon', 'activated');
+    log(`    🔮 Siphon! Enemy STR reduced by 2 (now ${enemyStr})`, 'flame');
+  }
+
+  // === SKILL: Pack Leader (Gigi) — +1 per follower ===
+  let packLeaderBonus = 0;
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Pack Leader') && hero.followers.length > 0) {
+    useSkill(hero, 'Pack Leader');
+    packLeaderBonus = hero.followers.length;
+    trackSkill(hero.id, 'Pack Leader', 'activated');
+    log(`    🐺 Pack Leader! +${packLeaderBonus} STR (${hero.followers.length} followers)`, 'flame');
+  }
+
+  // === SKILL: Heist (Eggo) — -1 STR but win = draw legendary ===
+  let heistActive = false;
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Heist') && enemyStr <= 3) {
+    useSkill(hero, 'Heist');
+    heistActive = true;
+    trackSkill(hero.id, 'Heist', 'activated');
+    log(`    🗡 Heist! Fighting at -1 STR for a chance at Legendary Equipment`, 'flame');
+  }
+
+  // === SKILL: Rallying Blow (Juju) — roll 2 keep worst, win = all heroes recharge 1 ===
+  let rallyingBlowActive = false;
+  if (hero.id === 'juju' && isSkillReady(hero, 'Rallying Blow') && totalStr(hero) >= enemyStr + 2) {
+    useSkill(hero, 'Rallying Blow');
+    rallyingBlowActive = true;
+    trackSkill(hero.id, 'Rallying Blow', 'activated');
+    log(`    ⚔ Rallying Blow! Rolling 2 dice, keeping worst`, 'flame');
+  }
+
   // === DOOMHAMMER pre-fight ===
   let doomhammerBonus = 0;
   if (hero.equipment.find(e => e.effect === 'roll_gamble')) {
     const doomRoll = Math.floor(Math.random() * 6) + 1;
-    if (doomRoll === 1) {
-      log(`    Doomhammer curse! Rolled 1 — KO!`, 'ko');
+    if (doomRoll <= 2) {
+      log(`    Doomhammer curse! Rolled ${doomRoll} — KO!`, 'ko');
       if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
       applyKO(hero);
       return;
@@ -1347,12 +1409,12 @@ function combat(hero, enemyCard, tier) {
     log(`    Firebane: exhausted a skill for +1 STR`, 'legendary');
   }
 
-  // === DEMON SWORD: +2 on Dread Dungeon ===
+  // === DEMON SWORD: +1 on Dread Dungeon ===
   let demonSwordBonus = 0;
   const heroRoom = G.board.find(r => r.id === hero.pos);
-  if (hero.equipment.find(e => e.effect === 'dd_+2') && heroRoom && heroRoom.type === 'dread') {
-    demonSwordBonus = 2;
-    log(`    Demon Sword blazes in the Dread Dungeon! +2 STR`, 'legendary');
+  if (hero.equipment.find(e => e.effect === 'dd_+1') && heroRoom && heroRoom.type === 'dread') {
+    demonSwordBonus = 1;
+    log(`    Demon Sword blazes in the Dread Dungeon! +1 STR`, 'legendary');
   }
 
   // === WARLORD ARMOUR: double base STR if enemy > hero ===
@@ -1370,7 +1432,7 @@ function combat(hero, enemyCard, tier) {
     if (fightRound > 0) log(`    Slayer: Round ${fightRound + 1}!`, 'combat');
 
     const result = singleFight(hero, enemyCard, tier, enemyStr,
-      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed });
+      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive });
 
     if (result === 'win') {
       totalWins++;
@@ -1404,9 +1466,23 @@ function combat(hero, enemyCard, tier) {
     drawLegendaryItem(hero);
   }
 
+  // Heist (Eggo): draw legendary on win
+  if (heistActive) {
+    drawLegendaryItem(hero);
+    log(`    🗡 Heist pays off! Drew Legendary Equipment!`, 'flame');
+  }
+
+  // Rallying Blow (Juju): all heroes recharge 1 skill on win
+  if (rallyingBlowActive) {
+    G.heroes.forEach(h => {
+      rechargeOneSkill(h);
+    });
+    log(`    ⚔ Rallying Blow victory! All heroes recharge 1 skill!`, 'flame');
+  }
+
   // Thiefling Rats: discard 1 equipment on defeat
   if (enemyCard.effect === 'discard_1_equip') {
-    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
     if (removable.length > 0) {
       removable.sort((a, b) => (a.str || 0) - (b.str || 0));
       const removed = removable[0];
@@ -1446,7 +1522,7 @@ function combat(hero, enemyCard, tier) {
 }
 
 function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
-  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed } = bonuses;
+  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive } = bonuses;
 
   // === ENEMY ROLL ===
   let enemyTotal;
@@ -1494,14 +1570,28 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   const hasTripleAxe = hero.equipment.find(e => e.effect === 'roll_3_keep_best');
   const hasVeteran = hero.followers.find(f => f.effect === 'roll_2_keep_best');
 
-  if (hasTripleAxe) {
+  // === SKILL: Cheap Shot (Eggo) — roll extra die, keep best ===
+  let cheapShotActive = false;
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Cheap Shot') && enemyStr >= 4 && !hasTripleAxe) {
+    useSkill(hero, 'Cheap Shot');
+    cheapShotActive = true;
+    trackSkill(hero.id, 'Cheap Shot', 'activated');
+  }
+
+  if (rallyingBlowActive) {
+    // Rallying Blow: roll 2 dice, keep worst
+    const r1 = heroRollDie(hero), r2 = heroRollDie(hero);
+    heroRoll = r1.val <= r2.val ? r1 : r2;
+    log(`    Rallying Blow: rolled [${r1.val}, ${r2.val}] keeps worst ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'flame');
+  } else if (hasTripleAxe) {
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero), r3 = heroRollDie(hero);
     heroRoll = [r1, r2, r3].sort((a, b) => b.val - a.val)[0];
     log(`    Triple Axe: rolled [${r1.val}, ${r2.val}, ${r3.val}] keeps ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'legendary');
-  } else if (hasVeteran) {
+  } else if (hasVeteran || cheapShotActive) {
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero);
     heroRoll = r1.val >= r2.val ? r1 : r2;
-    log(`    Veteran: rolled [${r1.val}, ${r2.val}] keeps ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'legendary');
+    const source = cheapShotActive ? 'Cheap Shot' : 'Veteran';
+    log(`    ${source}: rolled [${r1.val}, ${r2.val}] keeps ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, cheapShotActive ? 'flame' : 'legendary');
   } else {
     heroRoll = heroRollDie(hero);
   }
@@ -1564,8 +1654,8 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     return 'win';
   }
 
-  // NOTE: ATK skills removed — skills are still being designed.
-  // Only Skill Burn (reroll) is active.
+  // Skills (Siphon, Pack Leader, Heist, Cheap Shot, Rallying Blow, Soothe) are activated pre-fight.
+  // Skill Burn (reroll) remains as the last-resort skill use.
 
   // Siphon Blade
   if (hero.equipment.find(e => e.effect === 'drain_1')) {
@@ -1594,10 +1684,12 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   if (useBaseOnly) log(`    Squelette: ${hero.name} fights with base STR only!`, 'combat');
 
   const heroStrValue = useBaseOnly ? hero.str : totalStr(hero);
+  const heistPenalty = heistActive ? -1 : 0;
   let heroTotal = heroRoll.val + heroStrValue + combatBonus + doomhammerBonus + firebaneBonus
-    + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty;
+    + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
+    + (packLeaderBonus || 0) + heistPenalty;
 
-  log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
+  log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus + (packLeaderBonus || 0) ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty + heistPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
 
   // === SKILL BURN (can reroll YOUR die OR ENEMY die) ===
   if (heroTotal < enemyTotal + beatMargin && readySkillCount(hero) > 0) {
@@ -1611,7 +1703,8 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     if (enemyCard.effect === 'only_3plus_hits' && rerollHeroVal > 0 && rerollHeroVal < 3) { rerollHeroVal = 0; }
     const newBonusA = (hero.id === 'juju' && rerollHeroFlame && !hero.talentUsedThisTurn) ? 2 : (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0);
     const totalA = rerollHeroVal + heroStrValue + (combatBonus - (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0)) + newBonusA
-      + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty;
+      + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
+      + (packLeaderBonus || 0) + heistPenalty;
 
     // Option B: Reroll enemy die (keep hero roll, enemy gets new roll)
     const rerollEnemy = rollDie(hero);
@@ -1699,6 +1792,22 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 }
 
 function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
+  // === SKILL: Shield Wall (Juju) — prevent KO ===
+  if (hero.id === 'juju' && isSkillReady(hero, 'Shield Wall')) {
+    useSkill(hero, 'Shield Wall');
+    trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
+    log(`    🛡 Shield Wall! KO prevented!`, 'flame');
+    return;
+  }
+
+  // === SKILL: Soothe (Gigi) — STR 4+ prevent KO ===
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && (enemyCard.str || 0) >= 4) {
+    useSkill(hero, 'Soothe');
+    trackSkill(hero.id, 'Soothe', 'savedFromKO');
+    log(`    🌿 Soothe! ${hero.name} calms the ${enemyCard.name} and avoids KO!`, 'flame');
+    return;
+  }
+
   // Warden Angel: discard to win instead
   const wardenIdx = hero.followers.findIndex(f => f.effect === 'discard_win_fight');
   if (wardenIdx >= 0) {
@@ -1718,7 +1827,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
     return;
   }
 
-  // NOTE: Imagination Shield, Eggroll etc. not activated — skills still being designed.
+  // Shield Wall (Juju) and Soothe (Gigi) KO prevention are checked above.
 
   // Berserker Helmet: retry on loss
   if (hero.equipment.find(e => e.effect === 'retry_on_loss') && !hero._berserkerUsed) {
@@ -1757,7 +1866,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   // Ogre: no respawn, stay on tile
   if (enemyCard.effect === 'no_respawn_on_loss') {
     G.stats.ko++;
-    hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove');
+    hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
     removeFollowers(hero);
     log(`    Ogre pins ${hero.name}! No respawn — stuck until rescued.`, 'ko');
     return;
@@ -1818,8 +1927,8 @@ function applyKO(hero) {
     G.stats.ko++;
     initHeroTracker(G.tracker, hero.id).ko++;
     hero.ko = true;
-    const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove');
-    const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove').map(e => e.name).join(', ') || 'nothing';
+    const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
+    const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').map(e => e.name).join(', ') || 'nothing';
     hero.equipment = parasiteSword ? [parasiteSword] : [];
     removeFollowers(hero);
     hero.pos = 'entrance';
@@ -1845,8 +1954,8 @@ function applyKO(hero) {
 
   G.stats.ko++;
   initHeroTracker(G.tracker, hero.id).ko++;
-  const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove');
-  const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove').map(e => e.name).join(', ') || 'nothing';
+  const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
+  const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').map(e => e.name).join(', ') || 'nothing';
   if (parasiteSword) trackEquip(parasiteSword.name, 'survivedKO');
   hero.equipment = parasiteSword ? [parasiteSword] : [];
   removeFollowers(hero);
@@ -1861,6 +1970,11 @@ function triggerTalent(hero, context) {
   if (hero.talentUsedThisTurn) return;
   if (hasStalker(hero, 'no_flame_effect')) {
     log(`    Cursed Beggar blocks ${hero.name}'s talent!`, 'misfortune');
+    trackTalent(hero.id, 'blocked');
+    return;
+  }
+  if (hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent')) {
+    log(`    Parasite Sword blocks ${hero.name}'s talent!`, 'misfortune');
     trackTalent(hero.id, 'blocked');
     return;
   }
@@ -1964,7 +2078,7 @@ function hydraAttack(hero) {
       log(`    The Fangs: all heroes exhaust 1 Skill!`, 'misfortune');
     }
     if (head.name === 'The Maw') {
-      const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+      const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
       if (removable.length > 0) {
         const removed = removable[removable.length - 1];
         hero.equipment = hero.equipment.filter(e => e !== removed);
@@ -2014,8 +2128,8 @@ function hydraAttack(hero) {
   let doomhammerBonus = 0;
   if (hero.equipment.find(e => e.effect === 'roll_gamble')) {
     const doomRoll = Math.floor(Math.random() * 6) + 1;
-    if (doomRoll === 1) {
-      log(`    Doomhammer curse! Rolled 1 — KO!`, 'ko');
+    if (doomRoll <= 2) {
+      log(`    Doomhammer curse! Rolled ${doomRoll} — KO!`, 'ko');
       applyKO(hero);
       if (G.gameOver) return;
       growHydraHead();
@@ -2043,7 +2157,7 @@ function hydraAttack(hero) {
   }
 
   // Maw penalty
-  const mawPenalty = (head.name === 'The Maw' && hero.equipment.filter(e => e.effect !== 'cannot_remove').length === 0) ? -2 : 0;
+  const mawPenalty = (head.name === 'The Maw' && hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').length === 0) ? -2 : 0;
 
   let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
   const effectiveHeadStr = head.effectiveStr - siphonDrain;
@@ -2357,7 +2471,7 @@ function generateReport(results) {
   const heroIds = ['juju','gigi','lulu','eggo'];
 
   let html = `<h2>PLAYTEST REPORT</h2>`;
-  html += `<p style="color:var(--dim);font-size:11px;margin-bottom:12px">Skills are disabled. Only Innate Talents, Equipment, Followers, and Skill Burn (reroll) affect outcomes. This shows what the game looks like before skills are added.</p>`;
+  html += `<p style="color:var(--dim);font-size:11px;margin-bottom:12px">Skills are now active: Shield Wall, Soothe, Siphon, Pack Leader, Heist, Rallying Blow, Cheap Shot, Herbalist. Spatial/complex skills (Wild Call, Reality Warp, Spell Mirror, Copycat, Shadowstep, Taunt) are not yet simulated.</p>`;
   html += `<div class="report-section"><h3>Overview (${n} games)</h3>`;
   html += `<div class="report-card">`;
   html += `<div class="report-stat"><span class="rl">Win Rate</span><span class="rv" style="color:${winRate > 50 ? 'var(--heal)' : 'var(--ko)'}">${winRate}% (${wins}/${n})</span></div>`;
@@ -2469,15 +2583,15 @@ function generateReport(results) {
         comment = ` The +${eq.str} STR alone makes most Mishap enemies trivial (STR 1-3). Combined with base hero STR, the hero rarely faces a real threat. Consider: lower STR to +1, or add a drawback/condition.`;
       }
       if (eq.effect === 'roll_3_keep_best') comment = ` Rolling 3 dice and keeping best nearly guarantees a 5-6 roll. The variance reduction is too strong. Consider: roll 2 keep best, or 3 dice but you must use the middle value.`;
-      if (eq.effect === 'roll_gamble') comment = ` The gamble rarely matters because +2 base STR is already strong. The 1-in-6 KO risk is too low to balance the +3 upside. Consider: wider KO range (1-2) or lower base STR to +1.`;
+      if (eq.effect === 'roll_gamble') comment = ` KO on 1-2 (1/3 chance) is a serious risk. Ranges: 1-2 KO, 3-4 +1, 5+ +3. High variance weapon.`;
       if (eq.effect === 'roll_1_auto_win') comment = ` Auto-win on 1 is a 1/6 chance per fight on top of +2 STR. It's a win-more weapon. Consider: auto-win but with 0 STR, or auto-win only against enemies of STR 3 or less.`;
-      if (eq.effect === 'dd_+2') comment = ` +2 base plus +2 in Dread Dungeons means +4 total where it matters most. Dread fights become trivial. Consider: +1 in Dread instead of +2, or make it conditional (only on first fight).`;
+      if (eq.effect === 'dd_+1') comment = ` +2 base plus +1 in Dread Dungeons means +3 total. Solid but not overwhelming in Dread.`;
       if (eq.effect === 'exhaust_skill_+1') comment = ` The +2 STR base is already strong. The exhaust-for-+1 is just gravy. Consider: lower base to +1, making the exhaust decision more meaningful.`;
       if (eq.effect === 'win_roll_6_clear') comment = ` +2 STR is standard strong, but the "roll 6 clear all enemies" effect barely triggers. Not OP for the effect, just for the raw STR. Consider: lower to +1 STR, or make the clear effect trigger on 5-6.`;
       if (eq.effect === '+1_per_ready_skill') comment = ` +3 base plus +1 per ready skill means +7 with all skills ready. That's higher than most Misfortune enemies. Consider: +1 base with the scaling, or cap the bonus at +2 from skills.`;
       if (eq.effect === 'wonder_draw_legendary') comment = ` +2 STR is already strong. The Vanga effect (draw legendary on Wonder) accelerates equipment stacking. Consider: +1 STR, or the effect only triggers once per game.`;
       if (eq.effect === 'drain_1') comment = ` Drain is a +2 swing (+1 hero, -1 enemy). Combined with +1 base that's effectively +3. Consider: drain only applies to enemies STR 3+, or base STR 0.`;
-      if (eq.effect === 'cannot_remove') comment = ` Surviving KO is powerful since KO strips all equipment. +2 STR on top makes it a must-keep. Consider: +1 STR, or the curse prevents Flame effects while equipped.`;
+      if (eq.effect === 'cannot_remove_blocks_talent') comment = ` Surviving KO is powerful since KO strips all equipment. +3 STR is strong but the talent block is a real cost. Cannot be removed and blocks Flame talent activation.`;
       if (eq.effect === 'peek_adjacent') comment = ` Not OP due to its effect (peek is spatial and barely matters in sim). High win rate is from other equipment. May show differently in real play.`;
       if (!comment && isOP) comment = ` High win rate likely from raw STR bonus stacking with hero base. Consider lowering STR or adding a conditional drawback.`;
     }
@@ -2753,7 +2867,17 @@ function runSilentGame() {
     if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
       if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero);
     }
-    // NOTE: No skill activations — skills still being designed
+    // Herbalist (Gigi): recharge ally skill (batch sim)
+    if (hero.id === 'gigi' && isSkillReady(hero, 'Herbalist')) {
+      const allies = G.heroes.filter(h => h.id !== hero.id);
+      const neediest = allies.filter(h => h.skillStates.some(s => s === 'exhausted'))
+          .sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
+      if (neediest) {
+        useSkill(hero, 'Herbalist');
+        rechargeOneSkill(neediest);
+        trackSkill(hero.id, 'Herbalist', 'activated');
+      }
+    }
 
     // Hound
     if (hero.houndFollowing) {
