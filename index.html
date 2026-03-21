@@ -3992,7 +3992,7 @@ function generateReport(results) {
       suggestions.push(`Averages ${(heroData.ko/n).toFixed(1)} KOs/game. Needs better survival: a KO-prevention skill, a "respawn with 1 equipment" passive, or stalker resistance.`);
     }
     if (heroData.combats > 0 && heroData.wins / heroData.combats < 0.4) {
-      suggestions.push(`Combat win rate is only ${((heroData.wins/heroData.combats)*100).toFixed(0)}%. Base STR (${HEROES.find(h=>h.id===hid).str}) may be too low without skills. Consider: a permanent passive (+1 STR in specific conditions) or movement skills to avoid fights.`);
+      suggestions.push(`Combat win rate is only ${((heroData.wins/heroData.combats)*100).toFixed(0)}%. Base STR (${HEROES.find(h=>h.id===hid).str}) is low. Consider: stronger equipment options, better skill synergies, or movement abilities to avoid tough fights.`);
     }
     if (suggestions.length > 0) {
       html += `<div class="report-card need"><span class="tag need-tag">Skill Ideas</span><b style="color:var(--${hid})">${heroNames[hid]}</b><ul style="margin:4px 0 0 16px;padding:0">`;
