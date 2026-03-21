@@ -4139,15 +4139,184 @@ function onGameEnd() {
   G.heroes.forEach(h => {
     h.stalkers.forEach(s => trackStalker(s.name, 'turnsActive'));
   });
-  const result = {
-    victory: G.victory,
-    turn: G.turn,
-    stats: {...G.stats},
-    tracker: G.tracker,
-    heroes: G.heroes.map(h => ({id:h.id, equipment:h.equipment.map(e=>e.name), relics:h.heldRelics.length, ko:initHeroTracker(G.tracker,h.id).ko}))
-  };
-  lastReport = generateReport([result]);
+  lastReport = generateSingleGameReport();
   document.getElementById('reportBtn').disabled = false;
+}
+
+function generateSingleGameReport() {
+  const heroNames = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'};
+  const heroIds = ['juju','gigi','lulu','eggo'];
+  let html = `<h2>SINGLE GAME REPORT</h2>`;
+
+  // Result banner
+  if (G.victory) {
+    html += `<div class="report-card" style="border-left:3px solid var(--heal);font-size:14px"><b style="color:var(--heal)">🎉 VICTORY</b> in ${G.turn} turns (${G.round} rounds)</div>`;
+  } else {
+    const cause = G.tracker.deathMoments.length > 0 ? G.tracker.deathMoments[G.tracker.deathMoments.length-1] : null;
+    let causeText = 'Unknown';
+    if (cause) {
+      if (cause.context.includes('overflow')) causeText = 'Hydra Overflow (heads exceeded max)';
+      else if (cause.context.includes('0 relics')) causeText = `${cause.hero} KO at Hydra with no relics left`;
+      else causeText = cause.context;
+    }
+    html += `<div class="report-card" style="border-left:3px solid var(--ko);font-size:14px"><b style="color:var(--ko)">💀 DEFEAT</b> at turn ${G.turn}<br><span style="color:var(--dim)">Cause: ${causeText}</span></div>`;
+  }
+
+  // Game stats
+  html += `<div class="report-section"><h3>Game Stats</h3><div class="report-card">`;
+  html += `<div class="report-stat"><span class="rl">Turns</span><span class="rv">${G.turn}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Combats</span><span class="rv">${G.stats.combats}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Monsters Killed</span><span class="rv">${G.stats.monstersKilled}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Total KOs</span><span class="rv">${G.stats.ko}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Skill Burns</span><span class="rv">${G.stats.skillBurns}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Relics Spent</span><span class="rv">${G.stats.relicsSpent}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Tiles Explored</span><span class="rv">${G.tilesPlaced}/36</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Hydra Heads Destroyed</span><span class="rv">${G.hydraDestroyedCount}</span></div>`;
+  html += `</div></div>`;
+
+  // Per-hero breakdown
+  html += `<div class="report-section"><h3>Hero Breakdown</h3>`;
+  heroIds.forEach(hid => {
+    const hero = G.heroes.find(h => h.id === hid);
+    const ht = initHeroTracker(G.tracker, hid);
+    if (!hero) return;
+
+    html += `<div class="report-card" style="border-left:3px solid var(--${hid})">`;
+    html += `<b style="color:var(--${hid});font-size:13px">${hero.name} ${hero.title}</b><br>`;
+
+    // Final state
+    html += `<div style="margin:6px 0;padding:4px 6px;background:#0e0e16;border-radius:3px;font-size:11px">`;
+    html += `<b>Final State:</b> Total STR <b>${totalStr(hero)}</b> (base ${hero.str})`;
+    html += `<br>Equipment: ${hero.equipment.length > 0 ? hero.equipment.map(e => e.name + ' (+' + e.str + ')').join(', ') : 'none'}`;
+    html += `<br>Followers: ${hero.followers.length > 0 ? hero.followers.map(f => f.name).join(', ') : 'none'}`;
+    html += `<br>Relics: ${hero.heldRelics.length > 0 ? hero.heldRelics.map(r => r.name + (r.owner === hid ? ' ★' : '')).join(', ') : 'none'}`;
+    html += `<br>Stalkers: ${hero.stalkers.length > 0 ? hero.stalkers.map(s => s.name).join(', ') : 'none'}`;
+    html += `<br>Skills: ${hero.skills.map((s,i) => '<span style="color:' + (hero.skillStates[i]==='ready'?'var(--heal)':'#884444') + '">' + s.name + '</span>').join(', ')}`;
+    html += `</div>`;
+
+    // Combat record
+    html += `<div style="margin:4px 0;font-size:11px">`;
+    html += `⚔ Combats: <b>${ht.combats}</b> (${ht.wins}W/${ht.losses}L, ${ht.combats > 0 ? ((ht.wins/ht.combats)*100).toFixed(0) : 0}% win rate)`;
+    html += ` | 💀 KOs: <b>${ht.ko}</b>`;
+    html += ` | 🔄 Skill Burns: <b>${ht.skillsBurned || 0}</b>`;
+    html += ` | 💎 Relics Spent: <b>${ht.relicsSpent || 0}</b>`;
+    html += `</div>`;
+
+    // Skills used
+    const heroSkills = Object.entries(G.tracker.skills).filter(([k]) => k.startsWith(hid + '_'));
+    if (heroSkills.length > 0) {
+      html += `<div style="margin:4px 0;font-size:11px"><b>Skills Used:</b><br>`;
+      heroSkills.filter(([k]) => !k.includes('Skill Burn') && !k.includes('Dodge') && !k.includes('Warden')).forEach(([key, d]) => {
+        const sname = key.substring(hid.length + 1);
+        let info = `${sname}: <b>${d.activated || 0}x</b>`;
+        if (d.savedFromKO > 0) info += ` (saved ${d.savedFromKO} KOs)`;
+        if (d.turnedFight > 0) info += ` (turned ${d.turnedFight} fights)`;
+        html += `<span style="display:inline-block;margin:1px 8px 1px 0;padding:1px 4px;background:#1a1a2a;border-radius:2px">${info}</span>`;
+      });
+      // Skill Burn separately
+      const sb = heroSkills.find(([k]) => k.includes('Skill Burn'));
+      if (sb && sb[1].activated > 0) {
+        html += `<span style="display:inline-block;margin:1px 8px 1px 0;padding:1px 4px;background:#2a1a1a;border-radius:2px">Skill Burn: <b>${sb[1].activated}x</b>${sb[1].turnedFight ? ' (turned ' + sb[1].turnedFight + ' fights)' : ''}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    // Talent info
+    const talent = G.tracker.talents[hid];
+    if (talent) {
+      html += `<div style="margin:4px 0;font-size:11px">`;
+      html += `🔥 Talent (${hero.talent}): triggered <b>${talent.triggered || 0}x</b>`;
+      if (talent.blocked > 0) html += `, blocked ${talent.blocked}x`;
+      html += ` (combat: ${talent.combatImpact || 0}, movement: ${talent.movementImpact || 0})`;
+      html += `</div>`;
+    }
+
+    // Combat margin analysis
+    if (ht.combats > 0) {
+      html += `<div style="margin:4px 0;font-size:11px">`;
+      html += `📊 Avg win margin: <b>+${ht.damageDealt > 0 && ht.wins > 0 ? (ht.damageDealt / ht.wins).toFixed(1) : '?'}</b>`;
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+  });
+  html += `</div>`;
+
+  // Hydra combat timeline
+  const hydraLog = G.tracker.hydraCombatLog || [];
+  if (hydraLog.length > 0) {
+    html += `<div class="report-section"><h3>Hydra Fight Timeline</h3>`;
+    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:6px">Every attack at the Hydra, in order.</p>`;
+    html += `<div class="report-card" style="font-size:11px;max-height:300px;overflow-y:auto">`;
+    hydraLog.forEach((a, i) => {
+      const won = a.won;
+      const icon = won ? '✓' : '✗';
+      const color = won ? 'var(--heal)' : 'var(--ko)';
+      const margin = a.margin >= 0 ? '+' + a.margin : a.margin;
+      html += `<div style="padding:2px 0;border-bottom:1px solid #1a1a2a;color:${color}">`;
+      html += `${icon} T${a.turn} <b style="color:var(--${a.heroId})">${a.hero}</b> → ${a.head} (STR ${a.headStr}): rolled ${a.roll}, total <b>${a.finalHeroTotal}</b> vs ${a.headStr} = <b>${margin}</b>`;
+      html += ` [${a.aliveHeads} heads alive, max ${a.maxHeads}]`;
+      html += `</div>`;
+    });
+    html += `</div>`;
+
+    // Hydra summary
+    const hydraWins = hydraLog.filter(a => a.won).length;
+    const hydraLosses = hydraLog.filter(a => !a.won).length;
+    html += `<div class="report-card">`;
+    html += `<b>Summary:</b> ${hydraLog.length} attacks, ${hydraWins} won (${((hydraWins/hydraLog.length)*100).toFixed(0)}%), ${hydraLosses} lost`;
+    const avgHT = (hydraLog.reduce((s,a) => s + a.finalHeroTotal, 0) / hydraLog.length).toFixed(1);
+    const avgHS = (hydraLog.reduce((s,a) => s + a.headStr, 0) / hydraLog.length).toFixed(1);
+    html += `<br>Avg hero total: <b>${avgHT}</b> vs avg head STR: <b>${avgHS}</b> (gap: ${(avgHT - avgHS).toFixed(1)})`;
+    // Per-hero at hydra
+    heroIds.forEach(hid => {
+      const ha = hydraLog.filter(a => a.heroId === hid);
+      if (ha.length === 0) return;
+      const hw = ha.filter(a => a.won).length;
+      html += `<br><span style="color:var(--${hid})">${heroNames[hid]}</span>: ${ha.length} attacks, ${hw}W/${ha.length-hw}L`;
+    });
+    html += `</div>`;
+    html += `</div>`;
+  }
+
+  // Key moments (from tracker)
+  const deaths = G.tracker.deathMoments;
+  const closes = G.tracker.closeCalls;
+  if (deaths.length > 0 || closes.length > 0) {
+    html += `<div class="report-section"><h3>Key Moments</h3>`;
+    if (closes.length > 0) {
+      html += `<div class="report-card"><b>Close Calls (won by 0-1):</b><br>`;
+      closes.forEach(c => {
+        html += `<div style="font-size:11px;padding:1px 0">⚡ ${c.hero} vs ${c.enemy}: ${c.heroTotal} vs ${c.enemyTotal} (margin +${c.margin})</div>`;
+      });
+      html += `</div>`;
+    }
+    if (deaths.length > 0) {
+      html += `<div class="report-card" style="border-left:3px solid var(--ko)"><b>Death Moments:</b><br>`;
+      deaths.forEach(d => {
+        html += `<div style="font-size:11px;padding:1px 0">💀 Turn ${d.turn}: ${d.hero} — ${d.context}</div>`;
+      });
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Needed but didn't have (skill gaps)
+  let gapCount = 0;
+  heroIds.forEach(hid => {
+    const ht = G.tracker.heroes[hid];
+    if (!ht || ht.neededButDidntHave.length === 0) return;
+    if (gapCount === 0) html += `<div class="report-section"><h3>What Would Have Helped</h3>`;
+    gapCount++;
+    html += `<div class="report-card" style="border-left:3px solid var(--${hid})"><b style="color:var(--${hid})">${heroNames[hid]}</b><br>`;
+    ht.neededButDidntHave.forEach(g => {
+      html += `<div style="font-size:11px;padding:1px 0">• vs ${g.enemy} (margin ${g.margin}): ${g.context}</div>`;
+    });
+    html += `</div>`;
+  });
+  if (gapCount > 0) html += `</div>`;
+
+  return html;
 }
 
 // ========== CONTROLS ==========
