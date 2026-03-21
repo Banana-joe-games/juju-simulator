@@ -1115,6 +1115,22 @@ function runTurn() {
     }
   }
 
+  // Copycat → Herbalist (Eggo copies Gigi's Herbalist at turn start)
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat')) {
+    const gigiForCopy = G.heroes.find(h => h.id === 'gigi');
+    const eggoExhausted = hero.skillStates.filter(s => s === 'exhausted').length;
+    if (gigiForCopy && isSkillReady(gigiForCopy, 'Herbalist') && eggoExhausted >= 2) {
+      useSkill(hero, 'Copycat');
+      trackSkill(hero.id, 'Copycat', 'activated');
+      const candidates = G.heroes.filter(h => h.skillStates.some(s => s === 'exhausted'));
+      const neediest = candidates.sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
+      if (neediest) {
+        rechargeOneSkill(neediest);
+        log(`  🎭 Copycat → Herbalist: ${hero.name} recharges a skill for ${neediest.name}!`, 'flame');
+      }
+    }
+  }
+
   // Wild Call (Gigi): draw Wonder until Follower
   if (hero.id === 'gigi' && shouldUseSkill(hero, 'Wild Call', { atHydra: false })) {
     useSkill(hero, 'Wild Call');
@@ -1819,19 +1835,34 @@ function combat(hero, enemyCard, tier) {
     log(`    🔮 Siphon! Lulu${who} reduces enemy STR by 2 (now ${enemyStr})`, 'flame');
   }
 
-  // === SKILL: Copycat (Eggo) — copy Siphon pre-combat ===
-  if (hero.id === 'eggo' && shouldUseSkill(hero, 'Copycat', { ...skillCtx, preCombatSiphon: true })) {
-    const luluH = G.heroes.find(h => h.id === 'lulu');
+  let packLeaderBonus = 0;
+  // === SKILL: Copycat (Eggo) — copy best available ally skill pre-combat ===
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && enemyStr >= 3) {
+    const allies = G.heroes.filter(h => h.id !== hero.id);
+    // Priority: Siphon (-2 enemy), Not Today! (save close loss), Soothe (discard weak/prevent KO)
+    const luluH = allies.find(h => h.id === 'lulu');
+    const jujuH = allies.find(h => h.id === 'juju');
+    const gigiH = allies.find(h => h.id === 'gigi');
     if (luluH && isSkillReady(luluH, 'Siphon')) {
       useSkill(hero, 'Copycat');
       enemyStr -= 2;
       trackSkill(hero.id, 'Copycat', 'activated');
-      log(`  🎭 Copycat: ${hero.name} copies Siphon! Enemy -2 STR (now ${enemyStr})`, 'flame');
+      log(`  🎭 Copycat → Siphon: Enemy -2 STR (now ${enemyStr})`, 'flame');
+    } else if (gigiH && isSkillReady(gigiH, 'Soothe') && enemyStr <= 3) {
+      useSkill(hero, 'Copycat');
+      trackSkill(hero.id, 'Copycat', 'activated');
+      log(`  🎭 Copycat → Soothe: Discards ${enemyCard.name} (STR ${enemyStr})!`, 'flame');
+      trackEncounter(enemyCard.name, 'won');
+      return; // Skip combat entirely
+    } else if (gigiH && isSkillReady(gigiH, 'Pack Leader') && hero.followers.length >= 2) {
+      useSkill(hero, 'Copycat');
+      packLeaderBonus = hero.followers.length;
+      trackSkill(hero.id, 'Copycat', 'activated');
+      log(`  🎭 Copycat → Pack Leader: +${packLeaderBonus} STR (${hero.followers.length} followers)`, 'flame');
     }
   }
 
   // === SKILL: Pack Leader (Gigi) — +1 per follower ===
-  let packLeaderBonus = 0;
   if (hero.id === 'gigi' && shouldUseSkill(hero, 'Pack Leader', skillCtx)) {
     useSkill(hero, 'Pack Leader');
     packLeaderBonus = hero.followers.length;
@@ -2556,14 +2587,33 @@ function shouldUseSkill(hero, skillName, context) {
       if (atHydra) return true;
       return phase === 'early' || phase === 'mid';
 
-    case 'Copycat':
+    case 'Copycat': {
+      // Copycat can copy ANY ally Ready Skill — check if any useful one is available
+      if (ctx.preventKO) return true; // copy Shield Wall or Soothe to prevent KO
+      if (ctx.preCombatSiphon && enemyStr >= 3) return true; // copy Siphon pre-combat
+      // At Hydra: always worth copying something useful
       if (atHydra) {
-        const lulu = G.heroes.find(h => h.id === 'lulu');
-        if (lulu && isSkillReady(lulu, 'Siphon')) return true;
+        const allies = G.heroes.filter(h => h.id !== hero.id);
+        const hasUsefulAllySkill = allies.some(h =>
+          isSkillReady(h, 'Siphon') || isSkillReady(h, 'Shield Wall') ||
+          isSkillReady(h, 'Spell Mirror') || isSkillReady(h, 'Not Today!') ||
+          isSkillReady(h, 'Herbalist') || isSkillReady(h, 'Overload')
+        );
+        return hasUsefulAllySkill;
       }
-      if (ctx.preventKO) return true;
-      if (ctx.preCombatSiphon && enemyStr >= 5) return true;
+      // In dungeon: copy Herbalist to recharge skills if many exhausted
+      const eggoExhausted = hero.skillStates.filter(s => s === 'exhausted').length;
+      if (eggoExhausted >= 2) {
+        const herbGigi = G.heroes.find(h => h.id === 'gigi' && isSkillReady(h, 'Herbalist'));
+        if (herbGigi) return true;
+      }
+      // Copy Siphon against strong dungeon enemies
+      if (enemyStr >= 4) {
+        const luluSiphon = G.heroes.find(h => h.id === 'lulu' && isSkillReady(h, 'Siphon'));
+        if (luluSiphon) return true;
+      }
       return false;
+    }
   }
   return false;
 }
