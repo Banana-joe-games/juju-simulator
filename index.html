@@ -323,12 +323,14 @@ input[type=range] {
   <div class="right-panel" id="infoPanel"></div>
   <div class="footer">
     <span style="color:var(--dim);font-size:11px" id="statusBar">Ready. Press New Game.</span>
+    <button class="btn" id="downloadLogBtn" onclick="downloadGameLogMD()" style="margin-left:auto;display:none">⬇ Log (.md)</button>
     <div class="actions" id="choiceArea"></div>
   </div>
 </div>
 <div id="reportOverlay" class="report-overlay" style="display:none">
   <div class="report-modal">
     <button class="report-close" onclick="closeReport()">&times;</button>
+    <div style="margin-bottom:10px"><button class="btn primary" onclick="downloadReportMD()">⬇ Download Report (.md)</button></div>
     <div id="reportContent"></div>
   </div>
 </div>
@@ -2600,6 +2602,8 @@ function render() {
     ? (G.victory ? `🎉 VICTORY in ${G.turn} turns!` : `💀 GAME OVER at turn ${G.turn}`)
     : `Turn ${G.turn} · Round ${G.round} · ${G.heroes[G.currentHero].name}'s turn`;
   document.getElementById('statusBar').textContent = status;
+  const dlBtn = document.getElementById('downloadLogBtn');
+  if (dlBtn) dlBtn.style.display = G.gameOver ? 'inline-block' : 'none';
 }
 
 // ========== ANALYSIS ENGINE ==========
@@ -3176,6 +3180,98 @@ function showLastReport() {
 
 function closeReport() {
   document.getElementById('reportOverlay').style.display = 'none';
+}
+
+function htmlToMarkdown(html) {
+  let md = html;
+  // Headers
+  md = md.replace(/<h2>(.*?)<\/h2>/g, '# $1\n\n');
+  md = md.replace(/<h3>(.*?)<\/h3>/g, '## $1\n\n');
+  // Bold
+  md = md.replace(/<b[^>]*>(.*?)<\/b>/g, '**$1**');
+  md = md.replace(/<strong>(.*?)<\/strong>/g, '**$1**');
+  // Italic
+  md = md.replace(/<i[^>]*>(.*?)<\/i>/g, '*$1*');
+  md = md.replace(/<em>(.*?)<\/em>/g, '*$1*');
+  // Tags/badges
+  md = md.replace(/<span class="tag op-tag">(.*?)<\/span>/g, '[$1]');
+  md = md.replace(/<span class="tag weak-tag">(.*?)<\/span>/g, '[$1]');
+  md = md.replace(/<span class="tag need-tag">(.*?)<\/span>/g, '[$1]');
+  md = md.replace(/<span class="tag insight-tag">(.*?)<\/span>/g, '[$1]');
+  // List items
+  md = md.replace(/<li[^>]*>(.*?)<\/li>/g, '- $1\n');
+  md = md.replace(/<ul[^>]*>/g, '\n');
+  md = md.replace(/<\/ul>/g, '\n');
+  // Line breaks
+  md = md.replace(/<br\s*\/?>/g, '\n');
+  // Paragraphs
+  md = md.replace(/<p[^>]*>(.*?)<\/p>/g, '$1\n\n');
+  // Divs with report-stat (key-value rows)
+  md = md.replace(/<div class="report-stat"><span class="rl">(.*?)<\/span><span class="rv"[^>]*>(.*?)<\/span><\/div>/g, '- **$1**: $2\n');
+  // Remaining divs — extract content
+  md = md.replace(/<div[^>]*>/g, '\n');
+  md = md.replace(/<\/div>/g, '\n');
+  // Remove remaining spans
+  md = md.replace(/<span[^>]*>(.*?)<\/span>/g, '$1');
+  // Remove remaining tags
+  md = md.replace(/<[^>]+>/g, '');
+  // Decode HTML entities
+  md = md.replace(/&amp;/g, '&');
+  md = md.replace(/&lt;/g, '<');
+  md = md.replace(/&gt;/g, '>');
+  md = md.replace(/&quot;/g, '"');
+  md = md.replace(/&#39;/g, "'");
+  md = md.replace(/&times;/g, 'x');
+  // Clean up excessive newlines
+  md = md.replace(/\n{4,}/g, '\n\n\n');
+  md = md.replace(/[ \t]+\n/g, '\n');
+  return md.trim();
+}
+
+function downloadReportMD() {
+  const reportEl = document.getElementById('reportContent');
+  if (!reportEl || !reportEl.innerHTML) return;
+  const md = htmlToMarkdown(reportEl.innerHTML);
+  const date = new Date().toISOString().slice(0,16).replace('T','_').replace(':','-');
+  const filename = `JUJU_Playtest_Report_${date}.md`;
+  const blob = new Blob([md], {type: 'text/markdown'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function downloadGameLogMD() {
+  if (!G) return;
+  let md = '# JUJU Castle — Game Log\n\n';
+  md += `**Result:** ${G.victory ? 'VICTORY' : 'DEFEAT'} in ${G.turn} turns\n\n`;
+  md += `## Stats\n`;
+  md += `- Combats: ${G.stats.combats}\n`;
+  md += `- KOs: ${G.stats.ko}\n`;
+  md += `- Monsters Killed: ${G.stats.monstersKilled}\n`;
+  md += `- Skill Burns: ${G.stats.skillBurns}\n`;
+  md += `- Relics Spent: ${G.stats.relicsSpent}\n\n`;
+  md += `## Heroes (end state)\n`;
+  G.heroes.forEach(h => {
+    md += `### ${h.name} ${h.title} (STR ${totalStr(h)})\n`;
+    md += `- Equipment: ${h.equipment.map(e => e.name).join(', ') || 'none'}\n`;
+    md += `- Followers: ${h.followers.map(f => f.name).join(', ') || 'none'}\n`;
+    md += `- Relics: ${h.heldRelics.map(r => r.name).join(', ') || 'none'}\n`;
+    md += `- Skills: ${h.skills.map((s,i) => s.name + ' (' + h.skillStates[i] + ')').join(', ')}\n\n`;
+  });
+  md += `## Full Log\n\n`;
+  G.log.forEach(entry => {
+    md += entry.msg + '\n';
+  });
+  const date = new Date().toISOString().slice(0,16).replace('T','_').replace(':','-');
+  const filename = `JUJU_GameLog_${date}.md`;
+  const blob = new Blob([md], {type: 'text/markdown'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // Also generate single-game report on game end
