@@ -1098,20 +1098,21 @@ function runTurn() {
 
   // === SKILL ACTIVATIONS (turn start) ===
 
-  // Herbalist (Gigi): recharge any hero's skill (including self)
-  if (hero.id === 'gigi' && shouldUseSkill(hero, 'Herbalist', { atHydra: G.heroesInHydraArea.has(hero.id) })) {
+  // Herbalist (Gigi): cross-turn — Gigi can recharge a skill at any time
+  const gigiForHerb = G.heroes.find(h => h.id === 'gigi');
+  if (gigiForHerb && isSkillReady(gigiForHerb, 'Herbalist') && shouldUseSkill(gigiForHerb, 'Herbalist', { atHydra: G.heroesInHydraArea.has('gigi') })) {
     const candidates = G.heroes.filter(h => h.skillStates.some(s => s === 'exhausted'));
     const neediest = candidates.sort((a,b) => {
-      // Prioritize self if at Hydra and has key skills exhausted
-      const aScore = b.skillStates.filter(s => s === 'exhausted').length + (b.id === hero.id ? 0.5 : 0);
-      const bScore = a.skillStates.filter(s => s === 'exhausted').length + (a.id === hero.id ? 0.5 : 0);
+      // Prioritize the active hero, then most exhausted
+      const aScore = b.skillStates.filter(s => s === 'exhausted').length + (b.id === hero.id ? 1 : 0);
+      const bScore = a.skillStates.filter(s => s === 'exhausted').length + (a.id === hero.id ? 1 : 0);
       return aScore - bScore;
     })[0];
     if (neediest) {
-      useSkill(hero, 'Herbalist');
+      useSkill(gigiForHerb, 'Herbalist');
       rechargeOneSkill(neediest);
-      trackSkill(hero.id, 'Herbalist', 'activated');
-      log(`  🌿 Herbalist: ${hero.name} recharges a skill for ${neediest.name}${neediest.id === hero.id ? ' (self)' : ''}!`, 'wonder');
+      trackSkill('gigi', 'Herbalist', 'activated');
+      log(`  🌿 Herbalist: Gigi recharges a skill for ${neediest.name}${neediest.id === 'gigi' ? ' (self)' : ''}!`, 'wonder');
     }
   }
 
@@ -1836,29 +1837,31 @@ function combat(hero, enemyCard, tier) {
   }
 
   let packLeaderBonus = 0;
-  // === SKILL: Copycat (Eggo) — copy best available ally skill pre-combat ===
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && enemyStr >= 3) {
-    const allies = G.heroes.filter(h => h.id !== hero.id);
-    // Priority: Siphon (-2 enemy), Not Today! (save close loss), Soothe (discard weak/prevent KO)
+  // === SKILL: Copycat (Eggo) — cross-turn: Eggo can copy any ally skill to help ANY hero ===
+  const eggoForCopy = G.heroes.find(h => h.id === 'eggo');
+  if (eggoForCopy && isSkillReady(eggoForCopy, 'Copycat') && enemyStr >= 3) {
+    const allies = G.heroes.filter(h => h.id !== 'eggo');
     const luluH = allies.find(h => h.id === 'lulu');
-    const jujuH = allies.find(h => h.id === 'juju');
     const gigiH = allies.find(h => h.id === 'gigi');
+    // Copy Siphon if Lulu already used hers (double Siphon = -4 total)
     if (luluH && isSkillReady(luluH, 'Siphon')) {
-      useSkill(hero, 'Copycat');
+      useSkill(eggoForCopy, 'Copycat');
       enemyStr -= 2;
-      trackSkill(hero.id, 'Copycat', 'activated');
-      log(`  🎭 Copycat → Siphon: Enemy -2 STR (now ${enemyStr})`, 'flame');
+      trackSkill('eggo', 'Copycat', 'activated');
+      const who = hero.id === 'eggo' ? '' : ` (helping ${hero.name})`;
+      log(`  🎭 Copycat → Siphon${who}: Enemy -2 STR (now ${enemyStr})`, 'flame');
     } else if (gigiH && isSkillReady(gigiH, 'Soothe') && enemyStr <= 3) {
-      useSkill(hero, 'Copycat');
-      trackSkill(hero.id, 'Copycat', 'activated');
-      log(`  🎭 Copycat → Soothe: Discards ${enemyCard.name} (STR ${enemyStr})!`, 'flame');
+      useSkill(eggoForCopy, 'Copycat');
+      trackSkill('eggo', 'Copycat', 'activated');
+      const who = hero.id === 'eggo' ? '' : ` for ${hero.name}`;
+      log(`  🎭 Copycat → Soothe${who}: Discards ${enemyCard.name}!`, 'flame');
       trackEncounter(enemyCard.name, 'won');
-      return; // Skip combat entirely
+      return;
     } else if (gigiH && isSkillReady(gigiH, 'Pack Leader') && hero.followers.length >= 2) {
-      useSkill(hero, 'Copycat');
+      useSkill(eggoForCopy, 'Copycat');
       packLeaderBonus = hero.followers.length;
-      trackSkill(hero.id, 'Copycat', 'activated');
-      log(`  🎭 Copycat → Pack Leader: +${packLeaderBonus} STR (${hero.followers.length} followers)`, 'flame');
+      trackSkill('eggo', 'Copycat', 'activated');
+      log(`  🎭 Copycat → Pack Leader: +${packLeaderBonus} STR`, 'flame');
     }
   }
 
