@@ -384,11 +384,11 @@ input[type=range] {
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
     <h4>Batch Size</h4>
-    <div class="tweak-row"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
+    <div class="tweak-row" id="tw_batchRow"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
     <div class="tweaks-actions">
       <button class="btn" onclick="resetTweaks()">Reset to Default</button>
       <button class="btn" onclick="closeTweaks()">Cancel</button>
-      <button class="btn primary" onclick="runBatchWithTweaks()">Run Batch</button>
+      <button class="btn primary" id="tw_runBtn" onclick="runBatchWithTweaks()">Run Batch</button>
     </div>
   </div>
 </div>
@@ -613,8 +613,13 @@ function buildTweaksLists() {
   document.getElementById('tw_hydraList').innerHTML = hdHtml;
 }
 
-function showTweaksPanel() {
+var tweaksMode = 'batch'; // 'batch' or 'single'
+function showTweaksPanel(mode) {
+  tweaksMode = mode || 'batch';
   buildTweaksLists();
+  document.getElementById('tw_batchRow').style.display = tweaksMode === 'batch' ? '' : 'none';
+  document.getElementById('tw_runBtn').textContent = tweaksMode === 'batch' ? 'Run Batch' : '▶ Start Game';
+  document.getElementById('tw_runBtn').onclick = tweaksMode === 'batch' ? runBatchWithTweaks : startGameWithTweaks;
   document.getElementById('tweaksOverlay').style.display = 'flex';
 }
 
@@ -726,6 +731,12 @@ function runBatchWithTweaks() {
   closeTweaks();
   currentTweaks = readTweaks();
   runBatchInternal(currentTweaks.batchSize);
+}
+
+function startGameWithTweaks() {
+  closeTweaks();
+  currentTweaks = readTweaks();
+  startGameInternal();
 }
 
 function freshTracker() {
@@ -3992,7 +4003,7 @@ function classifyDefeat(state) {
 }
 
 function runBatch() {
-  showTweaksPanel();
+  showTweaksPanel('batch');
 }
 
 function runBatchInternal(count) {
@@ -4321,14 +4332,31 @@ function generateSingleGameReport() {
 
 // ========== CONTROLS ==========
 function startGame() {
+  showTweaksPanel('single');
+}
+
+function startGameInternal() {
   stopAuto();
   G = initState();
+  // Apply tweaks to single game
+  G._tweaks = currentTweaks;
+  if (currentTweaks) {
+    const defaults = {juju:3, gigi:2, lulu:1, eggo:2};
+    G.heroes.forEach(h => {
+      if (currentTweaks.heroStr && currentTweaks.heroStr[h.id] !== undefined) {
+        h.str = currentTweaks.heroStr[h.id];
+      }
+    });
+  }
+  const diffs = currentTweaks ? getTweaksDiff(currentTweaks) : [];
   log('═══════════════════════════════════════', 'system');
   log('  JUJU\'S CASTLE — NEW GAME', 'turn-header');
   log('═══════════════════════════════════════', 'system');
-  log('Party: Juju (STR 3), Gigi (STR 2), Lulu (STR 1), Eggo (STR 2)', 'system');
+  log(`Party: ${G.heroes.map(h => h.name + ' (STR ' + h.str + ')').join(', ')}`, 'system');
   log('All heroes start at the Entrance. 36 rooms to explore.', 'system');
-  log(`Legendary Equipment deck: ${LEGENDARY_EQUIPMENT.length} items`, 'system');
+  if (diffs.length > 0) {
+    log('⚙ Tweaks: ' + diffs.join(' | '), 'system');
+  }
   log('', 'system');
   document.getElementById('logPanel').innerHTML = '';
   document.getElementById('stepBtn').disabled = false;
