@@ -380,7 +380,7 @@ input[type=range] {
     <div class="tweak-row"><label>Mishap enemy STR</label><input type="range" id="tw_mishapEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_mishapEnemy_v">0</span></div>
     <div class="tweak-row"><label>Misfortune enemy STR</label><input type="range" id="tw_misfortuneEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_misfortuneEnemy_v">0</span></div>
     <h4>Toggles</h4>
-    <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Hero Skills (OFF = solo Skill Burn, niente abilità)</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Hero Skills (ON = tutte le skill attive, OFF = solo Skill Burn)</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_prepareFirst"><label for="tw_prepareFirst">Prepare before Hydra (wait until fully equipped)</label></div>
@@ -3425,7 +3425,7 @@ function generateReport(results) {
       html += '<div class="report-section"><h3>Tweaks Applied</h3><div class="report-card" style="font-size:11px;color:var(--dim)">Default settings (no changes)</div></div>';
     }
   }
-  html += '<p style="color:var(--dim);font-size:11px;margin-bottom:12px">All skills are now active: Shield Wall, Soothe, Siphon, Pack Leader, Heist, Rallying Blow, Cheap Shot, Herbalist, Wild Call, Reality Warp, Spell Mirror, Copycat, Shadowstep, Taunt. See Skill Analysis section for per-skill usage data.</p>';
+  html += '<p style="color:var(--dim);font-size:11px;margin-bottom:12px">All skills active (cross-turn enabled): Rallying Blow, Shield Wall, Not Today!, Taunt, Herbalist, Wild Call, Soothe, Pack Leader, Reality Warp, Siphon, Spell Mirror, Overload, Cheap Shot, Copycat, Heist, Shadowstep. See Skill Analysis for per-skill breakdown.</p>';
   html += '<div class="report-section"><h3>Overview (' + n + ' games)</h3>';
   html += `<div class="report-card">`;
   html += `<div class="report-stat"><span class="rl">Win Rate</span><span class="rv" style="color:${winRate > 50 ? 'var(--heal)' : 'var(--ko)'}">${winRate}% (${wins}/${n})</span></div>`;
@@ -3662,8 +3662,8 @@ function generateReport(results) {
     },
     lulu: (agg) => {
       let c = `<b>Arcane Recharge (recharge 1 skill):</b> Triggered ${agg.triggered}x total. `;
-      c += `Recharging skills is extremely valuable once skills are added. Right now it recharges Skill Burn availability, which is useful but not as impactful. `;
-      c += `This talent will become much stronger once you add real skill effects. Watch that it doesn't make Lulu's skills effectively unlimited.`;
+      c += `Arcane Recharge is key for cycling Lulu's powerful skills (Siphon, Overload, Spell Mirror). With cross-turn Siphon usage (${(agg.triggered / 4).toFixed(0)}+ recharges), Lulu can potentially use Siphon multiple times per round. `;
+      c += `Watch that this doesn't make Siphon feel unlimited — if Lulu recharges and uses Siphon every turn, every enemy effectively has -2 STR permanently.`;
       return c;
     },
     eggo: (agg) => {
