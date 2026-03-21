@@ -806,6 +806,8 @@ function freshTracker() {
     traps: {},
     // Talent triggers
     talents: {},
+    // Pacing milestones (turn numbers)
+    pacing: { firstEquip: 0, firstKO: 0, firstRelic: 0, hydraSpawn: 0, hydraArrival: 0 },
   };
 }
 
@@ -1058,6 +1060,7 @@ function equipItem(hero, item) {
   }
   hero.equipment.push(item);
   trackEquip(item.name, 'equipped');
+  if (G.tracker.pacing.firstEquip === 0) G.tracker.pacing.firstEquip = G.turn;
   log(`    ${hero.name} equips ${item.name} (${item.type}, STR ${item.str >= 0 ? '+' : ''}${item.str})`, 'legendary');
 }
 
@@ -2720,6 +2723,7 @@ function applyKO(hero) {
     }
     G.stats.ko++;
     initHeroTracker(G.tracker, hero.id).ko++;
+    if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
     hero.ko = true;
     const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
     const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
@@ -2766,6 +2770,7 @@ function applyKO(hero) {
   removeFollowers(hero);
   hero.stalkers = [];
   hero.pos = 'entrance';
+  if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
   hero.ko = true;
   log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}${droppedItems.length > 0 ? (hero._lastKOEnemy ? ' (guarded by enemy)' : ' (on dungeon floor)') : ''}. Respawned at Entrance.`, 'ko');
 }
@@ -2830,6 +2835,7 @@ function awakenEffect(hero) {
       recipient = leastRelics;
     }
     recipient.heldRelics.push(relic);
+    if (G.tracker.pacing.firstRelic === 0) G.tracker.pacing.firstRelic = G.turn;
     const bonus = relic.owner === recipient.id ? '+2' : '+1';
     log(`    ${recipient.name} claims ${relic.name}! (${bonus} STR, ${G.relicsCollected}/4 total)`, 'hydra');
     if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
@@ -2840,6 +2846,7 @@ function awakenEffect(hero) {
 }
 
 function spawnHydra() {
+  if (G.tracker.pacing.hydraSpawn === 0) G.tracker.pacing.hydraSpawn = G.turn;
   log(`\n  🐉 THE HYDRA AWAKENS! 🐉`, 'defeat');
   const pool = shuffle([...HYDRA_HEADS]);
   G.hydraHeads = pool.slice(0, 3).map(function(h) {
@@ -3298,6 +3305,7 @@ function runToHydra(hero) {
   if (Math.random() < 0.4 + roll.val * 0.1) {
     hero.runningToHydra = false;
     G.heroesInHydraArea.add(hero.id);
+    if (G.tracker.pacing.hydraArrival === 0) G.tracker.pacing.hydraArrival = G.turn;
     hero.pos = 'hydra';
     // Track arrival state
     if (!G.tracker.hydraArrivals) G.tracker.hydraArrivals = [];
@@ -3554,6 +3562,57 @@ function generateReport(results) {
   if (avgSkillBurns > 5) overviewNote += ` High Skill Burn usage (${avgSkillBurns}/game) means heroes rely heavily on rerolls. Skills that provide alternatives to Skill Burn would feel meaningful.`;
   html += `</div><div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Analysis</span>${overviewNote}</div></div>`;
 
+  // === GAME PACING ===
+  html += `<div class="report-section"><h3>Game Pacing</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Average turn when key milestones happen. Shows how the game unfolds over time.</p>`;
+  const pacingAgg = { firstEquip:[], firstKO:[], firstRelic:[], hydraSpawn:[], hydraArrival:[] };
+  results.forEach(r => {
+    const p = r.tracker.pacing;
+    if (p.firstEquip > 0) pacingAgg.firstEquip.push(p.firstEquip);
+    if (p.firstKO > 0) pacingAgg.firstKO.push(p.firstKO);
+    if (p.firstRelic > 0) pacingAgg.firstRelic.push(p.firstRelic);
+    if (p.hydraSpawn > 0) pacingAgg.hydraSpawn.push(p.hydraSpawn);
+    if (p.hydraArrival > 0) pacingAgg.hydraArrival.push(p.hydraArrival);
+  });
+  const pacingAvg = (arr) => arr.length > 0 ? (arr.reduce((s,v)=>s+v,0)/arr.length).toFixed(1) : '-';
+  const pacingMax = Math.max(...Object.values(pacingAgg).flat(), 1);
+  const milestones = [
+    { key:'firstEquip', label:'First Equipment', color:'var(--accent)', icon:'&#9876;' },
+    { key:'firstKO', label:'First KO', color:'var(--ko)', icon:'&#9760;' },
+    { key:'firstRelic', label:'First Relic', color:'var(--hydra)', icon:'&#9670;' },
+    { key:'hydraSpawn', label:'Hydra Spawns', color:'var(--misfortune)', icon:'&#9733;' },
+    { key:'hydraArrival', label:'First Hero at Hydra', color:'var(--flame)', icon:'&#9889;' },
+  ];
+  html += `<div class="report-card">`;
+  milestones.forEach(m => {
+    const avg = pacingAvg(pacingAgg[m.key]);
+    const count = pacingAgg[m.key].length;
+    const pct = avg !== '-' ? (parseFloat(avg) / pacingMax * 100).toFixed(0) : 0;
+    html += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">`;
+    html += `<span style="width:140px;font-size:10px;color:${m.color}">${m.icon} ${m.label}</span>`;
+    html += `<div style="flex:1;height:12px;background:#1a1a2a;border-radius:3px;overflow:hidden;position:relative">`;
+    html += `<div style="width:${pct}%;height:100%;background:${m.color};opacity:0.5;border-radius:3px"></div>`;
+    html += `</div>`;
+    html += `<span style="width:80px;text-align:right;font-size:10px;color:var(--dim)">turn ${avg} <span style="font-size:8px">(${count}/${n})</span></span>`;
+    html += `</div>`;
+  });
+  // Pacing insight
+  const avgEquipTurn = pacingAvg(pacingAgg.firstEquip);
+  const avgHydraSpawnTurn = pacingAvg(pacingAgg.hydraSpawn);
+  let pacingNote = '';
+  if (avgEquipTurn !== '-' && avgHydraSpawnTurn !== '-') {
+    const equipGap = parseFloat(avgHydraSpawnTurn) - parseFloat(avgEquipTurn);
+    if (equipGap < 5) pacingNote = `Heroes get their first equipment only ${equipGap.toFixed(0)} turns before the Hydra spawns. Feels rushed — they barely have time to prepare.`;
+    else if (equipGap > 15) pacingNote = `Heroes get equipped ${equipGap.toFixed(0)} turns before the Hydra. Plenty of preparation time — if the game still feels hard, the issue is at the Hydra itself, not dungeon pacing.`;
+    else pacingNote = `${equipGap.toFixed(0)}-turn gap between first gear and Hydra spawn. Enough time to build up but not so much that exploration drags.`;
+  }
+  if (pacingAgg.firstKO.length > 0 && pacingAgg.firstEquip.length > 0) {
+    const koBeforeEquip = pacingAgg.firstKO.filter((ko, i) => pacingAgg.firstEquip[i] && ko < pacingAgg.firstEquip[i]).length;
+    if (koBeforeEquip > n * 0.3) pacingNote += ` In ${Math.round(koBeforeEquip/n*100)}% of games, a hero gets KO'd before anyone finds equipment. Early game feels punishing.`;
+  }
+  if (pacingNote) html += `<div style="margin-top:8px;font-size:10px;color:var(--dim)">${pacingNote}</div>`;
+  html += `</div></div>`;
+
   // === PER-HERO ANALYSIS ===
   html += `<div class="report-section"><h3>Hero Performance</h3>`;
   html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Shows each hero's combat effectiveness including all skills, equipment, and talents.</p>`;
@@ -3645,6 +3704,41 @@ function generateReport(results) {
       Object.keys(data).forEach(k => encAgg[name][k] += data[k]);
     });
   });
+  // === COMBAT THREAT SUMMARY ===
+  const totalEncWins = Object.values(encAgg).reduce((s,d) => s + d.won, 0);
+  const totalEncLosses = Object.values(encAgg).reduce((s,d) => s + d.lost, 0);
+  const totalEncFights = totalEncWins + totalEncLosses;
+  const totalFreeWins = results.reduce((s, r) => s + r.tracker.overkills.length, 0);
+  const totalTenseFights = results.reduce((s, r) => s + r.tracker.closeCalls.length, 0);
+  const totalHeroLosses = totalEncLosses;
+  if (totalEncFights > 0) {
+    const freeWinPct = (totalFreeWins / totalEncFights * 100).toFixed(0);
+    const tensePct = (totalTenseFights / totalEncFights * 100).toFixed(0);
+    const lossPct = (totalHeroLosses / totalEncFights * 100).toFixed(0);
+    const comfortPct = Math.max(0, 100 - parseInt(freeWinPct) - parseInt(tensePct) - parseInt(lossPct));
+    html += `<div class="report-card" style="margin-bottom:12px">`;
+    html += `<b>Combat Threat Summary</b> <span style="color:var(--dim);font-size:10px">(${totalEncFights} total fights across ${n} games)</span>`;
+    html += `<div style="display:flex;height:18px;border-radius:4px;overflow:hidden;margin:8px 0 4px;font-size:9px;font-weight:600">`;
+    html += `<div style="width:${freeWinPct}%;background:#2a5a2a;display:flex;align-items:center;justify-content:center;color:#8f8" title="Free Wins (margin 5+)">${parseInt(freeWinPct)>3?freeWinPct+'%':''}</div>`;
+    html += `<div style="width:${comfortPct}%;background:#2a3a5a;display:flex;align-items:center;justify-content:center;color:#8af" title="Comfortable Wins">${comfortPct>3?comfortPct+'%':''}</div>`;
+    html += `<div style="width:${tensePct}%;background:#5a5a2a;display:flex;align-items:center;justify-content:center;color:#ee8" title="Tense Fights (margin 0-1)">${parseInt(tensePct)>3?tensePct+'%':''}</div>`;
+    html += `<div style="width:${lossPct}%;background:#5a2a2a;display:flex;align-items:center;justify-content:center;color:#f88" title="Hero Losses">${parseInt(lossPct)>3?lossPct+'%':''}</div>`;
+    html += `</div>`;
+    html += `<div style="display:flex;gap:12px;font-size:9px;color:var(--dim);margin-bottom:6px">`;
+    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#2a5a2a;border-radius:2px"></span> Free Win ${freeWinPct}%</span>`;
+    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#2a3a5a;border-radius:2px"></span> Comfortable ${comfortPct}%</span>`;
+    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#5a5a2a;border-radius:2px"></span> Tense ${tensePct}%</span>`;
+    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#5a2a2a;border-radius:2px"></span> Lost ${lossPct}%</span>`;
+    html += `</div>`;
+    let threatNote = '';
+    if (parseInt(freeWinPct) > 50) threatNote = `${freeWinPct}% of dungeon fights are free wins — most enemies are not threatening. Only ${tensePct}% of fights feel tense. Consider buffing weak enemies or adding secondary effects on draw.`;
+    else if (parseInt(lossPct) > 30) threatNote = `Heroes lose ${lossPct}% of fights, which is punishing. Players will feel like the dungeon is unfair. Consider lowering average enemy STR or adding more escape options.`;
+    else if (parseInt(tensePct) > 30) threatNote = `${tensePct}% of fights come down to the wire — strong tension. Make sure KO recovery is not too punishing or players will feel ground down.`;
+    else threatNote = `Good distribution of fight outcomes. Mix of easy wins, tense moments, and losses keeps the dungeon interesting.`;
+    html += `<div style="font-size:10px;color:var(--dim)">${threatNote}</div>`;
+    html += `</div>`;
+  }
+
   // Identify enemy tier from card data
   const mishapNames = new Set(MISHAP_CARDS.filter(c=>c.type==='enemy').map(c=>c.name));
   const misfortuneNames = new Set(MISFORTUNE_CARDS.filter(c=>c.type==='enemy').map(c=>c.name));
@@ -3676,7 +3770,18 @@ function generateReport(results) {
       mishapFlags++;
     } else if (heroWinRate >= 99.5 && fights >= 10) {
       cls = 'weak'; tag = '<span class="tag weak-tag">Trivial</span>';
-      comment = `Heroes win ${wr}% (${d.won}W/${d.lost}L). Zero threat. Consider: add a secondary effect even on hero win.`;
+      // Gameplay-focused suggestions for specific weak enemies
+      const weakSuggestions = {
+        'Sacerdote Fishfolk': `STR 1 is trivial. Consider: roll 1-2 = ALL heroes go to entrance (not just this one). Makes it a team-disruption card.`,
+        'Wind Elemental': `Too easy and the "move to revealed room" on loss barely matters since you almost always win. Consider: if YOU lose, Wind Elemental picks where you go.`,
+        'Thiefling Rats': `Discard 1 equip is painful BUT you win ${wr}% so it rarely triggers. Consider: the equip discard happens BEFORE the fight (like FROGman), not on loss.`,
+        'Djin': `Flame-only should be restricting but 50% flame chance is too generous. Consider: only EVEN flame faces count (reducing to ~16% hit chance).`,
+      };
+      if (weakSuggestions[name]) {
+        comment = weakSuggestions[name];
+      } else {
+        comment = `This enemy is a speed bump, not a challenge. Heroes win ${wr}% (${d.won}W/${d.lost}L). Consider adding: a triggered effect on draw (like "all heroes discard 1 Gil"), a blocking condition (can't pass this room until defeated), or a combo effect (if 2+ enemies are on the board, they gain +1 each).`;
+      }
       mishapFlags++;
     } else {
       return; // Don't show balanced Mishap enemies
@@ -3706,11 +3811,19 @@ function generateReport(results) {
     let cls = '', tag = '', comment = '';
     if (heroWinRate < 30 && fights >= 5) {
       cls = 'op'; tag = '<span class="tag op-tag">Too Hard</span>';
-      comment = `Heroes win only ${wr}% (${d.won}W/${d.lost}L). Too punishing even for Misfortune. Consider: lower STR by 1, or add an escape option.`;
+      // Gameplay-focused suggestions for specific OP enemies
+      const opSuggestions = {
+        'Dragon': `${wr}% hero win rate (${d.won}W/${d.lost}L). Consider: add a flee condition (if hero STR > 3, may flee without fighting), or reduce initial STR to 4 with +1 growth on loss.`,
+      };
+      if (opSuggestions[name]) {
+        comment = opSuggestions[name];
+      } else {
+        comment = `Heroes win only ${wr}% (${d.won}W/${d.lost}L). Too punishing even for Misfortune. Consider: add a flee condition, reduce STR by 1, or let heroes spend resources to avoid the fight entirely.`;
+      }
       misfortFlags++;
     } else if (heroWinRate > 85 && fights >= 5) {
       cls = 'weak'; tag = '<span class="tag weak-tag">Too Easy</span>';
-      comment = `Heroes win ${wr}% (${d.won}W/${d.lost}L). Not threatening for a Misfortune enemy. Consider: +1 STR, or a nastier special effect.`;
+      comment = `Heroes win ${wr}% (${d.won}W/${d.lost}L). This enemy is a speed bump, not a Misfortune-level threat. Consider adding: a triggered effect on draw, a blocking condition, or a combo effect with other enemies on the board.`;
       misfortFlags++;
     } else {
       // Show balanced ones too for Misfortune — they're the interesting data
@@ -4452,6 +4565,59 @@ function generateReport(results) {
   }
   html += `</div>`;
 
+  // === DEAD CARDS ===
+  html += `<div class="report-section"><h3>Dead Cards</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Cards that get drawn but have zero meaningful impact on the game. These are candidates for redesign or removal.</p>`;
+  let deadCardCount = 0;
+  // Dead enemies: 95%+ win rate AND avg margin > 4
+  Object.entries(encAgg).filter(([,d]) => d.drawn >= 5).forEach(([name, d]) => {
+    const fights = d.won + d.lost;
+    if (fights === 0) return;
+    const wr = d.won / fights * 100;
+    if (wr < 95) return;
+    // Check avg margin from overkills and close calls
+    const margins = [];
+    results.forEach(r => {
+      r.tracker.overkills.filter(cl => cl.enemy === name).forEach(cl => margins.push(cl.margin));
+      r.tracker.closeCalls.filter(cl => cl.enemy === name).forEach(cl => margins.push(cl.margin));
+    });
+    // If most wins are overkills, avg margin is high. Estimate from overkill ratio.
+    const overkillsForEnemy = results.reduce((s,r) => s + r.tracker.overkills.filter(cl => cl.enemy === name).length, 0);
+    const avgMargin = margins.length > 0 ? margins.reduce((s,v)=>s+v,0)/margins.length : (overkillsForEnemy > d.won * 0.5 ? 5 : 2);
+    if (avgMargin <= 4) return;
+    deadCardCount++;
+    html += `<div class="report-card weak"><span class="tag weak-tag">Dead Enemy</span><b>${name}</b> — ${wr.toFixed(0)}% hero win rate, avg margin +${avgMargin.toFixed(1)}. Heroes steamroll this enemy without spending any resources. It takes up a card slot but adds nothing to the experience.</div>`;
+  });
+  // Dead traps: 0 KOs AND 0 skill exhaustions across all games
+  Object.entries(trapAgg).filter(([,d]) => d.triggered >= 5).forEach(([name, d]) => {
+    if (d.ko > 0) return;
+    // Check if trap is in "useless" category from trapMeta
+    const meta = trapMeta[name];
+    if (!meta || meta.vibe !== 'useless') return;
+    deadCardCount++;
+    html += `<div class="report-card weak"><span class="tag weak-tag">Dead Trap</span><b>${name}</b> — ${d.triggered} triggers, 0 KOs, 0 meaningful setbacks. This trap creates no tension and no decisions.</div>`;
+  });
+  // Dead stalkers: attached but removed before causing any effect
+  const stalkerAgg = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.stalkers).forEach(([name, data]) => {
+      if (!stalkerAgg[name]) stalkerAgg[name] = { attached:0, turnsActive:0, causedKO:0, removed:0 };
+      Object.keys(data).forEach(k => { if (stalkerAgg[name][k] !== undefined) stalkerAgg[name][k] += data[k]; });
+    });
+  });
+  Object.entries(stalkerAgg).filter(([,d]) => d.attached >= 3).forEach(([name, d]) => {
+    if (d.causedKO > 0) return;
+    if (d.turnsActive > d.attached * 2) return; // it stuck around, just didn't kill
+    deadCardCount++;
+    html += `<div class="report-card weak"><span class="tag weak-tag">Dead Stalker</span><b>${name}</b> — attached ${d.attached}x but caused 0 KOs and lasted avg ${(d.turnsActive/Math.max(1,d.attached)).toFixed(1)} turns. Gets removed before it matters.</div>`;
+  });
+  if (deadCardCount === 0) {
+    html += `<div class="report-card insight"><span class="tag insight-tag">OK</span>No dead cards detected. All cards have some measurable impact on gameplay.</div>`;
+  } else {
+    html += `<div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Summary</span>${deadCardCount} dead card${deadCardCount>1?'s':''} found. These cards waste player time without creating decisions or tension. Consider redesigning their effects or replacing them.</div>`;
+  }
+  html += `</div>`;
+
   // === DIFFICULTY PRESETS ===
   html += `<div class="report-section"><h3>Difficulty Presets</h3>`;
   html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Suggested parameter combinations for different play experiences. These are starting points — run batches to fine-tune.</p>`;
@@ -4706,8 +4872,8 @@ function organizeReportTabs() {
 
   // Map section titles to tabs
   const tabMap = {
-    'tab-overview': ['Overview','Hero Performance','Combat Tension','Defeat Analysis','What Winners Had','Hydra Heads','Hydra Combat Breakdown','Room Distribution','Difficulty Presets','Balance Improvements'],
-    'tab-encounters': ['Encounter Balance','Trap Analysis','Follower Impact'],
+    'tab-overview': ['Overview','Game Pacing','Hero Performance','Combat Tension','Defeat Analysis','What Winners Had','Hydra Heads','Hydra Combat Breakdown','Room Distribution','Difficulty Presets','Balance Improvements'],
+    'tab-encounters': ['Encounter Balance','Trap Analysis','Follower Impact','Dead Cards'],
     'tab-equipment': ['Equipment Balance','Talent Analysis','Skill Analysis']
   };
 
