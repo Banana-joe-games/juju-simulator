@@ -3888,7 +3888,45 @@ function generateReport(results) {
       html += `<td style="padding:3px 4px;color:${verdictColor};font-size:9px">${verdict}</td>`;
       html += `</tr>`;
     });
-    html += `</table></div>`;
+    html += `</table>`;
+
+    // Per-skill WHY commentary
+    html += `<div style="margin-top:8px;padding:6px;background:#0e0e16;border-radius:3px;font-size:10px;line-height:1.6">`;
+    heroSkillDefs.forEach(skillDef => {
+      const key = hid + '_' + skillDef.name;
+      const d = skillAgg[key] || { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
+      const total = d.activated + d.burned;
+      if (total === 0) {
+        html += `<div style="margin:3px 0"><b style="color:#884444">${skillDef.name}</b>: Never triggered. The AI never found a situation where activating or burning this skill was worth it. <i style="color:var(--dim)">This could mean: the skill's conditions rarely come up, the hero has better options, or the AI logic doesn't recognize when to use it.</i></div>`;
+        return;
+      }
+      const usePct = Math.round(d.activated / total * 100);
+      const burnPct = 100 - usePct;
+      let why = `<b style="color:var(--${hid})">${skillDef.name}</b>: `;
+      if (d.activated === 0 && d.burned > 0) {
+        why += `Only burned (${d.burned}x), never activated. The AI always preferred a Skill Burn reroll over using this skill's effect. <i style="color:var(--dim)">This suggests the skill's effect is too situational or weaker than a simple reroll. Consider making the effect stronger or broader.</i>`;
+      } else if (usePct >= 80) {
+        why += `Used ${usePct}% of the time (${d.activated} used vs ${d.burned} burned). The skill's effect is almost always more valuable than a reroll. `;
+        if (d.savedFromKO > 0) why += `Saved from ${d.savedFromKO} KOs — a genuine life-saver. `;
+        if (d.turnedFight > 0) why += `Turned ${d.turnedFight} fights — a combat changer. `;
+        if (d.activatedHydra > d.activatedDungeon * 2) why += `<i style="color:var(--hydra)">Mostly used at the Hydra (${d.activatedHydra}H vs ${d.activatedDungeon}D) — it's a boss-fight skill.</i>`;
+        else if (d.activatedDungeon > d.activatedHydra * 2) why += `<i style="color:var(--wonder)">Mostly used in the Dungeon (${d.activatedDungeon}D vs ${d.activatedHydra}H) — good for exploration phase.</i>`;
+        else why += `<i style="color:var(--dim)">Used evenly across Dungeon and Hydra — versatile skill.</i>`;
+      } else if (burnPct >= 60) {
+        why += `Burned ${burnPct}% of the time (${d.burned} burned vs ${d.activated} used). The AI often prefers a reroll over activating this skill. `;
+        why += `<i style="color:var(--dim)">This means: in ${burnPct}% of situations, a random reroll was more likely to help than the skill's specific effect. Consider buffing the effect, lowering its condition threshold, or making it usable in more situations.</i>`;
+        if (d.activated > 0) why += ` When it IS used, it's in ${d.activatedHydra > d.activatedDungeon ? 'Hydra' : 'Dungeon'} situations.`;
+      } else {
+        why += `Balanced use: ${usePct}% activated, ${burnPct}% burned (${d.activated} used, ${d.burned} burned). `;
+        why += `<i style="color:var(--dim)">The AI sometimes prefers the effect, sometimes the reroll — this means the skill creates a meaningful decision.</i>`;
+        if (d.savedFromKO > 0) why += ` Saved ${d.savedFromKO} KOs when activated.`;
+        if (d.turnedFight > 0) why += ` Turned ${d.turnedFight} fights when activated.`;
+      }
+      html += `<div style="margin:3px 0">${why}</div>`;
+    });
+    html += `</div>`;
+
+    html += `</div>`;
   });
   html += `</div>`;
 
