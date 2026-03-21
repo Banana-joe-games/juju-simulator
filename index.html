@@ -406,7 +406,7 @@ const HEROES = [
   { id:'juju', name:'Juju', title:'The Hero', str:3, flameFaces:[4,5,6], color:'var(--juju)',
     talent:'Unwavering Power', talentDesc:'+2 to combat total',
     skills:[
-      {name:'Rallying Blow',kind:'Combat',effect:'Roll 2 dice keep worst. If you win, all heroes recharge 1 Skill.'},
+      {name:'Battlecry',kind:'Combat',effect:'Roll 2 dice keep worst. If you win, all heroes recharge 2 Skills.'},
       {name:'Shield Wall',kind:'Reactive',effect:'Prevent a KO on you or an ally.'},
       {name:'Not Today!',kind:'Combat',effect:'If you or ally lose by 1-2, turn into a win.'},
       {name:'Taunt',kind:'Combat',effect:'Fight any enemy on the board. At Hydra: extra attack this turn.'}
@@ -416,7 +416,7 @@ const HEROES = [
     skills:[
       {name:'Herbalist',kind:'Support',effect:'Choose any hero: they recharge 1 Skill.'},
       {name:'Wild Call',kind:'Support',effect:'Draw Wonder cards until you find a Follower. Take it.'},
-      {name:'Soothe',kind:'Combat',effect:'STR 3 or less: discard enemy. STR 4+: if defeated, prevent KO.'},
+      {name:'Second Nature',kind:'Combat',effect:'If you have no equipped items, gain +3 STR for this fight.'},
       {name:'Pack Leader',kind:'Combat',effect:'+1 STR per Follower for this combat.'}
     ]},
   { id:'lulu', name:'Lulu', title:'The Mage', str:1, flameFaces:[1,3,6], color:'var(--lulu)',
@@ -1874,18 +1874,13 @@ function combat(hero, enemyCard, tier) {
   // === STRATEGIC AI: Skill decisions via shouldUseSkill() ===
   const skillCtx = { enemyStr, atHydra: false };
 
-  // === SKILL: Soothe (Gigi) — STR 3- discard enemy, skip fight ===
-  if (hero.id === 'gigi' && enemyStr <= 3 && shouldUseSkill(hero, 'Soothe', { ...skillCtx, preCombat: true })) {
-    useSkill(hero, 'Soothe');
-    trackSkill(hero.id, 'Soothe', 'activated');
-    log(`    🌿 Soothe! ${enemyCard.name} (STR ${enemyStr}) calmed and discarded!`, 'flame');
-    G.stats.monstersKilled++;
-    gilReward(hero, enemyStr);
-    initHeroTracker(G.tracker, hero.id).wins++;
-    trackEncounter(enemyCard.name, 'won');
-    G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr, won:true, tier, turn:G.turn, skill:'Soothe' });
-    if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
-    return;
+  // === SKILL: Second Nature (Gigi) — +3 STR if no equipment ===
+  let secondNatureBonus = 0;
+  if (hero.id === 'gigi' && hero.equipment.length === 0 && shouldUseSkill(hero, 'Second Nature', skillCtx)) {
+    useSkill(hero, 'Second Nature');
+    secondNatureBonus = 3;
+    trackSkill(hero.id, 'Second Nature', 'activated');
+    log(`    🌿 Second Nature! Gigi fights with +3 STR (no equipment)`, 'flame');
   }
 
   // === SKILL: Siphon (Lulu) — -2 STR to ANY enemy in combat ===
@@ -1912,13 +1907,6 @@ function combat(hero, enemyCard, tier) {
       trackSkill('eggo', 'Copycat', 'activated');
       const who = hero.id === 'eggo' ? '' : ` (helping ${hero.name})`;
       log(`  🎭 Copycat → Siphon${who}: Enemy -2 STR (now ${enemyStr})`, 'flame');
-    } else if (gigiH && isSkillReady(gigiH, 'Soothe') && enemyStr <= 3) {
-      useSkill(eggoForCopy, 'Copycat');
-      trackSkill('eggo', 'Copycat', 'activated');
-      const who = hero.id === 'eggo' ? '' : ` for ${hero.name}`;
-      log(`  🎭 Copycat → Soothe${who}: Discards ${enemyCard.name}!`, 'flame');
-      trackEncounter(enemyCard.name, 'won');
-      return;
     } else if (gigiH && isSkillReady(gigiH, 'Pack Leader') && hero.followers.length >= 2) {
       useSkill(eggoForCopy, 'Copycat');
       packLeaderBonus = hero.followers.length;
@@ -1969,13 +1957,13 @@ function combat(hero, enemyCard, tier) {
     log(`    🗡 Heist! Fighting at -1 STR for a chance at Legendary Equipment`, 'flame');
   }
 
-  // === SKILL: Rallying Blow (Juju) — roll 2 keep worst, win = all heroes recharge 1 ===
+  // === SKILL: Battlecry (Juju) — roll 2 keep worst, win = all heroes recharge 2 ===
   let rallyingBlowActive = false;
-  if (hero.id === 'juju' && shouldUseSkill(hero, 'Rallying Blow', skillCtx)) {
-    useSkill(hero, 'Rallying Blow');
+  if (hero.id === 'juju' && shouldUseSkill(hero, 'Battlecry', skillCtx)) {
+    useSkill(hero, 'Battlecry');
     rallyingBlowActive = true;
-    trackSkill(hero.id, 'Rallying Blow', 'activated');
-    log(`    ⚔ Rallying Blow! Rolling 2 dice, keeping worst`, 'flame');
+    trackSkill(hero.id, 'Battlecry', 'activated');
+    log(`    ⚔ Battlecry! Rolling 2 dice, keeping worst`, 'flame');
   }
 
   // === DOOMHAMMER pre-fight ===
@@ -2027,7 +2015,7 @@ function combat(hero, enemyCard, tier) {
     if (fightRound > 0) log(`    Slayer: Round ${fightRound + 1}!`, 'combat');
 
     const result = singleFight(hero, enemyCard, tier, enemyStr,
-      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored });
+      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored, secondNatureBonus });
 
     if (result === 'win') {
       totalWins++;
@@ -2069,12 +2057,13 @@ function combat(hero, enemyCard, tier) {
     log(`    🗡 Heist pays off! Drew Legendary Equipment!`, 'flame');
   }
 
-  // Rallying Blow (Juju): all heroes recharge 1 skill on win
+  // Battlecry (Juju): all heroes recharge 2 skills on win
   if (rallyingBlowActive) {
     G.heroes.forEach(h => {
       rechargeOneSkill(h);
+      rechargeOneSkill(h);
     });
-    log(`    ⚔ Rallying Blow victory! All heroes recharge 1 skill!`, 'flame');
+    log(`    ⚔ Battlecry victory! All heroes recharge 2 skills!`, 'flame');
   }
 
   // Thiefling Rats: discard 1 equipment on defeat
@@ -2119,7 +2108,7 @@ function combat(hero, enemyCard, tier) {
 }
 
 function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
-  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored } = bonuses;
+  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored, secondNatureBonus } = bonuses;
 
   // === ENEMY ROLL ===
   let enemyTotal;
@@ -2176,10 +2165,10 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   }
 
   if (rallyingBlowActive) {
-    // Rallying Blow: roll 2 dice, keep worst
+    // Battlecry: roll 2 dice, keep worst
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero);
     heroRoll = r1.val <= r2.val ? r1 : r2;
-    log(`    Rallying Blow: rolled [${r1.val}, ${r2.val}] keeps worst ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'flame');
+    log(`    Battlecry: rolled [${r1.val}, ${r2.val}] keeps worst ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'flame');
   } else if (hasTripleAxe) {
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero), r3 = heroRollDie(hero);
     heroRoll = [r1, r2, r3].sort((a, b) => b.val - a.val)[0];
@@ -2251,7 +2240,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     return 'win';
   }
 
-  // Skills (Siphon, Pack Leader, Heist, Cheap Shot, Rallying Blow, Soothe) are activated pre-fight.
+  // Skills (Siphon, Pack Leader, Heist, Cheap Shot, Battlecry, Second Nature) are activated pre-fight.
   // Skill Burn (reroll) remains as the last-resort skill use.
 
   // Siphon Blade
@@ -2284,7 +2273,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   const heistPenalty = heistActive ? -1 : 0;
   let heroTotal = heroRoll.val + heroStrValue + combatBonus + doomhammerBonus + firebaneBonus
     + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
-    + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty;
+    + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty + (secondNatureBonus || 0);
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus + (packLeaderBonus || 0) ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty + heistPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
 
@@ -2432,16 +2421,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     return;
   }
 
-  // === SKILL: Soothe (Gigi) — STR 4+ prevent KO ===
-  if (hero.id === 'gigi' && preventKO && (enemyCard.str || 0) >= 4 && shouldUseSkill(hero, 'Soothe', { atHydra: false, enemyStr: enemyCard.str || 0 })) {
-    useSkill(hero, 'Soothe');
-    trackSkill(hero.id, 'Soothe', 'activated');
-    trackSkill(hero.id, 'Soothe', 'savedFromKO');
-    log(`    🌿 Soothe! ${hero.name} calms the ${enemyCard.name} and avoids KO!`, 'flame');
-    return;
-  }
-
-  // === SKILL: Copycat (Eggo) — copy Shield Wall or Soothe from ally ===
+  // === SKILL: Copycat (Eggo) — copy Shield Wall from ally ===
   if (hero.id === 'eggo' && preventKO && shouldUseSkill(hero, 'Copycat', { preventKO: true, atHydra: false })) {
     const juju = G.heroes.find(h => h.id === 'juju');
     if (juju && isSkillReady(juju, 'Shield Wall')) {
@@ -2449,14 +2429,6 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
       trackSkill(hero.id, 'Copycat', 'activated');
       trackSkill(hero.id, 'Copycat', 'savedFromKO');
       log(`  🎭 Copycat: ${hero.name} copies Shield Wall from Juju! KO prevented!`, 'flame');
-      return;
-    }
-    const gigi = G.heroes.find(h => h.id === 'gigi');
-    if (gigi && isSkillReady(gigi, 'Soothe') && (enemyCard.str || 0) >= 4) {
-      useSkill(hero, 'Copycat');
-      trackSkill(hero.id, 'Copycat', 'activated');
-      trackSkill(hero.id, 'Copycat', 'savedFromKO');
-      log(`  🎭 Copycat: ${hero.name} copies Soothe from Gigi! KO prevented!`, 'flame');
       return;
     }
   }
@@ -2483,7 +2455,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     return;
   }
 
-  // Shield Wall (Juju) and Soothe (Gigi) KO prevention are checked above.
+  // Shield Wall (Juju) KO prevention is checked above.
 
   // Berserker Helmet: retry on loss
   if (hero.equipment.find(e => e.effect === 'retry_on_loss') && !hero._berserkerUsed) {
@@ -2596,12 +2568,9 @@ function shouldUseSkill(hero, skillName, context) {
       // In dungeon: use if hero has equipment OR relics (something to lose)
       return hero.equipment.length > 0 || hero.heldRelics.length > 0;
 
-    case 'Soothe':
-      // Pre-combat discard (STR 3-): always use, it's free advantage
-      if (ctx.preCombat && enemyStr <= 3) return true;
-      if (atHydra) return true;
-      // KO prevention: use if hero has something to lose
-      return hero.equipment.length > 0 || hero.heldRelics.length > 0;
+    case 'Second Nature':
+      // Use when Gigi has no equipment and is in combat
+      return hero.equipment.length === 0;
 
     case 'Spell Mirror':
       if (atHydra) return true;
@@ -2624,7 +2593,7 @@ function shouldUseSkill(hero, skillName, context) {
       return readyCount >= 3 && enemyStr >= 5;
     }
 
-    case 'Rallying Blow':
+    case 'Battlecry':
       if (atHydra) return totalStr(hero) + 1 >= (ctx.headStr || 99);
       // In dungeon: use when can win with worst die (free team recharge)
       return totalStr(hero) >= enemyStr + 2;
@@ -2659,7 +2628,7 @@ function shouldUseSkill(hero, skillName, context) {
 
     case 'Copycat': {
       // Copycat can copy ANY ally Ready Skill — check if any useful one is available
-      if (ctx.preventKO) return true; // copy Shield Wall or Soothe to prevent KO
+      if (ctx.preventKO) return true; // copy Shield Wall to prevent KO
       if (ctx.preCombatSiphon && enemyStr >= 3) return true; // copy Siphon pre-combat
       // At Hydra: always worth copying something useful
       if (atHydra) {
@@ -3058,21 +3027,30 @@ function hydraAttack(hero) {
     log(`    🎯 Cheap Shot! Extra die, keeping ${heroRoll.val}`, 'flame');
   }
 
-  // 6. Rallying Blow (Juju) — roll 2 keep worst, if win all heroes recharge 1
+  // 6. Battlecry (Juju) — roll 2 keep worst, if win all heroes recharge 2
   let rallyingBlowActive = false;
-  if (hero.id === 'juju' && shouldUseSkill(hero, 'Rallying Blow', { atHydra: true, headStr: head.effectiveStr - siphonDrain - siphonSkillDrain })) {
-    useSkill(hero, 'Rallying Blow');
+  if (hero.id === 'juju' && shouldUseSkill(hero, 'Battlecry', { atHydra: true, headStr: head.effectiveStr - siphonDrain - siphonSkillDrain })) {
+    useSkill(hero, 'Battlecry');
     const r2 = heroRollDie(hero);
     if (r2.val < heroRoll.val) {
       heroRoll = r2;
       isFlame = (r2.isFlame) && (!broodAlive || hydraSpellMirrored);
     }
     rallyingBlowActive = true;
-    trackSkill(hero.id, 'Rallying Blow', 'activated');
-    log(`    ⚔ Rallying Blow! Keeping worst die: ${heroRoll.val}`, 'flame');
+    trackSkill(hero.id, 'Battlecry', 'activated');
+    log(`    ⚔ Battlecry! Keeping worst die: ${heroRoll.val}`, 'flame');
   }
 
-  let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty + skillBonus;
+  // Second Nature (Gigi): +3 STR if no equipment
+  let secondNatureBonus = 0;
+  if (hero.id === 'gigi' && hero.equipment.length === 0 && shouldUseSkill(hero, 'Second Nature', { atHydra: true })) {
+    useSkill(hero, 'Second Nature');
+    secondNatureBonus = 3;
+    trackSkill(hero.id, 'Second Nature', 'activated');
+    log(`    🌿 Second Nature! Gigi fights with +3 STR (no equipment)`, 'flame');
+  }
+
+  let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty + skillBonus + secondNatureBonus;
   const effectiveHeadStr = head.effectiveStr - siphonDrain - siphonSkillDrain;
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${totalStr(hero)} + bonuses = ${heroTotal} vs ${effectiveHeadStr}`, 'combat');
@@ -3191,15 +3169,7 @@ function hydraAttack(hero) {
       log(`    🛡 Shield Wall! Juju${who} prevents KO at Hydra!`, 'flame');
       hydraKOPrevented = true;
     }
-    // Soothe (Gigi) — heads are always STR 4+
-    if (!hydraKOPrevented && hero.id === 'gigi' && shouldUseSkill(hero, 'Soothe', { atHydra: true })) {
-      useSkill(hero, 'Soothe');
-      trackSkill(hero.id, 'Soothe', 'activated');
-      trackSkill(hero.id, 'Soothe', 'savedFromKO');
-      log(`    🌿 Soothe! Gigi avoids KO at Hydra!`, 'flame');
-      hydraKOPrevented = true;
-    }
-    // Copycat (Eggo) — copy Shield Wall or Soothe
+    // Copycat (Eggo) — copy Shield Wall
     if (!hydraKOPrevented && hero.id === 'eggo' && shouldUseSkill(hero, 'Copycat', { atHydra: true, preventKO: true })) {
       const jujuH = G.heroes.find(h => h.id === 'juju');
       const gigiH = G.heroes.find(h => h.id === 'gigi');
@@ -3208,12 +3178,6 @@ function hydraAttack(hero) {
         trackSkill(hero.id, 'Copycat', 'activated');
         trackSkill(hero.id, 'Copycat', 'savedFromKO');
         log(`    🎭 Copycat: copies Shield Wall! KO prevented!`, 'flame');
-        hydraKOPrevented = true;
-      } else if (gigiH && isSkillReady(gigiH, 'Soothe')) {
-        useSkill(hero, 'Copycat');
-        trackSkill(hero.id, 'Copycat', 'activated');
-        trackSkill(hero.id, 'Copycat', 'savedFromKO');
-        log(`    🎭 Copycat: copies Soothe! KO prevented!`, 'flame');
         hydraKOPrevented = true;
       }
     }
@@ -3231,10 +3195,10 @@ function hydraAttack(hero) {
     }
   }
 
-  // Rallying Blow bonus: if Juju won with it, all heroes recharge 1
+  // Battlecry bonus: if Juju won with it, all heroes recharge 2
   if (rallyingBlowActive && heroTotal >= effectiveHeadStr) {
-    G.heroes.forEach(h => { rechargeOneSkill(h); });
-    log(`    ⚔ Rallying Blow victory! All heroes recharge 1 Skill`, 'wonder');
+    G.heroes.forEach(h => { rechargeOneSkill(h); rechargeOneSkill(h); });
+    log(`    ⚔ Battlecry victory! All heroes recharge 2 Skills`, 'wonder');
   }
 
   // === TAUNT (Juju): extra Hydra attack ===
@@ -3492,7 +3456,7 @@ function generateReport(results) {
       html += '<div class="report-section"><h3>Tweaks Applied</h3><div class="report-card" style="font-size:11px;color:var(--dim)">Default settings (no changes)</div></div>';
     }
   }
-  html += '<p style="color:var(--dim);font-size:11px;margin-bottom:12px">All skills active (cross-turn enabled): Rallying Blow, Shield Wall, Not Today!, Taunt, Herbalist, Wild Call, Soothe, Pack Leader, Reality Warp, Siphon, Spell Mirror, Overload, Cheap Shot, Copycat, Heist, Shadowstep. See Skill Analysis for per-skill breakdown.</p>';
+  html += '<p style="color:var(--dim);font-size:11px;margin-bottom:12px">All skills active (cross-turn enabled): Battlecry, Shield Wall, Not Today!, Taunt, Herbalist, Wild Call, Second Nature, Pack Leader, Reality Warp, Siphon, Spell Mirror, Overload, Cheap Shot, Copycat, Heist, Shadowstep. See Skill Analysis for per-skill breakdown.</p>';
   html += '<div class="report-section"><h3>Overview (' + n + ' games)</h3>';
   html += `<div class="report-card">`;
   html += `<div class="report-stat"><span class="rl">Win Rate</span><span class="rv" style="color:${winRate > 50 ? 'var(--heal)' : 'var(--ko)'}">${winRate}% (${wins}/${n})</span></div>`;
