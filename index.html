@@ -2439,6 +2439,7 @@ function growHydraHead() {
   if (aliveCount >= G.hydraMaxHeads) {
     log(`  💀 OVERFLOW! Hydra exceeds max heads (${aliveCount}/${G.hydraMaxHeads}) — GAME OVER!`, 'defeat');
     G.gameOver = true;
+    G.tracker.deathMoments.push({ hero: 'party', context: `Hydra overflow: ${aliveCount} heads alive, max was ${G.hydraMaxHeads}`, turn: G.turn });
     return;
   }
   const usedNames = new Set(G.hydraHeads.map(h => h.name));
@@ -2955,6 +2956,100 @@ function generateReport(results) {
   }
   html += `</div></div>`;
 
+  // === DEFEAT ANALYSIS ===
+  const losses = results.filter(r => !r.victory);
+  if (losses.length > 0) {
+    html += `<div class="report-section"><h3>Defeat Analysis (${losses.length} losses)</h3>`;
+    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Why the party lost. Understanding the primary cause of defeat tells you what to fix first.</p>`;
+
+    // Count defeat causes
+    const causes = { hydra_overflow:0, no_relics:0, other:0, unknown:0 };
+    const overflowDetails = [];
+    const relicDetails = [];
+    losses.forEach(r => {
+      const dc = r.defeatCause || { cause:'unknown' };
+      causes[dc.cause] = (causes[dc.cause] || 0) + 1;
+      if (dc.cause === 'hydra_overflow') overflowDetails.push(dc);
+      if (dc.cause === 'no_relics') relicDetails.push(dc);
+    });
+
+    const totalLosses = losses.length;
+    const pct = (v) => ((v / totalLosses) * 100).toFixed(0);
+
+    if (causes.hydra_overflow > 0) {
+      const avgTurn = overflowDetails.length > 0 ? (overflowDetails.reduce((s,d) => s + (d.turn||0), 0) / overflowDetails.length).toFixed(0) : '?';
+      html += `<div class="report-card op"><span class="tag op-tag">${pct(causes.hydra_overflow)}%</span><b>Hydra Overflow</b> — ${causes.hydra_overflow}/${totalLosses} losses (avg turn ${avgTurn})<br>`;
+      html += `<i style="color:var(--dim)">Heroes can't kill heads fast enough, so new heads grow until they exceed the max. This means hero combat STR is too low relative to head STR. Fixes: lower head STR by 1-2, increase max heads limit, or add more +STR equipment/skills.</i></div>`;
+    }
+
+    if (causes.no_relics > 0) {
+      const whoFails = {};
+      relicDetails.forEach(d => { if (d.hero) whoFails[d.hero] = (whoFails[d.hero]||0) + 1; });
+      const avgTurn = relicDetails.length > 0 ? (relicDetails.reduce((s,d) => s + (d.turn||0), 0) / relicDetails.length).toFixed(0) : '?';
+      const whoStr = Object.entries(whoFails).sort((a,b)=>b[1]-a[1]).map(([h,c])=>`${h}: ${c}x`).join(', ');
+      html += `<div class="report-card op"><span class="tag op-tag">${pct(causes.no_relics)}%</span><b>Relics Exhausted</b> — ${causes.no_relics}/${totalLosses} losses (avg turn ${avgTurn})<br>`;
+      html += `Heroes who caused the final KO: ${whoStr}<br>`;
+      html += `<i style="color:var(--dim)">All 4 relics were spent on KO prevention before the Hydra was killed. Heroes are dying too often at the Hydra. Fixes: make heroes stronger (more equipment), reduce Hydra head STR, add skills that prevent KO without spending relics, or consider giving 5-6 relics instead of 4.</i></div>`;
+    }
+
+    if (causes.unknown > 0) {
+      html += `<div class="report-card"><b>Other/Unknown</b> — ${causes.unknown}/${totalLosses} losses</div>`;
+    }
+
+    // Average turn of defeat
+    const avgDefeatTurn = (losses.reduce((s,r) => s + r.turn, 0) / losses.length).toFixed(0);
+    const avgWinTurn = results.filter(r=>r.victory).length > 0 ? (results.filter(r=>r.victory).reduce((s,r)=>s+r.turn,0)/results.filter(r=>r.victory).length).toFixed(0) : 'N/A';
+    html += `<div class="report-card insight"><span class="tag insight-tag">Timing</span>Avg defeat turn: <b>${avgDefeatTurn}</b> | Avg victory turn: <b>${avgWinTurn}</b><br>`;
+    if (avgWinTurn !== 'N/A' && Number(avgDefeatTurn) < Number(avgWinTurn) * 0.7) {
+      html += `<i style="color:var(--dim)">Defeats happen much earlier than victories. The party snowballs if they survive the early Hydra, but often dies before building momentum. Consider a gentler Hydra ramp-up (start with 2 heads instead of 3).</i>`;
+    } else {
+      html += `<i style="color:var(--dim)">Defeats and victories happen at similar turns. The game doesn't snowball — it's a close fight to the end.</i>`;
+    }
+    html += `</div>`;
+
+    // Hero loadout at defeat
+    html += `<div class="report-card"><b>Average Hero Loadout at Defeat</b><br><br>`;
+    heroIds.forEach(hid => {
+      const snapshots = losses.map(r => r.heroes.find(h => h.id === hid)).filter(Boolean);
+      if (snapshots.length === 0) return;
+      const avgStr = (snapshots.reduce((s,h) => s + h.totalStr, 0) / snapshots.length).toFixed(1);
+      const avgEquip = (snapshots.reduce((s,h) => s + h.equipment.length, 0) / snapshots.length).toFixed(1);
+      const avgRelics = (snapshots.reduce((s,h) => s + h.relics, 0) / snapshots.length).toFixed(1);
+      const avgFollowers = (snapshots.reduce((s,h) => s + h.followers.length, 0) / snapshots.length).toFixed(1);
+      const avgReady = (snapshots.reduce((s,h) => s + h.readySkills, 0) / snapshots.length).toFixed(1);
+      const avgKO = (snapshots.reduce((s,h) => s + h.ko, 0) / snapshots.length).toFixed(1);
+      // Most common equipment
+      const equipCount = {};
+      snapshots.forEach(h => h.equipment.forEach(e => { equipCount[e.name] = (equipCount[e.name]||0) + 1; }));
+      const topEquip = Object.entries(equipCount).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([n,c])=>`${n} (${c}x)`).join(', ') || 'usually empty';
+
+      html += `<div style="margin:4px 0;padding:4px 6px;background:#0e0e16;border-radius:3px;font-size:11px;border-left:3px solid var(--${hid})">`;
+      html += `<b style="color:var(--${hid})">${heroNames[hid]}</b> — Total STR: <b>${avgStr}</b> | Equip: ${avgEquip} | Followers: ${avgFollowers} | Relics: ${avgRelics} | Ready Skills: ${avgReady}/4 | KOs suffered: ${avgKO}<br>`;
+      html += `<span style="color:var(--dim)">Common equip at defeat: ${topEquip}</span>`;
+      html += `</div>`;
+    });
+    html += `</div>`;
+
+    // Hydra state at defeat
+    const hydraDefeats = losses.filter(r => r.tracker.hydraHeads && Object.keys(r.tracker.hydraHeads).length > 0);
+    if (hydraDefeats.length > 0) {
+      const avgHeadsDestroyed = (hydraDefeats.reduce((s,r) => {
+        return s + Object.values(r.tracker.hydraHeads).reduce((ss,h) => ss + (h.destroyed||0), 0);
+      }, 0) / hydraDefeats.length).toFixed(1);
+      html += `<div class="report-card insight"><span class="tag insight-tag">Hydra at Defeat</span>Avg heads destroyed before losing: <b>${avgHeadsDestroyed}</b><br>`;
+      if (Number(avgHeadsDestroyed) < 1) {
+        html += `<i style="color:var(--dim)">Heroes can barely scratch the Hydra. Head STR is way too high relative to hero power. This is the root cause of most losses.</i>`;
+      } else if (Number(avgHeadsDestroyed) < 3) {
+        html += `<i style="color:var(--dim)">Heroes make some progress but can't finish the job. They run out of relics or heads overflow before clearing all heads.</i>`;
+      } else {
+        html += `<i style="color:var(--dim)">Heroes get close to winning. The Hydra fight is tight — small improvements could tip the balance.</i>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+  }
+
   // === DESIGN SUGGESTIONS ===
   html += `<div class="report-section"><h3>Design Suggestions</h3>`;
   html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Based on all data above. These are skill ideas and balance tweaks derived from what the heroes actually struggle with.</p>`;
@@ -3137,8 +3232,32 @@ function runSilentGame() {
     turn: G.turn,
     stats: {...G.stats},
     tracker: G.tracker,
-    heroes: G.heroes.map(h => ({id:h.id, equipment:h.equipment.map(e=>e.name), relics:h.heldRelics.length, ko:initHeroTracker(G.tracker,h.id).ko}))
+    heroes: G.heroes.map(h => ({
+      id:h.id,
+      equipment:h.equipment.map(e=>({name:e.name, str:e.str||0})),
+      followers:h.followers.map(f=>f.name),
+      relics:h.heldRelics.length,
+      relicNames:h.heldRelics.map(r=>r.name),
+      stalkers:h.stalkers.map(s=>s.name),
+      totalStr:totalStr(h),
+      readySkills:readySkillCount(h),
+      ko:initHeroTracker(G.tracker,h.id).ko
+    })),
+    defeatCause: !G.victory ? classifyDefeat(G) : null
   };
+}
+
+function classifyDefeat(state) {
+  const dm = state.tracker.deathMoments;
+  if (dm.length === 0) return { cause:'unknown', detail:'No death moment recorded' };
+  const last = dm[dm.length - 1];
+  if (last.context.includes('overflow')) {
+    return { cause:'hydra_overflow', detail:last.context, turn:last.turn };
+  }
+  if (last.context.includes('0 relics')) {
+    return { cause:'no_relics', detail:`${last.hero} KO at Hydra with no relics left`, turn:last.turn, hero:last.hero };
+  }
+  return { cause:'other', detail:last.context, turn:last.turn };
 }
 
 function runBatch() {
