@@ -1231,8 +1231,9 @@ function movePhase(hero) {
   const typeIcon = destType === 'wonder' ? '✦ Wonder' : destType === 'dread' ? '☠ Dread Dungeon' : '· Common Passage';
   log(`${hero.name} lands on ${typeIcon} (tile #${G.tilesPlaced})`, destType === 'wonder' ? 'wonder' : destType === 'dread' ? 'misfortune' : 'mishap');
 
-  // Reality Warp (Lulu): skip dangerous rooms
-  if (destType !== 'wonder' && isSkillReady(hero, 'Reality Warp') && hero.id === 'lulu') {
+  // Reality Warp (Lulu): skip dangerous rooms — but save for Hydra phase
+  const saveRWForHydra = G.hydraActive || G.relicsCollected >= 3;
+  if (destType !== 'wonder' && isSkillReady(hero, 'Reality Warp') && hero.id === 'lulu' && !saveRWForHydra) {
     if (destType === 'dread' || (destType === 'common' && totalStr(hero) < 4)) {
       useSkill(hero, 'Reality Warp');
       trackSkill(hero.id, 'Reality Warp', 'activated');
@@ -1567,13 +1568,30 @@ function resolveTrap(hero, card) {
 }
 
 // ========== SPELL MIRROR ==========
-function trySpellMirror(context) {
+function trySpellMirror(context, atHydra) {
     const lulu = G.heroes.find(h => h.id === 'lulu');
     if (!lulu || !isSkillReady(lulu, 'Spell Mirror')) return false;
+    // At Hydra: always use on head abilities (this is the key moment)
+    if (atHydra) {
+        useSkill(lulu, 'Spell Mirror');
+        trackSkill('lulu', 'Spell Mirror', 'activated');
+        log(`  🪞 Spell Mirror: Lulu cancels the Hydra head ability!`, 'flame');
+        return true;
+    }
+    // In dungeon: only use on truly lethal effects, AND only if Hydra isn't close
+    const saveForHydra = G.hydraActive || G.relicsCollected >= 3;
+    const lethal = ['ko_or_exhaust_all','roll_1_3_ko','fewer_2_skills_ko','fight_self_4dice'];
     const dangerous = ['flame_counts_0','only_flame_hits','fight_twice','rolls_2_best_double_lose',
-        'ko_or_exhaust_all','roll_1_3_ko','fewer_2_skills_ko','fight_self_4dice',
         'aoe_skill_drain','exhaust_2_or_minus2','exhaust_or_ko'];
-    if (dangerous.includes(context)) {
+    // Use on lethal traps even if saving for Hydra (survival first)
+    if (lethal.includes(context)) {
+        useSkill(lulu, 'Spell Mirror');
+        trackSkill('lulu', 'Spell Mirror', 'activated');
+        log(`  🪞 Spell Mirror: Lulu cancels the deadly effect!`, 'flame');
+        return true;
+    }
+    // Use on dangerous effects only if NOT saving for Hydra
+    if (!saveForHydra && dangerous.includes(context)) {
         useSkill(lulu, 'Spell Mirror');
         trackSkill('lulu', 'Spell Mirror', 'activated');
         log(`  🪞 Spell Mirror: Lulu cancels the special effect!`, 'flame');
@@ -1696,8 +1714,15 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
+  // === AI STRATEGY: Save key skills for Hydra ===
+  // When Hydra is active or close (3+ relics collected), don't waste combat skills on dungeon enemies
+  // Exception: if the enemy is very dangerous (STR 5+), use skills to survive
+  const saveForHydra = G.hydraActive || G.relicsCollected >= 3;
+  const dungeonEnemyIsDangerous = enemyStr >= 5;
+
   // === SKILL: Soothe (Gigi) — STR 3- discard enemy, skip fight ===
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && enemyStr <= 3) {
+  // In dungeon: use freely (saves HP/resources). At Hydra: Soothe is used for KO prevention (handled in handleCombatLoss)
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && enemyStr <= 3 && !saveForHydra) {
     useSkill(hero, 'Soothe');
     trackSkill(hero.id, 'Soothe', 'activated');
     log(`    🌿 Soothe! ${enemyCard.name} (STR ${enemyStr}) calmed and discarded!`, 'flame');
@@ -1709,9 +1734,9 @@ function combat(hero, enemyCard, tier) {
   }
 
   // === SKILL: Siphon (Lulu) — -2 STR to ANY enemy in combat ===
-  // Lulu can use Siphon to help ANY hero fighting, not just herself
+  // Save for Hydra unless enemy is very dangerous
   const luluForSiphon = G.heroes.find(h => h.id === 'lulu');
-  if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon') && enemyStr >= 3) {
+  if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon') && enemyStr >= 3 && (!saveForHydra || dungeonEnemyIsDangerous)) {
     useSkill(luluForSiphon, 'Siphon');
     enemyStr -= 2;
     trackSkill('lulu', 'Siphon', 'activated');
@@ -1720,8 +1745,9 @@ function combat(hero, enemyCard, tier) {
   }
 
   // === SKILL: Pack Leader (Gigi) — +1 per follower ===
+  // Save for Hydra unless enemy is dangerous
   let packLeaderBonus = 0;
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Pack Leader') && hero.followers.length > 0) {
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Pack Leader') && hero.followers.length > 0 && (!saveForHydra || dungeonEnemyIsDangerous)) {
     useSkill(hero, 'Pack Leader');
     packLeaderBonus = hero.followers.length;
     trackSkill(hero.id, 'Pack Leader', 'activated');
@@ -1729,12 +1755,12 @@ function combat(hero, enemyCard, tier) {
   }
 
   // === SKILL: Fireball (Lulu) — +1 per exhausted skill ===
+  // Save for Hydra always (it's strongest at Hydra when many skills are exhausted)
   let fireballBonus = 0;
-  if (hero.id === 'lulu' && isSkillReady(hero, 'Fireball')) {
+  if (hero.id === 'lulu' && isSkillReady(hero, 'Fireball') && (!saveForHydra || dungeonEnemyIsDangerous)) {
     const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
-    // AI: use when bonus is 2+ (worth more than a Skill Burn reroll)
     if (exhaustedCount >= 2) {
-      useSkill(hero, 'Fireball'); // this exhausts Fireball, but we count BEFORE exhausting
+      useSkill(hero, 'Fireball');
       fireballBonus = exhaustedCount;
       trackSkill(hero.id, 'Fireball', 'activated');
       log(`    🔥 Fireball! +${fireballBonus} STR (${exhaustedCount} exhausted skills)`, 'flame');
@@ -2168,8 +2194,14 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 }
 
 function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
+  // AI strategy: in dungeon, only use KO prevention skills if:
+  // - hero has valuable loadout (equipment worth saving), OR
+  // - Hydra is NOT close (skills not needed yet)
+  // At Hydra, KO prevention is handled separately in hydraAttack
+  const saveSkillsForHydra = (G.hydraActive || G.relicsCollected >= 3) && koLoadoutValue(hero) < 4;
+
   // === SKILL: Shield Wall (Juju) — prevent KO ===
-  if (hero.id === 'juju' && isSkillReady(hero, 'Shield Wall')) {
+  if (hero.id === 'juju' && isSkillReady(hero, 'Shield Wall') && !saveSkillsForHydra) {
     useSkill(hero, 'Shield Wall');
     trackSkill(hero.id, 'Shield Wall', 'activated');
     trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
@@ -2178,7 +2210,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   }
 
   // === SKILL: Soothe (Gigi) — STR 4+ prevent KO ===
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && (enemyCard.str || 0) >= 4) {
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && (enemyCard.str || 0) >= 4 && !saveSkillsForHydra) {
     useSkill(hero, 'Soothe');
     trackSkill(hero.id, 'Soothe', 'activated');
     trackSkill(hero.id, 'Soothe', 'savedFromKO');
@@ -2187,7 +2219,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   }
 
   // === SKILL: Copycat (Eggo) — copy Shield Wall or Soothe from ally ===
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat')) {
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && !saveSkillsForHydra) {
     const juju = G.heroes.find(h => h.id === 'juju');
     if (juju && isSkillReady(juju, 'Shield Wall')) {
       useSkill(hero, 'Copycat');
@@ -2477,7 +2509,7 @@ function hydraAttack(hero) {
   // Spell Mirror for Hydra head abilities
   let hydraSpellMirrored = false;
   const hydraHeadEffectMap = {'The Fangs':'exhaust_2_or_minus2','The Maw':'exhaust_2_or_minus2','The Brood':'flame_counts_0'};
-  if (hydraHeadEffectMap[head.name] && trySpellMirror(hydraHeadEffectMap[head.name])) {
+  if (hydraHeadEffectMap[head.name] && trySpellMirror(hydraHeadEffectMap[head.name], true)) {
     hydraSpellMirrored = true;
   }
 
