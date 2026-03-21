@@ -831,6 +831,12 @@ function trackEncounter(name, field) {
   G.tracker.encounters[name][field]++;
 }
 
+function trackFollower(name, field) {
+  if (!G.tracker.followers) G.tracker.followers = {};
+  if (!G.tracker.followers[name]) G.tracker.followers[name] = { drawn:0, helpedWin:0, lost:0 };
+  if (G.tracker.followers[name][field] !== undefined) G.tracker.followers[name][field]++;
+}
+
 function trackSkill(heroId, skillName, field) {
   const key = `${heroId}_${skillName}`;
   if (!G.tracker.skills[key]) G.tracker.skills[key] = {
@@ -1126,6 +1132,10 @@ function gilSpendAtEntrance(hero) {
 }
 
 function removeFollowers(hero) {
+  // Track lost followers
+  hero.followers.forEach(f => {
+    if (f.effect !== 'reroll_flame') trackFollower(f.name, 'lost');
+  });
   // Keep Faithful Dog (can't be removed)
   const dog = hero.followers.find(f => f.effect === 'reroll_flame');
   hero.followers = dog ? [dog] : [];
@@ -1227,6 +1237,7 @@ function runTurn() {
     shuffle(G.wonderDeck);
     if (foundFollower) {
       hero.followers.push({name: foundFollower.name, str: foundFollower.str || 0, effect: foundFollower.effect});
+      trackFollower(foundFollower.name, 'drawn');
       log(`  🐦 Wild Call: ${hero.name} found ${foundFollower.name}!`, 'wonder');
     } else {
       log(`  🐦 Wild Call: no followers left in Wonder deck`, 'system');
@@ -1575,6 +1586,7 @@ function resolveWonderCard(hero, card) {
     case 'follower':
       if (G._tweaks && !G._tweaks.followersEnabled) { log(`    ${card.name} passes by...`, 'system'); break; }
       hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
+      trackFollower(card.name, 'drawn');
       log(`    ${card.name} joins ${hero.name} as a follower!`, 'wonder');
       break;
   }
@@ -1588,6 +1600,7 @@ function resolveMishapCard(hero, card) {
     case 'follower':
       if (G._tweaks && !G._tweaks.followersEnabled) { log(`    ${card.name} passes by...`, 'system'); break; }
       hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
+      trackFollower(card.name, 'drawn');
       log(`    ${card.name} joins ${hero.name}!`, 'mishap');
       break;
     case 'stalker':
@@ -2058,6 +2071,7 @@ function combat(hero, enemyCard, tier) {
   // Golem: die result exactly 3 → becomes follower
   if (enemyCard.effect === 'exact_3_follower' && G._lastHeroRollVal === 3) {
     hero.followers.push({name:'Golem', str:3, effect:'none'});
+    trackFollower('Golem', 'drawn');
     log(`    The Golem becomes a follower! (+3 STR)`, 'wonder');
   }
 
@@ -2453,6 +2467,8 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
   if (wardenIdx >= 0) {
     const warden = hero.followers[wardenIdx];
     hero.followers.splice(wardenIdx, 1);
+    trackFollower('Warden Angel', 'helpedWin');
+    trackFollower('Warden Angel', 'lost');
     log(`    👼 Warden Angel sacrifices himself! ${hero.name} wins instead!`, 'wonder');
     G.stats.monstersKilled++;
     gilReward(hero, enemyStr);
@@ -3555,33 +3571,7 @@ function generateReport(results) {
     html += `<div class="report-stat"><span class="rl">Relics Spent</span><span class="rv">${agg.relicsSpent}</span></div>`;
     html += `</div>`;
 
-    // Skill gap analysis for this hero
-    if (agg.gaps.length > 0) {
-      const gapTypes = {};
-      agg.gaps.forEach(g => {
-        const key = g.type;
-        if (!gapTypes[key]) gapTypes[key] = { count: 0, examples: [], totalMargin: 0 };
-        gapTypes[key].count++;
-        gapTypes[key].totalMargin += g.margin;
-        if (gapTypes[key].examples.length < 3) gapTypes[key].examples.push(g);
-      });
-      Object.entries(gapTypes).forEach(([type, data]) => {
-        if (data.count < 2) return; // skip noise
-        const avgM = (data.totalMargin / data.count).toFixed(1);
-        const ex = data.examples[0];
-        let suggestion = '';
-        if (type === 'close_loss') {
-          suggestion = `${heroNames[hid]} lost ${data.count} close fights (avg margin: ${avgM}). A +2 ATK skill or STR buff would have turned ${Math.min(data.count, Math.ceil(data.count * 0.7))} of these into wins.`;
-        } else if (type === 'no_equip') {
-          suggestion = `${heroNames[hid]} fought ${data.count} times without equipment. A skill that grants temporary STR or an equipment-retrieval ability would help.`;
-        } else if (type === 'outmatched') {
-          suggestion = `${heroNames[hid]} was outmatched ${data.count} times (avg margin: ${avgM}). Needs avoidance (flee/redirect), damage reduction, or a way to weaken enemies before combat.`;
-        }
-        if (suggestion) {
-          html += `<div class="report-card need"><span class="tag need-tag">Skill Gap</span>${suggestion}</div>`;
-        }
-      });
-    }
+    // Skill gap analysis removed — skills are finalized, see Balance Improvements section
   });
   html += `</div>`;
 
@@ -4568,6 +4558,7 @@ function runSilentGame() {
       shuffle(G.wonderDeck);
       if (foundFollower) {
         hero.followers.push({name: foundFollower.name, str: foundFollower.str || 0, effect: foundFollower.effect});
+        trackFollower(foundFollower.name, 'drawn');
       }
     }
 
@@ -5084,20 +5075,7 @@ function generateSingleGameReport() {
     html += `</div>`;
   }
 
-  // Needed but didn't have (skill gaps)
-  let gapCount = 0;
-  heroIds.forEach(hid => {
-    const ht = G.tracker.heroes[hid];
-    if (!ht || ht.neededButDidntHave.length === 0) return;
-    if (gapCount === 0) html += `<div class="report-section"><h3>What Would Have Helped</h3>`;
-    gapCount++;
-    html += `<div class="report-card" style="border-left:3px solid var(--${hid})"><b style="color:var(--${hid})">${heroNames[hid]}</b><br>`;
-    ht.neededButDidntHave.forEach(g => {
-      html += `<div style="font-size:11px;padding:1px 0">• vs ${g.enemy} (margin ${g.margin}): ${g.context}</div>`;
-    });
-    html += `</div>`;
-  });
-  if (gapCount > 0) html += `</div>`;
+  // Skill gap section removed — skills are finalized
 
   // === AI GAME ANALYSIS ===
   html += `<div class="report-section"><h3>Game Analysis</h3>`;
