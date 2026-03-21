@@ -3666,6 +3666,7 @@ function generateReport(results) {
     html += `<th style="text-align:center;padding:2px 4px">Burn H</th>`;
     html += `<th style="text-align:center;padding:2px 4px">KO Saved</th>`;
     html += `<th style="text-align:center;padding:2px 4px">Fights Won</th>`;
+    html += `<th style="text-align:center;padding:2px 4px">Use/Burn</th>`;
     html += `<th style="text-align:left;padding:2px 4px">Verdict</th></tr>`;
 
     heroSkillDefs.forEach(skillDef => {
@@ -3710,6 +3711,26 @@ function generateReport(results) {
       html += `<td style="text-align:center;padding:3px 4px">${d.burnedHydra}</td>`;
       html += `<td style="text-align:center;padding:3px 4px;color:${d.savedFromKO>0?'var(--heal)':'var(--dim)'}">${d.savedFromKO || '-'}</td>`;
       html += `<td style="text-align:center;padding:3px 4px;color:${d.turnedFight>0?'var(--heal)':'var(--dim)'}">${d.turnedFight || '-'}</td>`;
+      // Use vs Burn ratio bar
+      let useBurnHtml = '-';
+      if (total > 0) {
+        const usePct = Math.round(d.activated / total * 100);
+        const burnPct = 100 - usePct;
+        const barW = 50;
+        const useW = Math.round(barW * usePct / 100);
+        const burnW = barW - useW;
+        let label = '';
+        let labelColor = 'var(--dim)';
+        if (usePct >= 80) { label = 'Used ' + usePct + '%'; labelColor = 'var(--heal)'; }
+        else if (burnPct >= 80) { label = 'Burned ' + burnPct + '%'; labelColor = '#cc8833'; }
+        else { label = usePct + '/' + burnPct + '%'; labelColor = 'var(--text)'; }
+        useBurnHtml = '<div style="display:flex;align-items:center;gap:3px;justify-content:center">'
+          + '<div style="width:' + barW + 'px;height:6px;background:#2a1a1a;border-radius:3px;overflow:hidden;display:flex">'
+          + '<div style="width:' + useW + 'px;background:var(--heal)"></div>'
+          + '<div style="width:' + burnW + 'px;background:#cc8833"></div></div>'
+          + '<span style="font-size:8px;color:' + labelColor + '">' + label + '</span></div>';
+      }
+      html += `<td style="text-align:center;padding:3px 4px">${useBurnHtml}</td>`;
       html += `<td style="padding:3px 4px;color:${verdictColor};font-size:9px">${verdict}</td>`;
       html += `</tr>`;
     });
