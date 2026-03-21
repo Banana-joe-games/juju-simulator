@@ -1891,6 +1891,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   // === SKILL: Shield Wall (Juju) — prevent KO ===
   if (hero.id === 'juju' && isSkillReady(hero, 'Shield Wall')) {
     useSkill(hero, 'Shield Wall');
+    trackSkill(hero.id, 'Shield Wall', 'activated');
     trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
     log(`    🛡 Shield Wall! KO prevented!`, 'flame');
     return;
@@ -1899,6 +1900,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   // === SKILL: Soothe (Gigi) — STR 4+ prevent KO ===
   if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && (enemyCard.str || 0) >= 4) {
     useSkill(hero, 'Soothe');
+    trackSkill(hero.id, 'Soothe', 'activated');
     trackSkill(hero.id, 'Soothe', 'savedFromKO');
     log(`    🌿 Soothe! ${hero.name} calms the ${enemyCard.name} and avoids KO!`, 'flame');
     return;
@@ -1932,6 +1934,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
     log(`    👼 Warden Angel sacrifices himself! ${hero.name} wins instead!`, 'wonder');
     G.stats.monstersKilled++;
     if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
+    trackSkill(hero.id, 'Warden Angel', 'activated');
     trackSkill(hero.id, 'Warden Angel', 'savedFromKO');
     return;
   }
@@ -1939,6 +1942,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   // Dodge check (Eggo)
   if (hero.dodgeActive) {
     log(`    🔥 DODGE! ${hero.name} avoids KO!`, 'flame');
+    trackSkill(hero.id, 'Dodge (Talent)', 'activated');
     trackSkill(hero.id, 'Dodge (Talent)', 'savedFromKO');
     return;
   }
@@ -2767,8 +2771,8 @@ function generateReport(results) {
     const cls = isOP ? 'op' : 'weak';
     const tag = isOP ? '<span class="tag op-tag">OP</span>' : '<span class="tag weak-tag">Weak</span>';
     let comment = '';
-    if (isOP) comment = `Heroes lose ${lossRate}% of the time (${d.lost}L/${d.won}W in ${d.drawn} games). This enemy may be too punishing without skills. Consider: lower STR by 1, add a flee condition, or let heroes use a follower to reduce damage.`;
-    if (isWeak) comment = `Heroes win ${100-Number(lossRate)}% of the time (${d.won}W/${d.lost}L in ${d.drawn} games). Too easy even without skills. Consider: +1 STR, or add a twist that makes the fight less straightforward.`;
+    if (isOP) comment = `Heroes lose ${lossRate}% of the time (${d.lost}L/${d.won}W in ${d.drawn} games). This enemy may be too punishing. Consider: lower STR by 1, add a flee condition, or let heroes use a follower to reduce damage.`;
+    if (isWeak) comment = `Heroes win ${100-Number(lossRate)}% of the time (${d.won}W/${d.lost}L in ${d.drawn} games). Too easy even with skills active. Consider: +1 STR, or add a twist that makes the fight less straightforward.`;
     html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — ${comment}</div>`;
   });
   if (Object.entries(encAgg).filter(([,d]) => d.drawn >= 3).every(([,d]) => { const f=d.won+d.lost; return f<4||(d.lost/Math.max(1,f)*100>10&&d.lost/Math.max(1,f)*100<70); })) {
@@ -2876,7 +2880,7 @@ function generateReport(results) {
   const headComments = {
     'The Nest': (d, ref) => `STR ${ref.str}. While alive, all other heads get +2 STR. ${d.destroyed === 0 ? 'Never destroyed in simulation. This means the +2 buff is always active, making every other head 2 points harder. If heroes can\'t kill STR 7, they can\'t kill anything. Consider: lower to STR 5-6 so heroes can realistically prioritize it, or change the passive to +1.' : `Destroyed ${d.destroyed}x. When it goes down, the fight gets much easier. Good design.`}`,
     'The Brood': (d, ref) => `STR ${ref.str}. Disables all Flame effects (talents, Awakening). ${d.destroyed === 0 ? 'Never destroyed. Flame suppression means: no Juju +2, no Eggo Dodge, no Lulu recharge. This head neutralizes all talents permanently. Consider: lower STR to 6-7 so heroes can kill it, or make the suppression partial (e.g., only blocks talents, not Flame-triggered equipment).' : `Destroyed ${d.destroyed}x. Good counterplay target.`}`,
-    'The Wail': (d, ref) => `STR ${ref.str}. On destroy: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. At STR 10 this head is nearly unkillable without skills. Heroes need total 10+ to beat it. Consider: lower to STR 8, or make the on-destroy effect less punishing (exhaust only the attacker).' : `Destroyed ${d.destroyed}x. The skill exhaust on death is a fair cost for removing a head.`}`,
+    'The Wail': (d, ref) => `STR ${ref.str}. On destroy: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. At STR 10 this head is nearly unkillable even with skills. Heroes need total 10+ to beat it. Consider: lower to STR 8, or make the on-destroy effect less punishing (exhaust only the attacker).' : `Destroyed ${d.destroyed}x. The skill exhaust on death is a fair cost for removing a head.`}`,
     'The Spite': (d, ref) => `STR ${ref.str}. On destroy: grow 1 extra head. ${d.destroyed === 0 ? 'Never destroyed. At STR 12 this is essentially a wall. Even with max equipment (+3 weapon, +2 base, roll 6) heroes barely reach 11. Consider: lower to STR 9-10, since the growth penalty already makes it risky to destroy.' : `Destroyed ${d.destroyed}x. Growing a head on death is a great mechanic that creates tension.`}`,
     'The Fangs': (d, ref) => `STR ${ref.str}. When targeted: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. The on-attack trigger means heroes LOSE skills just for trying. At STR 9 it\'s also hard to kill. This head punishes aggression too much. Consider: lower to STR 7, or change to "attacker only exhaust 1" instead of all heroes.' : `Destroyed ${d.destroyed}x. Punishing but fair if killable.`}`,
     'The Maw': (d, ref) => `STR ${ref.str}. When targeted: discard 1 Equipment or -2. ${d.destroyed === 0 ? 'Never destroyed. Heroes must sacrifice equipment just to attempt an attack. At STR 8 with Nest bonus (+2 = 10), heroes need 10+ after losing equipment. Consider: lower to STR 6, or change to "discard OR -1" instead of -2.' : `Destroyed ${d.destroyed}x. Equipment sacrifice adds an interesting cost.`}`
@@ -2994,11 +2998,11 @@ function generateReport(results) {
   });
 
   if (winRate < 30) {
-    html += `<div class="report-card op"><span class="tag op-tag">Too Hard</span>Win rate ${winRate}% without skills. Adding skills will raise this, but if skills only give +2 per fight and heroes need 4+ more to compete, the game may stay too hard. Consider: lower Hydra head STR by 2 across the board, or reduce tile deck Dread % from 25% to 15%.</div>`;
+    html += `<div class="report-card op"><span class="tag op-tag">Too Hard</span>Win rate ${winRate}% WITH all skills active. The game is too punishing. <b>Likely causes:</b> Hydra heads are too strong (STR 7-12 vs heroes averaging 5-8 total), equipment nerfs hit too hard (Firebane 2→1, Virtuous 3→1), Doomhammer now KOs on 1-2 instead of 1. <b>Suggested fixes:</b> lower Hydra head STR by 2 across the board, reduce Dread room % from 25% to 15%, or buff base hero STR by 1. Target: 45-60% win rate.</div>`;
   } else if (winRate > 70) {
-    html += `<div class="report-card weak"><span class="tag weak-tag">Too Easy</span>Win rate ${winRate}% even WITHOUT skills. Once skills are added, this will climb to 85-90%+. The game will feel like it plays itself. <b>Action items:</b> Increase Hydra head STR by 1-2, increase Dread room %, or reduce equipment STR across the board. Target: 40-55% base win rate without skills, so skills push it to 60-70%.</div>`;
+    html += `<div class="report-card weak"><span class="tag weak-tag">Too Easy</span>Win rate ${winRate}% with skills. The game is too forgiving. <b>Action items:</b> Increase Hydra head STR by 1-2, add more Misfortune enemies, or increase Dread room %. Target: 45-60% win rate.</div>`;
   } else {
-    html += `<div class="report-card insight"><span class="tag insight-tag">Good Baseline</span>Win rate ${winRate}% without skills is a solid foundation. Skills should push this to 60-75%, making them feel meaningful without trivializing the game.</div>`;
+    html += `<div class="report-card insight"><span class="tag insight-tag">Good Balance</span>Win rate ${winRate}% with all skills active is in a healthy range. Players will feel challenged but capable. Skills make a real difference in outcomes.</div>`;
   }
 
   // Skill Burn summary
