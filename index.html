@@ -728,6 +728,8 @@ function freshTracker() {
     skills: {},
     // Hydra head tracking
     hydraHeads: {},
+    // Hydra combat log: each attack attempt
+    hydraCombatLog: [],
     // Moments where a hero died and nothing could save them
     deathMoments: [],
     // Close calls: won with margin <= 1
@@ -2608,6 +2610,9 @@ function hydraAttack(hero) {
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${totalStr(hero)} + bonuses = ${heroTotal} vs ${effectiveHeadStr}`, 'combat');
 
+  // Track this attack for the Hydra Combat Report
+  const attackLog = { hero: hero.name, heroId: hero.id, head: head.name, headStr: effectiveHeadStr, heroTotal, roll: heroRoll.val, heroStr: totalStr(hero), isFlame, turn: G.turn, aliveHeads: G.hydraHeads.filter(h=>!h.destroyed).length, maxHeads: G.hydraMaxHeads };
+
   // Skill Burn at Hydra: reroll YOUR die only (Hydra heads don't roll dice)
   if (heroTotal < effectiveHeadStr && readySkillCount(hero) > 0) {
     const rerollH = heroRollDie(hero);
@@ -2624,6 +2629,12 @@ function hydraAttack(hero) {
       log(`    ⟲ Skill Burn! Rerolled: ${rerollH.val}${newFlameA ? ' 🔥' : ''} = ${heroTotal} vs ${effectiveHeadStr}`, 'flame');
     }
   }
+
+  // Record attack result
+  attackLog.finalHeroTotal = heroTotal;
+  attackLog.won = heroTotal >= effectiveHeadStr;
+  attackLog.margin = heroTotal - effectiveHeadStr;
+  G.tracker.hydraCombatLog.push(attackLog);
 
   if (heroTotal >= effectiveHeadStr) {
     head.destroyed = true;
@@ -3273,6 +3284,94 @@ function generateReport(results) {
   });
   html += `</div>`;
 
+  // === HYDRA COMBAT REPORT ===
+  const allHydraAttacks = results.reduce((arr, r) => arr.concat(r.tracker.hydraCombatLog || []), []);
+  if (allHydraAttacks.length > 0) {
+    html += `<div class="report-section"><h3>Hydra Combat Breakdown</h3>`;
+    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Every attack attempt at the Hydra across all ${n} games. Shows why heroes win or lose the Hydra fight.</p>`;
+    const totalAtks = allHydraAttacks.length;
+    const wins = allHydraAttacks.filter(a => a.won).length;
+    const losses = allHydraAttacks.filter(a => !a.won).length;
+    const avgMarginWin = wins > 0 ? (allHydraAttacks.filter(a=>a.won).reduce((s,a)=>s+a.margin,0)/wins).toFixed(1) : 'N/A';
+    const avgMarginLoss = losses > 0 ? (allHydraAttacks.filter(a=>!a.won).reduce((s,a)=>s+a.margin,0)/losses).toFixed(1) : 'N/A';
+    const avgHeroTotal = (allHydraAttacks.reduce((s,a)=>s+a.finalHeroTotal,0)/totalAtks).toFixed(1);
+    const avgHeadStr = (allHydraAttacks.reduce((s,a)=>s+a.headStr,0)/totalAtks).toFixed(1);
+
+    html += `<div class="report-card"><b>Overall</b>: ${totalAtks} attacks, ${wins} won (${((wins/totalAtks)*100).toFixed(0)}%), ${losses} lost<br>`;
+    html += `Avg hero total: <b>${avgHeroTotal}</b> vs avg head STR: <b>${avgHeadStr}</b> (gap: ${(avgHeroTotal - avgHeadStr).toFixed(1)})<br>`;
+    html += `Avg win margin: <b>+${avgMarginWin}</b> | Avg loss margin: <b>${avgMarginLoss}</b>`;
+    if (Number(avgHeroTotal) < Number(avgHeadStr)) {
+      html += `<br><i style="color:var(--ko)">Heroes are WEAKER than heads on average. They need to roll high AND have good equipment to win. Most attacks fail.</i>`;
+    } else if (Number(avgHeroTotal) - Number(avgHeadStr) < 2) {
+      html += `<br><i style="color:var(--mishap)">Very tight. Heroes need average+ rolls to win. Skill Burns and skills are critical.</i>`;
+    } else {
+      html += `<br><i style="color:var(--wonder)">Heroes are stronger than heads. Most attacks succeed.</i>`;
+    }
+    html += `</div>`;
+
+    // Per-hero breakdown at Hydra
+    html += `<div class="report-card"><b>Per Hero at Hydra</b><br><br>`;
+    heroIds.forEach(hid => {
+      const heroAtks = allHydraAttacks.filter(a => a.heroId === hid);
+      if (heroAtks.length === 0) return;
+      const hw = heroAtks.filter(a=>a.won).length;
+      const hl = heroAtks.filter(a=>!a.won).length;
+      const hAvgTotal = (heroAtks.reduce((s,a)=>s+a.finalHeroTotal,0)/heroAtks.length).toFixed(1);
+      const hAvgStr = (heroAtks.reduce((s,a)=>s+a.heroStr,0)/heroAtks.length).toFixed(1);
+      html += `<div style="margin:3px 0;padding:3px 6px;background:#0e0e16;border-radius:3px;font-size:11px;border-left:3px solid var(--${hid})">`;
+      html += `<b style="color:var(--${hid})">${heroNames[hid]}</b>: ${heroAtks.length} attacks, ${hw}W/${hl}L (${((hw/heroAtks.length)*100).toFixed(0)}% win rate). Avg STR: ${hAvgStr}, avg total: ${hAvgTotal}`;
+      if (hw / heroAtks.length < 0.3) html += ` <span style="color:var(--ko)">← Too weak for Hydra</span>`;
+      else if (hw / heroAtks.length > 0.7) html += ` <span style="color:var(--wonder)">← Strong Hydra fighter</span>`;
+      html += `</div>`;
+    });
+    html += `</div>`;
+
+    // Per-head breakdown: who wins/loses vs each head
+    html += `<div class="report-card"><b>Per Head Matchup</b><br><br>`;
+    const headNames = [...new Set(allHydraAttacks.map(a=>a.head))];
+    headNames.sort((a,b) => {
+      const sA = allHydraAttacks.filter(x=>x.head===a);
+      const sB = allHydraAttacks.filter(x=>x.head===b);
+      const wrA = sA.filter(x=>x.won).length / Math.max(1,sA.length);
+      const wrB = sB.filter(x=>x.won).length / Math.max(1,sB.length);
+      return wrA - wrB;
+    });
+    headNames.forEach(hname => {
+      const atks = allHydraAttacks.filter(a => a.head === hname);
+      const hw = atks.filter(a=>a.won).length;
+      const avgStr = (atks.reduce((s,a)=>s+a.headStr,0)/atks.length).toFixed(0);
+      const avgHT = (atks.reduce((s,a)=>s+a.finalHeroTotal,0)/atks.length).toFixed(1);
+      const wr = ((hw/atks.length)*100).toFixed(0);
+      let barColor = wr >= 60 ? 'var(--wonder)' : wr >= 40 ? 'var(--mishap)' : 'var(--ko)';
+      html += `<div style="margin:2px 0;font-size:11px">`;
+      html += `<b>${hname}</b> (STR ${avgStr}): ${atks.length} attacks, <b>${wr}%</b> win rate (avg hero total ${avgHT}) `;
+      html += `<div style="background:#1a1a2a;border-radius:2px;height:8px;margin-top:2px"><div style="width:${Math.min(100,wr)}%;background:${barColor};height:100%;border-radius:2px"></div></div>`;
+      html += `</div>`;
+    });
+    html += `</div>`;
+
+    // Overflow analysis
+    const overflowGames = results.filter(r => !r.victory && r.defeatCause && r.defeatCause.cause === 'hydra_overflow');
+    if (overflowGames.length > 0) {
+      const avgHeadsAtOverflow = (overflowGames.reduce((s,r) => {
+        const lastLog = (r.tracker.hydraCombatLog || []);
+        if (lastLog.length > 0) return s + lastLog[lastLog.length-1].aliveHeads;
+        return s;
+      }, 0) / overflowGames.length).toFixed(1);
+      const avgMaxAtOverflow = (overflowGames.reduce((s,r) => {
+        const lastLog = (r.tracker.hydraCombatLog || []);
+        if (lastLog.length > 0) return s + lastLog[lastLog.length-1].maxHeads;
+        return s;
+      }, 0) / overflowGames.length).toFixed(1);
+      html += `<div class="report-card need"><span class="tag need-tag">Overflow Detail</span>`;
+      html += `${overflowGames.length} games ended in overflow. Avg heads alive at overflow: <b>${avgHeadsAtOverflow}</b>, avg max at that point: <b>${avgMaxAtOverflow}</b>.<br>`;
+      html += `<i style="color:var(--dim)">The gap between alive and max shrinks as heroes destroy heads (max decreases). If heroes can't kill heads fast enough, new growths push them over. The tipping point is usually when max drops to 3-4 and one failed attack triggers overflow.</i>`;
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+  }
+
   // === TRAP ANALYSIS ===
   html += `<div class="report-section"><h3>Trap Analysis</h3>`;
   html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px"><b>Lethal</b> = directly KOs heroes. <b>Fun</b> = creates setbacks that add drama (lose resources, tempo). <b>Frustrating</b> = punishing with no counterplay, just feels bad. <b>Useless</b> = effect doesn't meaningfully change anything.</p>`;
@@ -3412,7 +3511,9 @@ function generateReport(results) {
 
       html += `<div style="margin:4px 0;padding:4px 6px;background:#0e0e16;border-radius:3px;font-size:11px;border-left:3px solid var(--${hid})">`;
       html += `<b style="color:var(--${hid})">${heroNames[hid]}</b> — Total STR: <b>${avgStr}</b> | Equip: ${avgEquip} | Followers: ${avgFollowers} | Relics: ${avgRelics} | Ready Skills: ${avgReady}/4 | KOs suffered: ${avgKO}<br>`;
-      html += `<span style="color:var(--dim)">Common equip at defeat: ${topEquip}</span>`;
+      const hadNoEquip = snapshots.filter(h => h.equipment.length === 0).length;
+      const pctNoEquip = ((hadNoEquip / snapshots.length) * 100).toFixed(0);
+      html += `<span style="color:var(--dim)">Most held weapon at defeat (across ${snapshots.length} losses): ${topEquip}. No equip in ${pctNoEquip}% of losses.</span>`;
       html += `</div>`;
     });
     html += `</div>`;
