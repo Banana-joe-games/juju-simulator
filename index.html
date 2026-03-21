@@ -3020,7 +3020,20 @@ function runToHydra(hero) {
     hero.runningToHydra = false;
     G.heroesInHydraArea.add(hero.id);
     hero.pos = 'hydra';
-    log(`  ${hero.name} reaches the Hydra!`, 'hydra');
+    // Track arrival state
+    if (!G.tracker.hydraArrivals) G.tracker.hydraArrivals = [];
+    G.tracker.hydraArrivals.push({
+      hero: hero.name, heroId: hero.id, turn: G.turn,
+      readySkills: readySkillCount(hero),
+      totalSkills: hero.skills.length,
+      skillNames: hero.skills.map((s,i) => ({ name:s.name, ready:hero.skillStates[i]==='ready' })),
+      totalStr: totalStr(hero),
+      equipment: hero.equipment.map(e => e.name),
+      followers: hero.followers.map(f => f.name),
+      relics: hero.heldRelics.map(r => r.name),
+      partyRelics: partyRelicTotal()
+    });
+    log(`  ${hero.name} reaches the Hydra! (STR ${totalStr(hero)}, ${readySkillCount(hero)}/${hero.skills.length} skills, ${partyRelicTotal()} relics)`, 'hydra');
   } else {
     log(`  ${hero.name} is still running...`, 'system');
   }
@@ -4295,6 +4308,28 @@ function generateSingleGameReport() {
       html += `<div style="padding:1px 0;color:${color}">${icon} T${c.turn} <b style="color:var(--${c.heroId})">${c.hero}</b> vs ${c.enemy} (STR ${c.enemyStr}) [${c.tier}]${c.skill ? ' — ' + c.skill : ''}</div>`;
     });
     html += `</div></div>`;
+  }
+
+  // Hydra arrival state
+  const arrivals = G.tracker.hydraArrivals || [];
+  if (arrivals.length > 0) {
+    html += `<div class="report-section"><h3>Hydra Arrival</h3>`;
+    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:6px">What each hero had when they arrived at the Hydra. This shows if they were prepared or depleted.</p>`;
+    arrivals.forEach(a => {
+      const skillList = a.skillNames.map(s => `<span style="color:${s.ready?'var(--heal)':'#884444'}">${s.name}</span>`).join(', ');
+      const equipList = a.equipment.length > 0 ? a.equipment.join(', ') : 'none';
+      const followerList = a.followers.length > 0 ? a.followers.join(', ') : 'none';
+      const relicList = a.relics.length > 0 ? a.relics.join(', ') : 'none';
+      html += `<div class="report-card" style="border-left:3px solid var(--${a.heroId})">`;
+      html += `<b style="color:var(--${a.heroId})">${a.hero}</b> arrived turn <b>${a.turn}</b> — Total STR: <b>${a.totalStr}</b><br>`;
+      html += `<div style="font-size:11px;margin-top:3px">`;
+      html += `Skills: ${a.readySkills}/${a.totalSkills} ready → ${skillList}<br>`;
+      html += `Equipment: ${equipList}<br>`;
+      html += `Followers: ${followerList}<br>`;
+      html += `Relics held: ${relicList} (party total: ${a.partyRelics})`;
+      html += `</div></div>`;
+    });
+    html += `</div>`;
   }
 
   // Hydra combat timeline
