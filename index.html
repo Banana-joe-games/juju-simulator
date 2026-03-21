@@ -293,6 +293,27 @@ input[type=range] {
 .batch-bar input { width:60px; background:var(--bg); color:var(--text); border:1px solid var(--border); padding:3px 6px; font-family:inherit; font-size:11px; border-radius:3px; }
 .batch-progress { height:4px; background:var(--border); border-radius:2px; margin:8px 0; overflow:hidden; }
 .batch-progress .fill { height:100%; background:var(--accent); transition:width .1s; }
+/* Tweaks Panel */
+.tweaks-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.85);
+  z-index:1001; display:flex; align-items:center; justify-content:center;
+}
+.tweaks-modal {
+  background:var(--panel); border:1px solid var(--accent);
+  border-radius:8px; width:90vw; max-width:560px; max-height:85vh;
+  overflow-y:auto; padding:20px 24px; position:relative;
+}
+.tweaks-modal h2 { font-family:'Cinzel',serif; color:var(--accent); font-size:16px; margin-bottom:14px; letter-spacing:2px; }
+.tweaks-modal h4 { color:var(--accent); font-size:11px; margin:12px 0 6px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid var(--border); padding-bottom:3px; }
+.tweak-row { display:flex; align-items:center; gap:8px; margin:4px 0; font-size:11px; }
+.tweak-row label { color:var(--dim); min-width:130px; }
+.tweak-row input[type=range] { flex:1; max-width:140px; }
+.tweak-row .tweak-val { color:var(--text); font-weight:600; min-width:28px; text-align:center; }
+.tweak-row input[type=number] { width:60px; background:var(--bg); color:var(--text); border:1px solid var(--border); padding:3px 6px; font-family:inherit; font-size:11px; border-radius:3px; }
+.tweak-toggle { display:flex; align-items:center; gap:8px; margin:4px 0; font-size:11px; cursor:pointer; }
+.tweak-toggle label { color:var(--dim); cursor:pointer; }
+.tweak-toggle input[type=checkbox] { accent-color:var(--accent); }
+.tweaks-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
 </style>
 </head>
 <body>
@@ -312,9 +333,7 @@ input[type=range] {
       <button class="btn" id="autoBtn" onclick="toggleAuto()" disabled>▶ Auto</button>
       <button class="btn danger" id="resetBtn" onclick="resetGame()">Reset</button>
       <span style="color:var(--border);margin:0 4px">|</span>
-      <label>Batch:</label>
-      <input type="number" id="batchCount" value="50" min="5" max="500" style="width:50px;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:2px 4px;font-family:inherit;font-size:11px;border-radius:3px">
-      <button class="btn" id="batchBtn" onclick="runBatch()">Run Batch</button>
+      <button class="btn" id="batchBtn" onclick="runBatch()">Batch</button>
       <button class="btn" id="reportBtn" onclick="showLastReport()" disabled>Report</button>
     </div>
   </div>
@@ -332,6 +351,34 @@ input[type=range] {
     <button class="report-close" onclick="closeReport()">&times;</button>
     <div style="margin-bottom:10px"><button class="btn primary" onclick="downloadReportMD()">⬇ Download Report (.md)</button></div>
     <div id="reportContent"></div>
+  </div>
+</div>
+<div id="tweaksOverlay" class="tweaks-overlay" style="display:none">
+  <div class="tweaks-modal">
+    <h2>Batch Tweaks</h2>
+    <h4>Hero Base STR</h4>
+    <div class="tweak-row"><label>Juju</label><input type="range" id="tw_juju" min="1" max="6" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_juju_v">3</span></div>
+    <div class="tweak-row"><label>Gigi</label><input type="range" id="tw_gigi" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_gigi_v">2</span></div>
+    <div class="tweak-row"><label>Lulu</label><input type="range" id="tw_lulu" min="1" max="6" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_lulu_v">1</span></div>
+    <div class="tweak-row"><label>Eggo</label><input type="range" id="tw_eggo" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_eggo_v">2</span></div>
+    <h4>Hydra Head STR (global offset)</h4>
+    <div class="tweak-row"><label>Hydra STR mod</label><input type="range" id="tw_hydra" min="-4" max="4" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_hydra_v">0</span></div>
+    <h4>Equipment STR (global offset)</h4>
+    <div class="tweak-row"><label>Weapon STR mod</label><input type="range" id="tw_weapon" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_weapon_v">0</span></div>
+    <h4>Enemy STR (global offset)</h4>
+    <div class="tweak-row"><label>Mishap enemy STR</label><input type="range" id="tw_mishapEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_mishapEnemy_v">0</span></div>
+    <div class="tweak-row"><label>Misfortune enemy STR</label><input type="range" id="tw_misfortuneEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_misfortuneEnemy_v">0</span></div>
+    <h4>Toggles</h4>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_legendary" checked><label for="tw_legendary">Legendary Equipment</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Skills (Skill Burn still active when OFF)</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
+    <h4>Batch Size</h4>
+    <div class="tweak-row"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
+    <div class="tweaks-actions">
+      <button class="btn" onclick="resetTweaks()">Reset to Default</button>
+      <button class="btn" onclick="closeTweaks()">Cancel</button>
+      <button class="btn primary" onclick="runBatchWithTweaks()">Run Batch</button>
+    </div>
   </div>
 </div>
 <script>
@@ -498,6 +545,84 @@ let autoRunning = false;
 let autoTimer = null;
 let batchResults = [];   // accumulated results across batch runs
 let lastReport = null;   // last generated report HTML
+let currentTweaks = null; // active tweaks for batch run
+
+const TWEAK_DEFAULTS = {
+  heroStr: { juju:3, gigi:2, lulu:1, eggo:2 },
+  hydraStrMod: 0, weaponStrMod: 0,
+  mishapEnemyStrMod: 0, misfortuneEnemyStrMod: 0,
+  legendaryEnabled: true, skillsEnabled: true, followersEnabled: true,
+  batchSize: 50
+};
+
+function twVal(el) {
+  document.getElementById(el.id + '_v').textContent = el.value;
+}
+
+function showTweaksPanel() {
+  document.getElementById('tweaksOverlay').style.display = 'flex';
+}
+
+function closeTweaks() {
+  document.getElementById('tweaksOverlay').style.display = 'none';
+}
+
+function resetTweaks() {
+  document.getElementById('tw_juju').value = 3; document.getElementById('tw_juju_v').textContent = '3';
+  document.getElementById('tw_gigi').value = 2; document.getElementById('tw_gigi_v').textContent = '2';
+  document.getElementById('tw_lulu').value = 1; document.getElementById('tw_lulu_v').textContent = '1';
+  document.getElementById('tw_eggo').value = 2; document.getElementById('tw_eggo_v').textContent = '2';
+  document.getElementById('tw_hydra').value = 0; document.getElementById('tw_hydra_v').textContent = '0';
+  document.getElementById('tw_weapon').value = 0; document.getElementById('tw_weapon_v').textContent = '0';
+  document.getElementById('tw_mishapEnemy').value = 0; document.getElementById('tw_mishapEnemy_v').textContent = '0';
+  document.getElementById('tw_misfortuneEnemy').value = 0; document.getElementById('tw_misfortuneEnemy_v').textContent = '0';
+  document.getElementById('tw_legendary').checked = true;
+  document.getElementById('tw_skills').checked = true;
+  document.getElementById('tw_followers').checked = true;
+  document.getElementById('tw_batchSize').value = 50;
+}
+
+function readTweaks() {
+  return {
+    heroStr: {
+      juju: parseInt(document.getElementById('tw_juju').value),
+      gigi: parseInt(document.getElementById('tw_gigi').value),
+      lulu: parseInt(document.getElementById('tw_lulu').value),
+      eggo: parseInt(document.getElementById('tw_eggo').value)
+    },
+    hydraStrMod: parseInt(document.getElementById('tw_hydra').value),
+    weaponStrMod: parseInt(document.getElementById('tw_weapon').value),
+    mishapEnemyStrMod: parseInt(document.getElementById('tw_mishapEnemy').value),
+    misfortuneEnemyStrMod: parseInt(document.getElementById('tw_misfortuneEnemy').value),
+    legendaryEnabled: document.getElementById('tw_legendary').checked,
+    skillsEnabled: document.getElementById('tw_skills').checked,
+    followersEnabled: document.getElementById('tw_followers').checked,
+    batchSize: parseInt(document.getElementById('tw_batchSize').value) || 50
+  };
+}
+
+function getTweaksDiff(tweaks) {
+  const diffs = [];
+  const defaults = { juju:3, gigi:2, lulu:1, eggo:2 };
+  Object.entries(tweaks.heroStr).forEach(function(entry) {
+    var id = entry[0], val = entry[1];
+    if (val !== defaults[id]) diffs.push(id.charAt(0).toUpperCase() + id.slice(1) + ' base STR: ' + defaults[id] + ' \u2192 ' + val);
+  });
+  if (tweaks.hydraStrMod !== 0) diffs.push('Hydra STR: ' + (tweaks.hydraStrMod > 0 ? '+' : '') + tweaks.hydraStrMod + ' to all heads');
+  if (tweaks.weaponStrMod !== 0) diffs.push('Weapon STR: ' + (tweaks.weaponStrMod > 0 ? '+' : '') + tweaks.weaponStrMod + ' to all weapons');
+  if (tweaks.mishapEnemyStrMod !== 0) diffs.push('Mishap enemy STR: ' + (tweaks.mishapEnemyStrMod > 0 ? '+' : '') + tweaks.mishapEnemyStrMod);
+  if (tweaks.misfortuneEnemyStrMod !== 0) diffs.push('Misfortune enemy STR: ' + (tweaks.misfortuneEnemyStrMod > 0 ? '+' : '') + tweaks.misfortuneEnemyStrMod);
+  if (!tweaks.legendaryEnabled) diffs.push('Legendary Equipment: DISABLED');
+  if (!tweaks.skillsEnabled) diffs.push('Skills: DISABLED (Skill Burn only)');
+  if (!tweaks.followersEnabled) diffs.push('Followers: DISABLED');
+  return diffs;
+}
+
+function runBatchWithTweaks() {
+  closeTweaks();
+  currentTweaks = readTweaks();
+  runBatchInternal(currentTweaks.batchSize);
+}
 
 function freshTracker() {
   return {
@@ -687,6 +812,7 @@ function readySkillCount(hero) {
 }
 
 function isSkillReady(hero, skillName) {
+  if (G && G._tweaks && !G._tweaks.skillsEnabled) return false;
   const idx = hero.skills.findIndex(s => s.name === skillName);
   return idx >= 0 && hero.skillStates[idx] === 'ready';
 }
@@ -707,6 +833,7 @@ function totalStr(hero, opts = {}) {
   hero.equipment.forEach(e => {
     if (opts.noWeapons && e.type === 'weapon') return;
     if (e.str) s += e.str;
+    if (e.type === 'weapon' && G && G._tweaks && G._tweaks.weaponStrMod) s += G._tweaks.weaponStrMod;
   });
   hero.followers.forEach(f => { if (f.str) s += f.str; });
   hero.stalkers.forEach(st => {
@@ -1033,6 +1160,7 @@ function resolveRoom(hero, roomType) {
 }
 
 function drawLegendaryItem(hero) {
+  if (G._tweaks && !G._tweaks.legendaryEnabled) return;
   if (G.legendaryDeck.length > 0) {
     const idx = G.legendaryDeck.pop();
     const eq = {...LEGENDARY_EQUIPMENT[idx]};
@@ -1071,7 +1199,7 @@ function drawDread(hero) {
 
   // Draw Legendary Equipment (guarded)
   let guardedEquip = null;
-  if (G.legendaryDeck.length > 0) {
+  if ((!G._tweaks || G._tweaks.legendaryEnabled) && G.legendaryDeck.length > 0) {
     const idx = G.legendaryDeck.pop();
     guardedEquip = {...LEGENDARY_EQUIPMENT[idx]};
     log(`  ⚔ Guarded Legendary: ${guardedEquip.name} (STR ${guardedEquip.str >= 0 ? '+' : ''}${guardedEquip.str})`, 'legendary');
@@ -1128,6 +1256,7 @@ function resolveWonderCard(hero, card) {
       }
       break;
     case 'follower':
+      if (G._tweaks && !G._tweaks.followersEnabled) { log(`    ${card.name} passes by...`, 'system'); break; }
       hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
       log(`    ${card.name} joins ${hero.name} as a follower!`, 'wonder');
       break;
@@ -1140,6 +1269,7 @@ function resolveMishapCard(hero, card) {
       log(`    ${card.name}: minor encounter resolved.`, 'mishap');
       break;
     case 'follower':
+      if (G._tweaks && !G._tweaks.followersEnabled) { log(`    ${card.name} passes by...`, 'system'); break; }
       hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
       log(`    ${card.name} joins ${hero.name}!`, 'mishap');
       break;
@@ -1333,6 +1463,12 @@ function combat(hero, enemyCard, tier) {
   ht.combats++;
   trackEncounter(enemyCard.name, 'drawn');
   let enemyStr = enemyCard.str || 0;
+
+  // === TWEAKS: enemy STR modifier ===
+  if (G._tweaks) {
+    if (tier === 'mishap' && G._tweaks.mishapEnemyStrMod) enemyStr = Math.max(0, enemyStr + G._tweaks.mishapEnemyStrMod);
+    if (tier === 'misfortune' && G._tweaks.misfortuneEnemyStrMod) enemyStr = Math.max(0, enemyStr + G._tweaks.misfortuneEnemyStrMod);
+  }
 
   // === SPECIAL ENEMY STR ===
   if (enemyCard.effect === 'random_str') {
@@ -2172,8 +2308,9 @@ function spawnHydra() {
 function recalcHydraStr() {
   const nestAlive = G.hydraHeads.some(h => h.name === 'The Nest' && !h.destroyed);
   const nestBonus = nestAlive ? 2 : 0;
+  const hydraMod = (G._tweaks && G._tweaks.hydraStrMod) ? G._tweaks.hydraStrMod : 0;
   G.hydraHeads.forEach(h => {
-    h.effectiveStr = h.str + (h.name !== 'The Nest' ? nestBonus : 0);
+    h.effectiveStr = Math.max(1, h.str + (h.name !== 'The Nest' ? nestBonus : 0) + hydraMod);
   });
 }
 
@@ -2620,9 +2757,20 @@ function generateReport(results) {
   const heroNames = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'};
   const heroIds = ['juju','gigi','lulu','eggo'];
 
-  let html = `<h2>PLAYTEST REPORT</h2>`;
-  html += `<p style="color:var(--dim);font-size:11px;margin-bottom:12px">All skills are now active: Shield Wall, Soothe, Siphon, Pack Leader, Heist, Rallying Blow, Cheap Shot, Herbalist, Wild Call, Reality Warp, Spell Mirror, Copycat, Shadowstep, Taunt. See Skill Analysis section for per-skill usage data.</p>`;
-  html += `<div class="report-section"><h3>Overview (${n} games)</h3>`;
+  let html = '<h2>PLAYTEST REPORT</h2>';
+  // Tweaks diff section
+  if (currentTweaks) {
+    var tweakDiffs = getTweaksDiff(currentTweaks);
+    if (tweakDiffs.length > 0) {
+      html += '<div class="report-section"><h3>Tweaks Applied</h3><div class="report-card insight">';
+      tweakDiffs.forEach(function(d) { html += '<div style="font-size:11px;padding:1px 0">- ' + d + '</div>'; });
+      html += '</div></div>';
+    } else {
+      html += '<div class="report-section"><h3>Tweaks Applied</h3><div class="report-card" style="font-size:11px;color:var(--dim)">Default settings (no changes)</div></div>';
+    }
+  }
+  html += '<p style="color:var(--dim);font-size:11px;margin-bottom:12px">All skills are now active: Shield Wall, Soothe, Siphon, Pack Leader, Heist, Rallying Blow, Cheap Shot, Herbalist, Wild Call, Reality Warp, Spell Mirror, Copycat, Shadowstep, Taunt. See Skill Analysis section for per-skill usage data.</p>';
+  html += '<div class="report-section"><h3>Overview (' + n + ' games)</h3>';
   html += `<div class="report-card">`;
   html += `<div class="report-stat"><span class="rl">Win Rate</span><span class="rv" style="color:${winRate > 50 ? 'var(--heal)' : 'var(--ko)'}">${winRate}% (${wins}/${n})</span></div>`;
   html += `<div class="report-stat"><span class="rl">Avg Turns</span><span class="rv">${avgTurns}</span></div>`;
@@ -3136,6 +3284,12 @@ function generateReport(results) {
 // ========== BATCH RUN ==========
 function runSilentGame() {
   G = initState();
+  G._tweaks = currentTweaks || null;
+  if (G._tweaks) {
+    G.heroes.forEach(function(h) {
+      if (G._tweaks.heroStr[h.id] !== undefined) h.str = G._tweaks.heroStr[h.id];
+    });
+  }
   HEROES.forEach(h => initHeroTracker(G.tracker, h.id));
   let safety = 0;
   while (!G.gameOver && safety < 2000) {
@@ -3161,7 +3315,7 @@ function runSilentGame() {
       }
     }
     // Wild Call (Gigi): draw Wonder until Follower (batch sim)
-    if (hero.id === 'gigi' && isSkillReady(hero, 'Wild Call') && hero.followers.length < 2) {
+    if (hero.id === 'gigi' && isSkillReady(hero, 'Wild Call') && hero.followers.length < 2 && (!G._tweaks || G._tweaks.followersEnabled)) {
       useSkill(hero, 'Wild Call');
       trackSkill(hero.id, 'Wild Call', 'activated');
       let foundFollower = null;
@@ -3261,14 +3415,14 @@ function classifyDefeat(state) {
 }
 
 function runBatch() {
-  const count = parseInt(document.getElementById('batchCount').value) || 50;
+  showTweaksPanel();
+}
+
+function runBatchInternal(count) {
   document.getElementById('batchBtn').disabled = true;
-  document.getElementById('statusBar').textContent = `Running batch: 0/${count}...`;
+  document.getElementById('statusBar').textContent = 'Running batch: 0/' + count + '...';
 
   batchResults = [];
-  // Suppress log output during batch
-  const origLog = log;
-  const silentLog = (msg, cls) => { G.log.push({msg, cls}); };
 
   let i = 0;
   function batchStep() {
@@ -3277,14 +3431,14 @@ function runBatch() {
       batchResults.push(runSilentGame());
       i++;
     }
-    document.getElementById('statusBar').textContent = `Running batch: ${i}/${count}...`;
+    document.getElementById('statusBar').textContent = 'Running batch: ' + i + '/' + count + '...';
     if (i < count) {
       setTimeout(batchStep, 0);
     } else {
       lastReport = generateReport(batchResults);
       document.getElementById('batchBtn').disabled = false;
       document.getElementById('reportBtn').disabled = false;
-      document.getElementById('statusBar').textContent = `Batch complete: ${count} games. Click Report to view analysis.`;
+      document.getElementById('statusBar').textContent = 'Batch complete: ' + count + ' games. Click Report to view analysis.';
       showLastReport();
     }
   }
@@ -3350,9 +3504,18 @@ function htmlToMarkdown(html) {
 function downloadReportMD() {
   const reportEl = document.getElementById('reportContent');
   if (!reportEl || !reportEl.innerHTML) return;
-  const md = htmlToMarkdown(reportEl.innerHTML);
+  var mdPrefix = '';
+  if (currentTweaks) {
+    var tweakDiffs = getTweaksDiff(currentTweaks);
+    if (tweakDiffs.length > 0) {
+      mdPrefix = '# Balance Changes Applied\nThese changes were applied to the base game for this playtest run:\n';
+      tweakDiffs.forEach(function(d) { mdPrefix += '- ' + d + '\n'; });
+      mdPrefix += '\n---\n\n';
+    }
+  }
+  const md = mdPrefix + htmlToMarkdown(reportEl.innerHTML);
   const date = new Date().toISOString().slice(0,16).replace('T','_').replace(':','-');
-  const filename = `JUJU_Playtest_Report_${date}.md`;
+  const filename = 'JUJU_Playtest_Report_' + date + '.md';
   const blob = new Blob([md], {type: 'text/markdown'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
