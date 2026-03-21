@@ -3087,7 +3087,7 @@ function hydraAttack(hero) {
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${totalStr(hero)} + bonuses = ${heroTotal} vs ${effectiveHeadStr}`, 'combat');
 
   // Track this attack for the Hydra Combat Report
-  const attackLog = { hero: hero.name, heroId: hero.id, head: head.name, headStr: effectiveHeadStr, heroTotal, roll: heroRoll.val, heroStr: totalStr(hero), isFlame, turn: G.turn, aliveHeads: G.hydraHeads.filter(h=>!h.destroyed).length, maxHeads: G.hydraMaxHeads };
+  const attackLog = { hero: hero.name, heroId: hero.id, head: head.name, headStr: effectiveHeadStr, headBaseStr: head.effectiveStr, heroTotal, roll: heroRoll.val, heroStr: totalStr(hero), isFlame, turn: G.turn, aliveHeads: G.hydraHeads.filter(h=>!h.destroyed).length, maxHeads: G.hydraMaxHeads };
 
   // Skill Burn at Hydra: reroll YOUR die only (Hydra heads don't roll dice)
   if (heroTotal < effectiveHeadStr && readySkillCount(hero) > 0) {
@@ -4003,7 +4003,7 @@ function generateReport(results) {
     headNames.forEach(hname => {
       const atks = allHydraAttacks.filter(a => a.head === hname);
       const hw = atks.filter(a=>a.won).length;
-      const avgStr = (atks.reduce((s,a)=>s+a.headStr,0)/atks.length).toFixed(0);
+      const avgStr = (atks.reduce((s,a)=>s+(a.headBaseStr||a.headStr),0)/atks.length).toFixed(0);
       const avgHT = (atks.reduce((s,a)=>s+a.finalHeroTotal,0)/atks.length).toFixed(1);
       const wr = ((hw/atks.length)*100).toFixed(0);
       let barColor = wr >= 60 ? 'var(--wonder)' : wr >= 40 ? 'var(--mishap)' : 'var(--ko)';
