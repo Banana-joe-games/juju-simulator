@@ -384,6 +384,13 @@ input[type=range] {
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_prepareFirst"><label for="tw_prepareFirst">Prepare before Hydra (wait until fully equipped)</label></div>
+    <h4>💰 Gil System (experimental)</h4>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_gilEnabled"><label for="tw_gilEnabled">Enable Gil (monsters drop gold, spend at entrance)</label></div>
+    <div id="tw_gilSettings" style="display:none">
+      <div class="tweak-row"><label>Gil per enemy STR point</label><input type="range" id="tw_gilPerStr" min="1" max="3" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_gilPerStr_v">1</span></div>
+      <div class="tweak-row"><label>Cost: Recharge 1 Skill</label><input type="range" id="tw_gilRechargeSkill" min="1" max="8" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_gilRechargeSkill_v">3</span></div>
+      <div class="tweak-row"><label>Cost: Buy Legendary Equip</label><input type="range" id="tw_gilBuyEquip" min="3" max="12" value="6" oninput="twVal(this)"><span class="tweak-val" id="tw_gilBuyEquip_v">6</span></div>
+    </div>
     <h4>Batch Size</h4>
     <div class="tweak-row" id="tw_batchRow"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
     <div class="tweaks-actions">
@@ -639,6 +646,11 @@ function resetTweaks() {
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
   document.getElementById('tw_prepareFirst').checked = false;
+  document.getElementById('tw_gilEnabled').checked = false;
+  document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
+  document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
+  document.getElementById('tw_gilBuyEquip').value = 6; document.getElementById('tw_gilBuyEquip_v').textContent = '6';
+  document.getElementById('tw_gilSettings').style.display = 'none';
   document.getElementById('tw_batchSize').value = 50;
   // Reset per-equipment
   LEGENDARY_EQUIPMENT.forEach(function(e, i) {
@@ -697,6 +709,10 @@ function readTweaks() {
     followersEnabled: document.getElementById('tw_followers').checked,
     overflowGameOver: document.getElementById('tw_overflow').checked,
     prepareFirst: document.getElementById('tw_prepareFirst').checked,
+    gilEnabled: document.getElementById('tw_gilEnabled').checked,
+    gilPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
+    gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 3,
+    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 6,
     batchSize: parseInt(document.getElementById('tw_batchSize').value) || 50
   };
 }
@@ -728,6 +744,7 @@ function getTweaksDiff(tweaks) {
   if (!tweaks.followersEnabled) diffs.push('Followers: DISABLED');
   if (!tweaks.overflowGameOver) diffs.push('Hydra Overflow: NOT game over (heads just stop growing)');
   if (tweaks.prepareFirst) diffs.push('Prepare First: Heroes wait until fully equipped (2 equip + followers) before entering Hydra');
+  if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||3) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||6) + ' Gil)');
   return diffs;
 }
 
@@ -882,7 +899,11 @@ function initState() {
       dodgeActive: false,
       giftedFlame: false,
       runningToHydra: false,
-      houndFollowing: null
+      houndFollowing: null,
+      gil: 0,
+      gilEarned: 0,
+      gilSpentSkill: 0,
+      gilSpentEquip: 0
     })),
     relicPool: shuffle([...RELICS]),
     board: [{id:'entrance',type:'entrance',enemies:[],equipment:[]}],
@@ -1053,6 +1074,43 @@ function rechargeOneSkill(hero) {
   }
 }
 
+// === GIL SYSTEM ===
+function gilEnabled() {
+  return G._tweaks && G._tweaks.gilEnabled;
+}
+function gilReward(hero, enemyStr) {
+  if (!gilEnabled()) return;
+  const perStr = (G._tweaks && G._tweaks.gilPerStr) || 1;
+  const earned = Math.max(1, Math.floor(enemyStr * perStr));
+  hero.gil += earned;
+  hero.gilEarned += earned;
+  log(`    💰 +${earned} Gil (total: ${hero.gil})`, 'legendary');
+}
+function gilSpendAtEntrance(hero) {
+  if (!gilEnabled()) return;
+  if (hero.pos !== 'entrance') return;
+  const tw = G._tweaks || {};
+  const rechargeCost = tw.gilRechargeSkillCost || 3;
+  const equipCost = tw.gilBuyEquipCost || 6;
+  // AI priority: buy equipment if no weapon AND can afford, else recharge skills
+  const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
+  const exhaustedSkills = hero.skillStates.filter(s => s === 'exhausted').length;
+  // Buy equip if affordable and need it
+  if (!hasWeapon && hero.gil >= equipCost && G.legendaryDeck.length > 0) {
+    hero.gil -= equipCost;
+    hero.gilSpentEquip += equipCost;
+    drawLegendaryItem(hero);
+    log(`  💰 Spent ${equipCost} Gil → bought Legendary Equipment! (${hero.gil} Gil left)`, 'legendary');
+  }
+  // Recharge skills if affordable and have exhausted ones
+  while (hero.gil >= rechargeCost && exhaustedSkills > 0 && hero.skillStates.some(s => s === 'exhausted')) {
+    hero.gil -= rechargeCost;
+    hero.gilSpentSkill += rechargeCost;
+    rechargeOneSkill(hero);
+    log(`  💰 Spent ${rechargeCost} Gil → recharged 1 Skill! (${hero.gil} Gil left)`, 'legendary');
+  }
+}
+
 function removeFollowers(hero) {
   // Keep Faithful Dog (can't be removed)
   const dog = hero.followers.find(f => f.effect === 'reroll_flame');
@@ -1084,6 +1142,9 @@ function runTurn() {
   hero.ko = false;
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
+
+  // Gil: spend at entrance if at entrance
+  gilSpendAtEntrance(hero);
 
   // Turn-start: Wizard Hat
   if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
@@ -1819,6 +1880,7 @@ function combat(hero, enemyCard, tier) {
     trackSkill(hero.id, 'Soothe', 'activated');
     log(`    🌿 Soothe! ${enemyCard.name} (STR ${enemyStr}) calmed and discarded!`, 'flame');
     G.stats.monstersKilled++;
+    gilReward(hero, enemyStr);
     initHeroTracker(G.tracker, hero.id).wins++;
     trackEncounter(enemyCard.name, 'won');
     G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr, won:true, tier, turn:G.turn, skill:'Soothe' });
@@ -1977,6 +2039,7 @@ function combat(hero, enemyCard, tier) {
 
   // All rounds won
   G.stats.monstersKilled++;
+  gilReward(hero, enemyStr);
   ht.wins++;
   trackEncounter(enemyCard.name, 'won');
   G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, won:true, tier, turn:G.turn });
@@ -2326,6 +2389,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
         // Treat as win
         hero.equipment.forEach(e => trackEquip(e.name, 'wonWith'));
         G.stats.monstersKilled++;
+        gilReward(hero, enemyStr);
         trackEncounter(enemyCard.name, 'won');
         if (frogmanSwallowed) { hero.equipment.push(frogmanSwallowed); log(`    Recovered ${frogmanSwallowed.name}!`, 'wonder'); }
         // Post-win effects
@@ -2403,6 +2467,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
     hero.followers.splice(wardenIdx, 1);
     log(`    👼 Warden Angel sacrifices himself! ${hero.name} wins instead!`, 'wonder');
     G.stats.monstersKilled++;
+    gilReward(hero, enemyStr);
     if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
     trackSkill(hero.id, 'Warden Angel', 'activated');
     trackSkill(hero.id, 'Warden Angel', 'savedFromKO');
@@ -2432,6 +2497,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
     if (retryTotal >= enemyRetryTotal) {
       log(`    Berserker Helmet wins the retry!`, 'wonder');
       G.stats.monstersKilled++;
+      gilReward(hero, enemyStr);
       if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
       hero._berserkerUsed = false;
       return;
@@ -3321,7 +3387,7 @@ function renderHeroes() {
         <div class="name" style="color:${h.color}">${h.name} ${h.title}</div>
         <div class="stat">STR <b>${totalStr(h)}</b> (base ${h.str}) · 🔥 ${h.flameFaces.join(',')}</div>
         <div class="stat">Talent: <b>${h.talent}</b></div>
-        <div class="stat">${h.dodgeActive ? '🛡Dodge ' : ''}${h.runningToHydra ? '🏃Running' : ''}</div>
+        <div class="stat">${h.dodgeActive ? '🛡Dodge ' : ''}${h.runningToHydra ? '🏃Running' : ''}${gilEnabled() ? ' 💰 ' + h.gil + ' Gil' : ''}</div>
         <div style="margin-top:3px">Relics: ${relics}</div>
         <div style="margin-top:4px">${skills}</div>
         <div style="margin-top:3px">Equip: ${equip}</div>
@@ -3434,6 +3500,40 @@ function generateReport(results) {
   html += `<div class="report-stat"><span class="rl">Avg KOs</span><span class="rv">${avgKO}</span></div>`;
   html += `<div class="report-stat"><span class="rl">Avg Skill Burns</span><span class="rv">${avgSkillBurns}</span></div>`;
   html += `<div class="report-stat"><span class="rl">Avg Relics Spent</span><span class="rv">${avgRelicsSpent}</span></div>`;
+  // Gil stats in batch
+  const gilActive = results[0] && results[0].heroes && results[0].heroes[0] && results[0].heroes[0].gilEarned !== undefined;
+  if (gilActive) {
+    const avgGilEarned = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gilEarned||0), 0), 0) / n).toFixed(1);
+    const avgGilSpentSkill = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gilSpentSkill||0), 0), 0) / n).toFixed(1);
+    const avgGilSpentEquip = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gilSpentEquip||0), 0), 0) / n).toFixed(1);
+    const avgGilRemaining = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gil||0), 0), 0) / n).toFixed(1);
+    html += `<div class="report-stat"><span class="rl">💰 Avg Gil Earned (party)</span><span class="rv">${avgGilEarned}</span></div>`;
+    html += `<div class="report-stat"><span class="rl">💰 Avg Gil → Skills</span><span class="rv">${avgGilSpentSkill}</span></div>`;
+    html += `<div class="report-stat"><span class="rl">💰 Avg Gil → Equip</span><span class="rv">${avgGilSpentEquip}</span></div>`;
+    html += `<div class="report-stat"><span class="rl">💰 Avg Gil Unspent</span><span class="rv">${avgGilRemaining}</span></div>`;
+    // Per-hero Gil breakdown
+    const heroGil = {};
+    ['juju','gigi','lulu','eggo'].forEach(hid => {
+      heroGil[hid] = { earned:0, spentSkill:0, spentEquip:0, remaining:0 };
+    });
+    results.forEach(r => {
+      r.heroes.forEach(h => {
+        if (heroGil[h.id]) {
+          heroGil[h.id].earned += h.gilEarned || 0;
+          heroGil[h.id].spentSkill += h.gilSpentSkill || 0;
+          heroGil[h.id].spentEquip += h.gilSpentEquip || 0;
+          heroGil[h.id].remaining += h.gil || 0;
+        }
+      });
+    });
+    html += `<div class="report-stat" style="flex-direction:column;align-items:flex-start"><span class="rl">💰 Gil per Hero (avg/game)</span>`;
+    ['juju','gigi','lulu','eggo'].forEach(hid => {
+      const d = heroGil[hid];
+      const hName = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'}[hid];
+      html += `<span class="rv" style="font-size:10px;color:var(--${hid})">  ${hName}: earned ${(d.earned/n).toFixed(1)}, skills ${(d.spentSkill/n).toFixed(1)}, equip ${(d.spentEquip/n).toFixed(1)}, left ${(d.remaining/n).toFixed(1)}</span>`;
+    });
+    html += `</div>`;
+  }
   // Overview commentary
   let overviewNote = '';
   if (winRate > 70) overviewNote = `Win rate is high (${winRate}%). Heroes are winning too easily. Consider: buff Hydra heads, increase Dread room %, or nerf equipment.`;
@@ -4195,6 +4295,9 @@ function runSilentGame() {
     hero.talentUsedThisTurn = false;
     hero.dodgeActive = false;
 
+    // Gil: spend at entrance
+    gilSpendAtEntrance(hero);
+
     // Turn-start effects
     if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
       if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero);
@@ -4294,7 +4397,11 @@ function runSilentGame() {
       stalkers:h.stalkers.map(s=>s.name),
       totalStr:totalStr(h),
       readySkills:readySkillCount(h),
-      ko:initHeroTracker(G.tracker,h.id).ko
+      ko:initHeroTracker(G.tracker,h.id).ko,
+      gil:h.gil||0,
+      gilEarned:h.gilEarned||0,
+      gilSpentSkill:h.gilSpentSkill||0,
+      gilSpentEquip:h.gilSpentEquip||0
     })),
     defeatCause: !G.victory ? classifyDefeat(G) : null
   };
@@ -4550,6 +4657,9 @@ function generateSingleGameReport() {
     html += ` | 💀 KOs: <b>${ht.ko}</b>`;
     html += ` | 🔄 Skill Burns: <b>${ht.skillsBurned || 0}</b>`;
     html += ` | 💎 Relics Spent: <b>${ht.relicsSpent || 0}</b>`;
+    if (gilEnabled()) {
+      html += `<br>💰 Gil: earned <b>${hero.gilEarned}</b>, spent on skills <b>${hero.gilSpentSkill}</b>, spent on equip <b>${hero.gilSpentEquip}</b>, remaining <b>${hero.gil}</b>`;
+    }
     html += `</div>`;
 
     // Skills used — detailed breakdown
@@ -5019,6 +5129,10 @@ function resetGame() {
 }
 
 document.getElementById('statusBar').textContent = 'Ready. Press New Game.';
+// Gil toggle visibility
+document.getElementById('tw_gilEnabled').addEventListener('change', function() {
+  document.getElementById('tw_gilSettings').style.display = this.checked ? 'block' : 'none';
+});
 </script>
 </body>
 </html>
