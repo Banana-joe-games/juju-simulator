@@ -4197,65 +4197,93 @@ function generateReport(results) {
     html += `</div>`;
   }
 
-  // === HERO STRUGGLE ANALYSIS ===
-  html += `<div class="report-section"><h3>Hero Struggle Analysis</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Where each hero struggles despite having skills. Cross-reference with Skill Analysis above to see if existing skills address these problems or if they're being used/burned suboptimally.</p>`;
-  const allGaps = {};
-  results.forEach(r => {
-    Object.entries(r.tracker.heroes).forEach(([hid, ht]) => {
-      if (!allGaps[hid]) allGaps[hid] = {};
-      ht.neededButDidntHave.forEach(g => {
-        if (!allGaps[hid][g.type]) allGaps[hid][g.type] = 0;
-        allGaps[hid][g.type]++;
-      });
-    });
-  });
+  // === BALANCE IMPROVEMENT SUGGESTIONS ===
+  html += `<div class="report-section"><h3>Balance Improvements</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Concrete suggestions to improve existing skills, equipment, and enemies based on the data above.</p>`;
+
+  // --- Per-hero skill improvements ---
   heroIds.forEach(hid => {
-    const gaps = allGaps[hid] || {};
+    const heroSkills = HEROES.find(h => h.id === hid).skills;
     const heroData = { combats:0, ko:0, wins:0, losses:0 };
     results.forEach(r => {
       const ht = r.tracker.heroes[hid];
       if (ht) { heroData.combats += ht.combats; heroData.ko += ht.ko; heroData.wins += ht.wins; heroData.losses += ht.losses; }
     });
-    const heroSkills = HEROES.find(h => h.id === hid).skills;
-    const issues = [];
-    const closeLosses = gaps.close_loss || 0;
-    const noEquipLosses = gaps.no_equip || 0;
-    const outmatched = gaps.outmatched || 0;
-    if (closeLosses >= n * 0.3) {
-      // Check if hero has skills that should address this
-      const hasAtkSkill = heroSkills.some(s => s.kind === 'Combat');
-      const atkKeys = heroSkills.filter(s => s.kind === 'Combat').map(s => hid + '_' + s.name);
-      const atkUsed = atkKeys.reduce((sum, k) => sum + (skillAgg[k] ? skillAgg[k].activated : 0), 0);
-      const atkBurned = atkKeys.reduce((sum, k) => sum + (skillAgg[k] ? skillAgg[k].burned : 0), 0);
-      if (hasAtkSkill && atkBurned > atkUsed) {
-        issues.push(`Lost ${closeLosses} close fights (margin 1-2) — BUT has Combat skills that are being burned more than used (${atkBurned} burned vs ${atkUsed} used). The AI prefers rerolling over activating them. Check Skill Analysis: are the combat skills too situational?`);
-      } else if (hasAtkSkill) {
-        issues.push(`Lost ${closeLosses} close fights (margin 1-2) despite using Combat skills ${atkUsed}x. The skills help but aren't enough. Consider: higher STR bonus, or a passive that triggers automatically on close fights.`);
-      } else {
-        issues.push(`Lost ${closeLosses} close fights (margin 1-2) with no Combat skill to help. This hero relies purely on STR and Skill Burn for combat.`);
+    const suggestions = [];
+
+    heroSkills.forEach(skillDef => {
+      const key = hid + '_' + skillDef.name;
+      const d = skillAgg[key] || { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
+      const total = d.activated + d.burned;
+      const perGame = total > 0 ? (d.activated / n).toFixed(1) : '0';
+
+      if (total === 0) {
+        suggestions.push(`<b>${skillDef.name}</b>: never used or burned. The skill's trigger condition may be too narrow. Try: broaden when it activates, or make it passive so it doesn't compete with Skill Burn.`);
+      } else if (d.activated === 0 && d.burned > 0) {
+        suggestions.push(`<b>${skillDef.name}</b>: burned ${d.burned}x but never activated. A Skill Burn reroll is always more attractive than this effect. Try: make the effect stronger (e.g., +3 instead of +2), or make it free to use (doesn't exhaust on activation).`);
+      } else if (d.burned > d.activated * 2.5 && total >= n * 0.3) {
+        const burnPct = Math.round(d.burned / total * 100);
+        suggestions.push(`<b>${skillDef.name}</b>: burned ${burnPct}% of the time (${d.burned} burned vs ${d.activated} used). The effect exists but a reroll is usually better. Try: increase the bonus, add a secondary effect, or make it trigger automatically without exhausting.`);
+      } else if (d.activated > 0 && d.turnedFight === 0 && d.savedFromKO === 0 && d.activatedHydra === 0 && total >= n * 0.2) {
+        suggestions.push(`<b>${skillDef.name}</b>: used ${d.activated}x but never saved a KO or turned a fight, and never at the Hydra. The effect fires but doesn't change outcomes. Try: increase its impact or give it a Hydra-specific bonus.`);
       }
+    });
+
+    // Hero-level observations
+    const winRate = heroData.combats > 0 ? (heroData.wins / heroData.combats * 100) : 0;
+    const koPerGame = heroData.ko / n;
+    if (winRate < 40 && heroData.combats > n) {
+      suggestions.push(`<b>Combat win rate ${winRate.toFixed(0)}%</b> — below 40%. Base STR ${HEROES.find(h=>h.id===hid).str} may need +1, or this hero needs a stronger passive combat bonus.`);
     }
-    if (noEquipLosses >= n * 0.2) {
-      issues.push(`Fought without equipment ${noEquipLosses} times and lost. Gets KO'd and loses gear, then fights naked. A skill that works better WITHOUT equipment or an equipment-recovery mechanic would help.`);
+    if (koPerGame > 2.5) {
+      suggestions.push(`<b>${koPerGame.toFixed(1)} KOs/game</b> — very fragile. Consider: a passive that reduces KO frequency (e.g., "first KO each game is prevented"), or increase base STR by 1.`);
     }
-    if (outmatched >= n * 0.3) {
-      const hasSiphon = hid === 'lulu' || heroSkills.some(s => s.effect && s.effect.includes('-2'));
-      issues.push(`Outmatched ${outmatched} times (margin 4+). ${hasSiphon ? 'Siphon (-2 STR) exists but doesn\'t close a 4+ gap alone.' : 'No debuff skill available.'} Consider: cross-turn Siphon usage (is Lulu using it for this hero?) or stronger equipment.`);
-    }
-    if (heroData.ko / n > 2) {
-      const hasKOPrevention = heroSkills.some(s => s.effect && (s.effect.includes('KO') || s.effect.includes('Prevent')));
-      issues.push(`${(heroData.ko/n).toFixed(1)} KOs/game. ${hasKOPrevention ? 'Has KO prevention skill but still goes down often. Is it being burned instead of saved?' : 'No KO prevention skill.'} Check if Shield Wall (Juju cross-turn) is being used to protect this hero.`);
-    }
-    if (heroData.combats > 0 && heroData.wins / heroData.combats < 0.4) {
-      issues.push(`Combat win rate only ${((heroData.wins/heroData.combats)*100).toFixed(0)}%. Base STR ${HEROES.find(h=>h.id===hid).str} may be too low even with skills.`);
-    }
-    if (issues.length > 0) {
-      html += `<div class="report-card need"><span class="tag need-tag">Struggles</span><b style="color:var(--${hid})">${heroNames[hid]}</b><ul style="margin:4px 0 0 16px;padding:0">`;
-      issues.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
+
+    if (suggestions.length > 0) {
+      html += `<div class="report-card need"><span class="tag need-tag">Improve</span><b style="color:var(--${hid})">${heroNames[hid]}</b><ul style="margin:4px 0 0 16px;padding:0">`;
+      suggestions.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
       html += `</ul></div>`;
     }
   });
+
+  // --- Equipment improvement suggestions ---
+  const equipImprovements = [];
+  const equipData = LEGENDARY_EQUIPMENT.reduce((m,e) => { m[e.name] = e; return m; }, {});
+  Object.entries(equipAgg).filter(([,d]) => d.equipped >= n * 0.1).forEach(([name, d]) => {
+    const total = d.wonWith + d.lostWith;
+    if (total < 3) return;
+    const wr = d.wonWith / total;
+    if (wr >= 0.95 && total >= 5) {
+      const eq = equipData[name] || {};
+      equipImprovements.push(`<b>${name}</b> (STR +${eq.str||0}): ${(wr*100).toFixed(0)}% win rate in ${total} fights. Heroes never lose with this item. Try: reduce STR by 1, or add a drawback (e.g., exhaust 1 skill on equip, can't use Skill Burn while equipped).`);
+    }
+    if (wr <= 0.3 && total >= 5) {
+      equipImprovements.push(`<b>${name}</b>: only ${(wr*100).toFixed(0)}% win rate despite being equipped. The item doesn't help enough. Try: increase STR by 1, or add a combat bonus effect.`);
+    }
+  });
+  if (equipImprovements.length > 0) {
+    html += `<div class="report-card need"><span class="tag need-tag">Equipment</span><b>Equipment Tweaks</b><ul style="margin:4px 0 0 16px;padding:0">`;
+    equipImprovements.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
+    html += `</ul></div>`;
+  }
+
+  // --- Enemy improvement suggestions ---
+  const enemyImprovements = [];
+  Object.entries(encAgg).filter(([,d]) => d.drawn >= n * 0.1).forEach(([name, d]) => {
+    const fights = d.won + d.lost;
+    if (fights < 4) return;
+    const lossRate = d.lost / fights;
+    if (lossRate <= 0.05 && fights >= 8) {
+      enemyImprovements.push(`<b>${name}</b>: heroes win ${((1-lossRate)*100).toFixed(0)}% of the time (${d.won}W/${d.lost}L). Too easy. Try: +1 STR, add a special ability, or make it a "group" enemy (counts as 2 fights).`);
+    } else if (lossRate >= 0.85 && fights >= 8) {
+      enemyImprovements.push(`<b>${name}</b>: heroes lose ${(lossRate*100).toFixed(0)}% of the time (${d.lost}L/${d.won}W). Too punishing. Try: -1 STR, add a flee condition, or give a reward on defeat to make the risk worth it.`);
+    }
+  });
+  if (enemyImprovements.length > 0) {
+    html += `<div class="report-card need"><span class="tag need-tag">Enemies</span><b>Enemy Tweaks</b><ul style="margin:4px 0 0 16px;padding:0">`;
+    enemyImprovements.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
+    html += `</ul></div>`;
+  }
 
   const isPrepare = results[0] && results[0].tracker && results[0].tracker.prepareFirst;
   if (winRate < 40) {
