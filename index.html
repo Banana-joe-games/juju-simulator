@@ -382,6 +382,7 @@ input[type=range] {
     <h4>Toggles</h4>
     <div class="tweak-toggle"><input type="checkbox" id="tw_skills" checked><label for="tw_skills">Hero Skills (OFF = solo Skill Burn, niente abilità)</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
     <h4>Batch Size</h4>
     <div class="tweak-row"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
     <div class="tweaks-actions">
@@ -570,7 +571,7 @@ const TWEAK_DEFAULTS = {
     return m;
   })(),
   mishapEnemyStrMod: 0, misfortuneEnemyStrMod: 0,
-  skillsEnabled: true, followersEnabled: true,
+  skillsEnabled: true, followersEnabled: true, overflowGameOver: true,
   batchSize: 50
 };
 
@@ -630,6 +631,7 @@ function resetTweaks() {
   document.getElementById('tw_misfortuneEnemy').value = 0; document.getElementById('tw_misfortuneEnemy_v').textContent = '0';
   document.getElementById('tw_skills').checked = true;
   document.getElementById('tw_followers').checked = true;
+  document.getElementById('tw_overflow').checked = true;
   document.getElementById('tw_batchSize').value = 50;
   // Reset per-equipment
   LEGENDARY_EQUIPMENT.forEach(function(e, i) {
@@ -686,6 +688,7 @@ function readTweaks() {
     misfortuneEnemyStrMod: parseInt(document.getElementById('tw_misfortuneEnemy').value),
     skillsEnabled: document.getElementById('tw_skills').checked,
     followersEnabled: document.getElementById('tw_followers').checked,
+    overflowGameOver: document.getElementById('tw_overflow').checked,
     batchSize: parseInt(document.getElementById('tw_batchSize').value) || 50
   };
 }
@@ -715,6 +718,7 @@ function getTweaksDiff(tweaks) {
   if (tweaks.misfortuneEnemyStrMod !== 0) diffs.push('Misfortune enemy STR: ' + (tweaks.misfortuneEnemyStrMod > 0 ? '+' : '') + tweaks.misfortuneEnemyStrMod);
   if (!tweaks.skillsEnabled) diffs.push('Skills: DISABLED (Skill Burn only)');
   if (!tweaks.followersEnabled) diffs.push('Followers: DISABLED');
+  if (!tweaks.overflowGameOver) diffs.push('Hydra Overflow: NOT game over (heads just stop growing)');
   return diffs;
 }
 
@@ -2960,10 +2964,15 @@ function hydraAttack(hero) {
 
 function growHydraHead() {
   const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
+  const overflowEnabled = !G._tweaks || G._tweaks.overflowGameOver !== false;
   if (aliveCount >= G.hydraMaxHeads) {
-    log(`  💀 OVERFLOW! Hydra exceeds max heads (${aliveCount}/${G.hydraMaxHeads}) — GAME OVER!`, 'defeat');
-    G.gameOver = true;
-    G.tracker.deathMoments.push({ hero: 'party', context: `Hydra overflow: ${aliveCount} heads alive, max was ${G.hydraMaxHeads}`, turn: G.turn });
+    if (overflowEnabled) {
+      log(`  💀 OVERFLOW! Hydra exceeds max heads (${aliveCount}/${G.hydraMaxHeads}) — GAME OVER!`, 'defeat');
+      G.gameOver = true;
+      G.tracker.deathMoments.push({ hero: 'party', context: `Hydra overflow: ${aliveCount} heads alive, max was ${G.hydraMaxHeads}`, turn: G.turn });
+    } else {
+      log(`  ⚠ Hydra at max heads (${aliveCount}/${G.hydraMaxHeads}) — no new head grows (overflow disabled)`, 'system');
+    }
     return;
   }
   const usedNames = new Set(G.hydraHeads.map(h => h.name));
