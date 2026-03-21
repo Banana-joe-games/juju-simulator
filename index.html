@@ -831,8 +831,31 @@ function runTurn() {
     }
   }
 
-  // NOTE: Wild Call (Gigi), Reality Warp (Lulu), Spell Mirror (Lulu), Copycat (Eggo),
-  // Shadowstep (Eggo), Taunt extra attack at Hydra (Juju) — not simulated yet (spatial/complex)
+  // Wild Call (Gigi): draw Wonder until Follower
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Wild Call') && hero.followers.length < 2) {
+    useSkill(hero, 'Wild Call');
+    trackSkill(hero.id, 'Wild Call', 'activated');
+    let foundFollower = null;
+    const skipped = [];
+    while (G.wonderDeck.length > 0) {
+      const idx = G.wonderDeck.pop();
+      const card = WONDER_CARDS[idx];
+      if (card.type === 'follower' && !foundFollower) {
+        foundFollower = card;
+        break;
+      } else {
+        skipped.push(idx);
+      }
+    }
+    skipped.forEach(i => G.wonderDeck.push(i));
+    shuffle(G.wonderDeck);
+    if (foundFollower) {
+      hero.followers.push({name: foundFollower.name, str: foundFollower.str || 0, effect: foundFollower.effect});
+      log(`  🐦 Wild Call: ${hero.name} found ${foundFollower.name}!`, 'wonder');
+    } else {
+      log(`  🐦 Wild Call: no followers left in Wonder deck`, 'system');
+    }
+  }
 
   // Hound following from previous turn
   if (hero.houndFollowing) {
@@ -849,6 +872,30 @@ function runTurn() {
     hydraAttack(hero);
   } else {
     movePhase(hero);
+
+    // === TAUNT (Juju): fight a random enemy in dungeon ===
+    if (hero.id === 'juju' && isSkillReady(hero, 'Taunt') && !hero.ko && !G.gameOver && !G.hydraActive) {
+      if (G.mishapDeck.length > 0) {
+        const enemies = MISHAP_CARDS.filter(c => c.type === 'enemy');
+        if (enemies.length > 0) {
+          const enemy = enemies[Math.floor(Math.random() * enemies.length)];
+          useSkill(hero, 'Taunt');
+          trackSkill(hero.id, 'Taunt', 'activated');
+          log(`  🗡 Taunt: ${hero.name} challenges ${enemy.name}!`, 'flame');
+          combat(hero, {...enemy}, 'mishap');
+        }
+      }
+    }
+
+    // === SHADOWSTEP (Eggo): extra turn from scratch ===
+    if (hero.id === 'eggo' && isSkillReady(hero, 'Shadowstep') && !G.gameOver && !hero.ko && !G.hydraActive) {
+      useSkill(hero, 'Shadowstep');
+      trackSkill(hero.id, 'Shadowstep', 'activated');
+      log(`  👤 Shadowstep: ${hero.name} takes another turn!`, 'flame');
+      hero.talentUsedThisTurn = false;
+      hero.dodgeActive = false;
+      movePhase(hero);
+    }
   }
 
   if (!G.gameOver) {
@@ -952,6 +999,16 @@ function movePhase(hero) {
 
   const typeIcon = destType === 'wonder' ? '✦ Wonder' : destType === 'dread' ? '☠ Dread Dungeon' : '· Common Passage';
   log(`${hero.name} lands on ${typeIcon} (tile #${G.tilesPlaced})`, destType === 'wonder' ? 'wonder' : destType === 'dread' ? 'misfortune' : 'mishap');
+
+  // Reality Warp (Lulu): skip dangerous rooms
+  if (destType !== 'wonder' && isSkillReady(hero, 'Reality Warp') && hero.id === 'lulu') {
+    if (destType === 'dread' || (destType === 'common' && totalStr(hero) < 4)) {
+      useSkill(hero, 'Reality Warp');
+      trackSkill(hero.id, 'Reality Warp', 'activated');
+      log(`  🌀 Reality Warp: ${hero.name} warps to a safe room!`, 'wonder');
+      return;
+    }
+  }
 
   // Room resolution
   resolveRoom(hero, destType);
@@ -1119,6 +1176,12 @@ function resolveMisfortuneCard(hero, card) {
 
 function resolveTrap(hero, card) {
   trackTrap(card.name, 'triggered');
+  // Spell Mirror: cancel dangerous trap effects
+  if (trySpellMirror(card.effect)) {
+    log(`    Trap effect cancelled by Spell Mirror! No harm done.`, 'wonder');
+    trackTrap(card.name, 'survived');
+    return;
+  }
   switch(card.effect) {
     case 'roll_1_2_ko': {
       const r = heroRollDie(hero);
@@ -1245,6 +1308,22 @@ function resolveTrap(hero, card) {
   }
 }
 
+// ========== SPELL MIRROR ==========
+function trySpellMirror(context) {
+    const lulu = G.heroes.find(h => h.id === 'lulu');
+    if (!lulu || !isSkillReady(lulu, 'Spell Mirror')) return false;
+    const dangerous = ['flame_counts_0','only_flame_hits','fight_twice','rolls_2_best_double_lose',
+        'ko_or_exhaust_all','roll_1_3_ko','fewer_2_skills_ko','fight_self_4dice',
+        'aoe_skill_drain','exhaust_2_or_minus2','exhaust_or_ko'];
+    if (dangerous.includes(context)) {
+        useSkill(lulu, 'Spell Mirror');
+        trackSkill('lulu', 'Spell Mirror', 'activated');
+        log(`  🪞 Spell Mirror: Lulu cancels the special effect!`, 'flame');
+        return true;
+    }
+    return false;
+}
+
 // ========== COMBAT ==========
 function combat(hero, enemyCard, tier) {
   G.stats.combats++;
@@ -1299,13 +1378,30 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
+  // === SPELL MIRROR: cancel dangerous enemy effects ===
+  let spellMirrored = false;
+  if (enemyCard.effect && trySpellMirror(enemyCard.effect)) {
+    spellMirrored = true;
+  }
+
+  // === COPYCAT (Eggo): copy Siphon pre-combat ===
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && enemyStr >= 5) {
+    const luluH = G.heroes.find(h => h.id === 'lulu');
+    if (luluH && isSkillReady(luluH, 'Siphon')) {
+      useSkill(hero, 'Copycat');
+      enemyStr -= 2;
+      trackSkill(hero.id, 'Copycat', 'activated');
+      log(`  🎭 Copycat: ${hero.name} copies Siphon! Enemy -2 STR (now ${enemyStr})`, 'flame');
+    }
+  }
+
   // === PRE-COMBAT EFFECTS ===
-  if (enemyCard.effect === 'exhaust_1_skill') {
+  if (!spellMirrored && enemyCard.effect === 'exhaust_1_skill') {
     exhaustOneSkill(hero);
     log(`    Snakerogue exhausts a skill before combat!`, 'misfortune');
   }
 
-  if (enemyCard.effect === 'aoe_skill_drain') {
+  if (!spellMirrored && enemyCard.effect === 'aoe_skill_drain') {
     G.heroes.forEach(h => {
       const r = heroRollDie(h);
       if (r.val <= 2) { exhaustOneSkill(h); log(`    Stormcaller: ${h.name} loses a skill!`, 'misfortune'); }
@@ -1314,7 +1410,7 @@ function combat(hero, enemyCard, tier) {
 
   // Mana Leech: exhaust 2 or -2
   let manaLeechPenalty = 0;
-  if (enemyCard.effect === 'exhaust_2_or_minus2') {
+  if (!spellMirrored && enemyCard.effect === 'exhaust_2_or_minus2') {
     if (readySkillCount(hero) >= 2) {
       exhaustOneSkill(hero);
       exhaustOneSkill(hero);
@@ -1425,14 +1521,14 @@ function combat(hero, enemyCard, tier) {
   }
 
   // === RUN FIGHT (supports Slayer: fight_twice) ===
-  const winsNeeded = (enemyCard.effect === 'fight_twice') ? 2 : 1;
+  const winsNeeded = (!spellMirrored && enemyCard.effect === 'fight_twice') ? 2 : 1;
   let totalWins = 0;
   for (let fightRound = 0; fightRound < winsNeeded; fightRound++) {
     if (G.gameOver) return;
     if (fightRound > 0) log(`    Slayer: Round ${fightRound + 1}!`, 'combat');
 
     const result = singleFight(hero, enemyCard, tier, enemyStr,
-      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive });
+      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive, spellMirrored });
 
     if (result === 'win') {
       totalWins++;
@@ -1522,13 +1618,13 @@ function combat(hero, enemyCard, tier) {
 }
 
 function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
-  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive } = bonuses;
+  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive, spellMirrored } = bonuses;
 
   // === ENEMY ROLL ===
   let enemyTotal;
   let enemyRollResult = null;
 
-  if (enemyCard.effect === 'rolls_2_best_double_lose') {
+  if (!spellMirrored && enemyCard.effect === 'rolls_2_best_double_lose') {
     // Jack o' Lantern: 2 dice, keep best, doubles = auto-lose
     const r1 = rollDie(hero), r2 = rollDie(hero);
     const isDouble = r1.val === r2.val;
@@ -1541,7 +1637,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
       return 'loss';
     }
     enemyRollResult = { val: bestRoll, isFlame: false };
-  } else if (enemyCard.effect === 'rolls_2_best') {
+  } else if (!spellMirrored && enemyCard.effect === 'rolls_2_best') {
     // Ghoul: 2 dice, keep best
     const r1 = rollDie(hero), r2 = rollDie(hero);
     const bestRoll = Math.max(r1.val, r2.val);
@@ -1605,14 +1701,14 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 
   // === ROLL MODIFIERS ===
   // Mycoid: flame counts as 0 AND no talent
-  if (enemyCard.effect === 'flame_counts_0' && isFlame) {
+  if (!spellMirrored && enemyCard.effect === 'flame_counts_0' && isFlame) {
     heroRoll = { val: 0, isFlame: true };
     isFlame = false;
     log(`    Mycoid spores! Flame roll counts as 0, no talent!`, 'misfortune');
   }
 
   // Djin: only flame hits
-  if (enemyCard.effect === 'only_flame_hits' && !isFlame) {
+  if (!spellMirrored && enemyCard.effect === 'only_flame_hits' && !isFlame) {
     log(`    Djin: non-Flame roll (${heroRoll.val}) counts as 0!`, 'combat');
     heroRoll = { val: 0, isFlame: false };
   }
@@ -1806,6 +1902,26 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
     trackSkill(hero.id, 'Soothe', 'savedFromKO');
     log(`    🌿 Soothe! ${hero.name} calms the ${enemyCard.name} and avoids KO!`, 'flame');
     return;
+  }
+
+  // === SKILL: Copycat (Eggo) — copy Shield Wall or Soothe from ally ===
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat')) {
+    const juju = G.heroes.find(h => h.id === 'juju');
+    if (juju && isSkillReady(juju, 'Shield Wall')) {
+      useSkill(hero, 'Copycat');
+      trackSkill(hero.id, 'Copycat', 'activated');
+      trackSkill(hero.id, 'Copycat', 'savedFromKO');
+      log(`  🎭 Copycat: ${hero.name} copies Shield Wall from Juju! KO prevented!`, 'flame');
+      return;
+    }
+    const gigi = G.heroes.find(h => h.id === 'gigi');
+    if (gigi && isSkillReady(gigi, 'Soothe') && (enemyCard.str || 0) >= 4) {
+      useSkill(hero, 'Copycat');
+      trackSkill(hero.id, 'Copycat', 'activated');
+      trackSkill(hero.id, 'Copycat', 'savedFromKO');
+      log(`  🎭 Copycat: ${hero.name} copies Soothe from Gigi! KO prevented!`, 'flame');
+      return;
+    }
   }
 
   // Warden Angel: discard to win instead
@@ -2071,8 +2187,15 @@ function hydraAttack(hero) {
 
   const broodAlive = G.hydraHeads.some(h => h.name === 'The Brood' && !h.destroyed);
 
+  // Spell Mirror for Hydra head abilities
+  let hydraSpellMirrored = false;
+  const hydraHeadEffectMap = {'The Fangs':'exhaust_2_or_minus2','The Maw':'exhaust_2_or_minus2','The Brood':'flame_counts_0'};
+  if (hydraHeadEffectMap[head.name] && trySpellMirror(hydraHeadEffectMap[head.name])) {
+    hydraSpellMirrored = true;
+  }
+
   // On Attack effects
-  if (head.skillType === 'onAttack') {
+  if (!hydraSpellMirrored && head.skillType === 'onAttack') {
     if (head.name === 'The Fangs') {
       G.heroes.forEach(h => { if (G.heroesInHydraArea.has(h.id)) exhaustOneSkill(h); });
       log(`    The Fangs: all heroes exhaust 1 Skill!`, 'misfortune');
@@ -2113,7 +2236,7 @@ function hydraAttack(hero) {
     return;
   }
 
-  let isFlame = (heroRoll.isFlame || hero.giftedFlame) && !broodAlive;
+  let isFlame = (heroRoll.isFlame || hero.giftedFlame) && (!broodAlive || hydraSpellMirrored);
   hero.giftedFlame = false;
 
   if (isFlame && !hero.talentUsedThisTurn && !hasStalker(hero, 'no_flame_effect')) {
@@ -2284,6 +2407,24 @@ function hydraAttack(hero) {
     applyKO(hero);
     if (G.gameOver) return;
     growHydraHead();
+  }
+
+  // === TAUNT (Juju): extra Hydra attack ===
+  if (hero.id === 'juju' && isSkillReady(hero, 'Taunt') && !G.gameOver && !hero.ko && G.heroesInHydraArea.has(hero.id)) {
+    useSkill(hero, 'Taunt');
+    trackSkill(hero.id, 'Taunt', 'activated');
+    log(`  🗡 Taunt: ${hero.name} makes an additional Hydra attack!`, 'flame');
+    hydraAttack(hero);
+  }
+
+  // === SHADOWSTEP (Eggo): extra turn at Hydra ===
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Shadowstep') && !G.gameOver && !hero.ko && G.heroesInHydraArea.has(hero.id)) {
+    useSkill(hero, 'Shadowstep');
+    trackSkill(hero.id, 'Shadowstep', 'activated');
+    log(`  👤 Shadowstep: ${hero.name} takes another turn at the Hydra!`, 'flame');
+    hero.talentUsedThisTurn = false;
+    hero.dodgeActive = false;
+    hydraAttack(hero);
   }
 }
 
@@ -2471,7 +2612,7 @@ function generateReport(results) {
   const heroIds = ['juju','gigi','lulu','eggo'];
 
   let html = `<h2>PLAYTEST REPORT</h2>`;
-  html += `<p style="color:var(--dim);font-size:11px;margin-bottom:12px">Skills are now active: Shield Wall, Soothe, Siphon, Pack Leader, Heist, Rallying Blow, Cheap Shot, Herbalist. Spatial/complex skills (Wild Call, Reality Warp, Spell Mirror, Copycat, Shadowstep, Taunt) are not yet simulated.</p>`;
+  html += `<p style="color:var(--dim);font-size:11px;margin-bottom:12px">All skills are now active: Shield Wall, Soothe, Siphon, Pack Leader, Heist, Rallying Blow, Cheap Shot, Herbalist, Wild Call, Reality Warp, Spell Mirror, Copycat, Shadowstep, Taunt. See Skill Analysis section for per-skill usage data.</p>`;
   html += `<div class="report-section"><h3>Overview (${n} games)</h3>`;
   html += `<div class="report-card">`;
   html += `<div class="report-stat"><span class="rl">Win Rate</span><span class="rv" style="color:${winRate > 50 ? 'var(--heal)' : 'var(--ko)'}">${winRate}% (${wins}/${n})</span></div>`;
@@ -2492,7 +2633,7 @@ function generateReport(results) {
 
   // === PER-HERO ANALYSIS ===
   html += `<div class="report-section"><h3>Hero Performance</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Without skills active. Shows each hero's raw combat effectiveness based on base STR, equipment, and talents only.</p>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Shows each hero's combat effectiveness including all skills, equipment, and talents.</p>`;
   heroIds.forEach(hid => {
     const agg = { combats:0, wins:0, losses:0, ko:0, skillsBurned:0, damageDealt:0, damageTaken:0, relicsSpent:0, gaps:[] };
     results.forEach(r => {
@@ -2681,6 +2822,44 @@ function generateReport(results) {
     if (agg.triggered + agg.blocked === 0) return;
     const comment = talentComments[hid] ? talentComments[hid](agg) : '';
     html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]}</b> — triggered ${agg.triggered}x, blocked ${agg.blocked}x<br>${comment}</div>`;
+  });
+  html += `</div>`;
+
+  // === SKILL ANALYSIS ===
+  html += `<div class="report-section"><h3>Skill Analysis</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">How often each skill was used and its impact. Skills that never activate may need a lower activation threshold or a redesign.</p>`;
+
+  const skillAgg = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.skills).forEach(([key, data]) => {
+      if (!skillAgg[key]) skillAgg[key] = { activated:0, burned:0, savedFromKO:0, turnedFight:0 };
+      Object.keys(data).forEach(k => { if (skillAgg[key][k] !== undefined) skillAgg[key][k] += data[k]; });
+    });
+  });
+
+  heroIds.forEach(hid => {
+    const heroSkills = Object.entries(skillAgg).filter(([k]) => k.startsWith(hid + '_'));
+    if (heroSkills.length === 0) return;
+    html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]} Skills</b><br>`;
+    heroSkills.sort((a,b) => b[1].activated - a[1].activated).forEach(([key, d]) => {
+      const sname = key.substring(hid.length + 1);
+      if (sname === 'Skill Burn' || sname === 'Dodge (Talent)') return;
+      const perGame = (d.activated / n).toFixed(1);
+      let impact = '';
+      if (d.savedFromKO > 0) impact += ` Prevented ${d.savedFromKO} KOs.`;
+      if (d.turnedFight > 0) impact += ` Turned ${d.turnedFight} fights.`;
+
+      let comment = '';
+      if (d.activated === 0) comment = ' \u2192 Never used. AI conditions may be too strict, or situations never arise. Consider broadening the trigger.';
+      else if (perGame < 0.3) comment = ' \u2192 Rarely used. Situational \u2014 may feel like a dead card in real play.';
+      else if (perGame >= 1.5) comment = ' \u2192 Very active. Core part of this hero\'s gameplay loop.';
+      else comment = ' \u2192 Moderate usage. Feels like a real choice.';
+
+      html += `<div style="margin:4px 0;padding:3px 6px;background:#0e0e16;border-radius:3px;font-size:11px">`;
+      html += `<b>${sname}</b> \u2014 used ${d.activated}x (${perGame}/game)${impact}`;
+      html += `<br><i style="color:var(--dim)">${comment}</i></div>`;
+    });
+    html += `</div>`;
   });
   html += `</div>`;
 
@@ -2878,6 +3057,28 @@ function runSilentGame() {
         trackSkill(hero.id, 'Herbalist', 'activated');
       }
     }
+    // Wild Call (Gigi): draw Wonder until Follower (batch sim)
+    if (hero.id === 'gigi' && isSkillReady(hero, 'Wild Call') && hero.followers.length < 2) {
+      useSkill(hero, 'Wild Call');
+      trackSkill(hero.id, 'Wild Call', 'activated');
+      let foundFollower = null;
+      const skipped = [];
+      while (G.wonderDeck.length > 0) {
+        const idx = G.wonderDeck.pop();
+        const card = WONDER_CARDS[idx];
+        if (card.type === 'follower' && !foundFollower) {
+          foundFollower = card;
+          break;
+        } else {
+          skipped.push(idx);
+        }
+      }
+      skipped.forEach(i => G.wonderDeck.push(i));
+      shuffle(G.wonderDeck);
+      if (foundFollower) {
+        hero.followers.push({name: foundFollower.name, str: foundFollower.str || 0, effect: foundFollower.effect});
+      }
+    }
 
     // Hound
     if (hero.houndFollowing) {
@@ -2892,6 +3093,26 @@ function runSilentGame() {
       hydraAttack(hero);
     } else {
       movePhase(hero);
+      // Taunt (Juju): fight random enemy in dungeon (batch sim)
+      if (hero.id === 'juju' && isSkillReady(hero, 'Taunt') && !hero.ko && !G.gameOver && !G.hydraActive) {
+        if (G.mishapDeck.length > 0) {
+          const enemies = MISHAP_CARDS.filter(c => c.type === 'enemy');
+          if (enemies.length > 0) {
+            const enemy = enemies[Math.floor(Math.random() * enemies.length)];
+            useSkill(hero, 'Taunt');
+            trackSkill(hero.id, 'Taunt', 'activated');
+            combat(hero, {...enemy}, 'mishap');
+          }
+        }
+      }
+      // Shadowstep (Eggo): extra turn in dungeon (batch sim)
+      if (hero.id === 'eggo' && isSkillReady(hero, 'Shadowstep') && !G.gameOver && !hero.ko && !G.hydraActive) {
+        useSkill(hero, 'Shadowstep');
+        trackSkill(hero.id, 'Shadowstep', 'activated');
+        hero.talentUsedThisTurn = false;
+        hero.dodgeActive = false;
+        movePhase(hero);
+      }
     }
 
     if (!G.gameOver) nextHero();
