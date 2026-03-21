@@ -2134,7 +2134,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     log(`    Jack o' Lantern rolls [${r1.val}, ${r2.val}] keeps ${bestRoll} + STR ${enemyStr} = ${enemyTotal}${isDouble ? ' DOUBLES!' : ''}`, 'combat');
     if (isDouble) {
       log(`    Doubles! ${hero.name} automatically loses!`, 'ko');
-      handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed);
+      handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr);
       return 'loss';
     }
     enemyRollResult = { val: bestRoll, isFlame: false };
@@ -2411,12 +2411,13 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
       ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: `Outmatched by ${margin}`, type: 'outmatched' });
     }
     log(`  ✗ ${hero.name} loses to ${enemyCard.name}! (${heroTotal} vs ${enemyTotal}${beatMargin ? '+' + beatMargin : ''})`, 'ko');
-    handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed);
+    handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr);
     return 'loss';
   }
 }
 
-function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
+function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
+  if (enemyStr === undefined) enemyStr = enemyCard.str || 0;
   // Strategic AI: evaluate whether to spend resources preventing this KO
   const preventKO = shouldPreventKO(hero);
 
