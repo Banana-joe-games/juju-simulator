@@ -1050,7 +1050,7 @@ function runTurn() {
   // === SKILL ACTIVATIONS (turn start) ===
 
   // Herbalist (Gigi): recharge ally skill
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Herbalist')) {
+  if (hero.id === 'gigi' && shouldUseSkill(hero, 'Herbalist', { atHydra: G.heroesInHydraArea.has(hero.id) })) {
     const allies = G.heroes.filter(h => h.id !== hero.id);
     const neediest = allies.filter(h => h.skillStates.some(s => s === 'exhausted'))
         .sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
@@ -1063,7 +1063,7 @@ function runTurn() {
   }
 
   // Wild Call (Gigi): draw Wonder until Follower
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Wild Call') && hero.followers.length < 2) {
+  if (hero.id === 'gigi' && shouldUseSkill(hero, 'Wild Call', { atHydra: false })) {
     useSkill(hero, 'Wild Call');
     trackSkill(hero.id, 'Wild Call', 'activated');
     let foundFollower = null;
@@ -1105,7 +1105,7 @@ function runTurn() {
     movePhase(hero);
 
     // === TAUNT (Juju): fight a random enemy in dungeon ===
-    if (hero.id === 'juju' && isSkillReady(hero, 'Taunt') && !hero.ko && !G.gameOver && !G.hydraActive) {
+    if (hero.id === 'juju' && !hero.ko && !G.gameOver && !G.hydraActive && shouldUseSkill(hero, 'Taunt', { atHydra: false })) {
       if (G.mishapDeck.length > 0) {
         const enemies = MISHAP_CARDS.filter(c => c.type === 'enemy');
         if (enemies.length > 0) {
@@ -1119,7 +1119,7 @@ function runTurn() {
     }
 
     // === SHADOWSTEP (Eggo): extra turn from scratch ===
-    if (hero.id === 'eggo' && isSkillReady(hero, 'Shadowstep') && !G.gameOver && !hero.ko && !G.hydraActive) {
+    if (hero.id === 'eggo' && !G.gameOver && !hero.ko && !G.hydraActive && shouldUseSkill(hero, 'Shadowstep', { atHydra: false })) {
       useSkill(hero, 'Shadowstep');
       trackSkill(hero.id, 'Shadowstep', 'activated');
       log(`  👤 Shadowstep: ${hero.name} takes another turn!`, 'flame');
@@ -1231,9 +1231,8 @@ function movePhase(hero) {
   const typeIcon = destType === 'wonder' ? '✦ Wonder' : destType === 'dread' ? '☠ Dread Dungeon' : '· Common Passage';
   log(`${hero.name} lands on ${typeIcon} (tile #${G.tilesPlaced})`, destType === 'wonder' ? 'wonder' : destType === 'dread' ? 'misfortune' : 'mishap');
 
-  // Reality Warp (Lulu): skip dangerous rooms — but save for Hydra phase
-  const saveRWForHydra = G.hydraActive || G.relicsCollected >= 3;
-  if (destType !== 'wonder' && isSkillReady(hero, 'Reality Warp') && hero.id === 'lulu' && !saveRWForHydra) {
+  // Reality Warp (Lulu): skip dangerous rooms — strategic decision
+  if (destType !== 'wonder' && hero.id === 'lulu' && shouldUseSkill(hero, 'Reality Warp', { atHydra: false })) {
     if (destType === 'dread' || (destType === 'common' && totalStr(hero) < 4)) {
       useSkill(hero, 'Reality Warp');
       trackSkill(hero.id, 'Reality Warp', 'activated');
@@ -1571,30 +1570,23 @@ function resolveTrap(hero, card) {
 function trySpellMirror(context, atHydra) {
     const lulu = G.heroes.find(h => h.id === 'lulu');
     if (!lulu || !isSkillReady(lulu, 'Spell Mirror')) return false;
-    // At Hydra: always use on head abilities (this is the key moment)
-    if (atHydra) {
-        useSkill(lulu, 'Spell Mirror');
-        trackSkill('lulu', 'Spell Mirror', 'activated');
-        log(`  🪞 Spell Mirror: Lulu cancels the Hydra head ability!`, 'flame');
-        return true;
-    }
-    // In dungeon: only use on truly lethal effects, AND only if Hydra isn't close
-    const saveForHydra = G.hydraActive || G.relicsCollected >= 3;
+
     const lethal = ['ko_or_exhaust_all','roll_1_3_ko','fewer_2_skills_ko','fight_self_4dice'];
     const dangerous = ['flame_counts_0','only_flame_hits','fight_twice','rolls_2_best_double_lose',
         'aoe_skill_drain','exhaust_2_or_minus2','exhaust_or_ko'];
-    // Use on lethal traps even if saving for Hydra (survival first)
-    if (lethal.includes(context)) {
+    const isLethal = lethal.includes(context);
+    const isDangerous = dangerous.includes(context);
+
+    if (shouldUseSkill(lulu, 'Spell Mirror', { atHydra: !!atHydra, isLethal, isDangerous })) {
         useSkill(lulu, 'Spell Mirror');
         trackSkill('lulu', 'Spell Mirror', 'activated');
-        log(`  🪞 Spell Mirror: Lulu cancels the deadly effect!`, 'flame');
-        return true;
-    }
-    // Use on dangerous effects only if NOT saving for Hydra
-    if (!saveForHydra && dangerous.includes(context)) {
-        useSkill(lulu, 'Spell Mirror');
-        trackSkill('lulu', 'Spell Mirror', 'activated');
-        log(`  🪞 Spell Mirror: Lulu cancels the special effect!`, 'flame');
+        if (atHydra) {
+            log(`  🪞 Spell Mirror: Lulu cancels the Hydra head ability!`, 'flame');
+        } else if (isLethal) {
+            log(`  🪞 Spell Mirror: Lulu cancels the deadly effect!`, 'flame');
+        } else {
+            log(`  🪞 Spell Mirror: Lulu cancels the special effect!`, 'flame');
+        }
         return true;
     }
     return false;
@@ -1666,17 +1658,6 @@ function combat(hero, enemyCard, tier) {
     spellMirrored = true;
   }
 
-  // === COPYCAT (Eggo): copy Siphon pre-combat ===
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && enemyStr >= 5) {
-    const luluH = G.heroes.find(h => h.id === 'lulu');
-    if (luluH && isSkillReady(luluH, 'Siphon')) {
-      useSkill(hero, 'Copycat');
-      enemyStr -= 2;
-      trackSkill(hero.id, 'Copycat', 'activated');
-      log(`  🎭 Copycat: ${hero.name} copies Siphon! Enemy -2 STR (now ${enemyStr})`, 'flame');
-    }
-  }
-
   // === PRE-COMBAT EFFECTS ===
   if (!spellMirrored && enemyCard.effect === 'exhaust_1_skill') {
     exhaustOneSkill(hero);
@@ -1714,15 +1695,11 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
-  // === AI STRATEGY: Save key skills for Hydra ===
-  // When Hydra is active or close (3+ relics collected), don't waste combat skills on dungeon enemies
-  // Exception: if the enemy is very dangerous (STR 5+), use skills to survive
-  const saveForHydra = G.hydraActive || G.relicsCollected >= 3;
-  const dungeonEnemyIsDangerous = enemyStr >= 5;
+  // === STRATEGIC AI: Skill decisions via shouldUseSkill() ===
+  const skillCtx = { enemyStr, atHydra: false };
 
   // === SKILL: Soothe (Gigi) — STR 3- discard enemy, skip fight ===
-  // In dungeon: use freely (saves HP/resources). At Hydra: Soothe is used for KO prevention (handled in handleCombatLoss)
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && enemyStr <= 3 && !saveForHydra) {
+  if (hero.id === 'gigi' && enemyStr <= 3 && shouldUseSkill(hero, 'Soothe', { ...skillCtx, preCombat: true })) {
     useSkill(hero, 'Soothe');
     trackSkill(hero.id, 'Soothe', 'activated');
     log(`    🌿 Soothe! ${enemyCard.name} (STR ${enemyStr}) calmed and discarded!`, 'flame');
@@ -1734,9 +1711,8 @@ function combat(hero, enemyCard, tier) {
   }
 
   // === SKILL: Siphon (Lulu) — -2 STR to ANY enemy in combat ===
-  // Save for Hydra unless enemy is very dangerous
   const luluForSiphon = G.heroes.find(h => h.id === 'lulu');
-  if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon') && enemyStr >= 3 && (!saveForHydra || dungeonEnemyIsDangerous)) {
+  if (luluForSiphon && shouldUseSkill(luluForSiphon, 'Siphon', skillCtx)) {
     useSkill(luluForSiphon, 'Siphon');
     enemyStr -= 2;
     trackSkill('lulu', 'Siphon', 'activated');
@@ -1744,10 +1720,20 @@ function combat(hero, enemyCard, tier) {
     log(`    🔮 Siphon! Lulu${who} reduces enemy STR by 2 (now ${enemyStr})`, 'flame');
   }
 
+  // === SKILL: Copycat (Eggo) — copy Siphon pre-combat ===
+  if (hero.id === 'eggo' && shouldUseSkill(hero, 'Copycat', { ...skillCtx, preCombatSiphon: true })) {
+    const luluH = G.heroes.find(h => h.id === 'lulu');
+    if (luluH && isSkillReady(luluH, 'Siphon')) {
+      useSkill(hero, 'Copycat');
+      enemyStr -= 2;
+      trackSkill(hero.id, 'Copycat', 'activated');
+      log(`  🎭 Copycat: ${hero.name} copies Siphon! Enemy -2 STR (now ${enemyStr})`, 'flame');
+    }
+  }
+
   // === SKILL: Pack Leader (Gigi) — +1 per follower ===
-  // Save for Hydra unless enemy is dangerous
   let packLeaderBonus = 0;
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Pack Leader') && hero.followers.length > 0 && (!saveForHydra || dungeonEnemyIsDangerous)) {
+  if (hero.id === 'gigi' && shouldUseSkill(hero, 'Pack Leader', skillCtx)) {
     useSkill(hero, 'Pack Leader');
     packLeaderBonus = hero.followers.length;
     trackSkill(hero.id, 'Pack Leader', 'activated');
@@ -1755,21 +1741,18 @@ function combat(hero, enemyCard, tier) {
   }
 
   // === SKILL: Fireball (Lulu) — +1 per exhausted skill ===
-  // Save for Hydra always (it's strongest at Hydra when many skills are exhausted)
   let fireballBonus = 0;
-  if (hero.id === 'lulu' && isSkillReady(hero, 'Fireball') && (!saveForHydra || dungeonEnemyIsDangerous)) {
+  if (hero.id === 'lulu' && shouldUseSkill(hero, 'Fireball', skillCtx)) {
     const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
-    if (exhaustedCount >= 2) {
-      useSkill(hero, 'Fireball');
-      fireballBonus = exhaustedCount;
-      trackSkill(hero.id, 'Fireball', 'activated');
-      log(`    🔥 Fireball! +${fireballBonus} STR (${exhaustedCount} exhausted skills)`, 'flame');
-    }
+    useSkill(hero, 'Fireball');
+    fireballBonus = exhaustedCount;
+    trackSkill(hero.id, 'Fireball', 'activated');
+    log(`    🔥 Fireball! +${fireballBonus} STR (${exhaustedCount} exhausted skills)`, 'flame');
   }
 
   // === SKILL: Heist (Eggo) — -1 STR but win = draw legendary ===
   let heistActive = false;
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Heist') && enemyStr <= 3) {
+  if (hero.id === 'eggo' && shouldUseSkill(hero, 'Heist', skillCtx)) {
     useSkill(hero, 'Heist');
     heistActive = true;
     trackSkill(hero.id, 'Heist', 'activated');
@@ -1778,7 +1761,7 @@ function combat(hero, enemyCard, tier) {
 
   // === SKILL: Rallying Blow (Juju) — roll 2 keep worst, win = all heroes recharge 1 ===
   let rallyingBlowActive = false;
-  if (hero.id === 'juju' && isSkillReady(hero, 'Rallying Blow') && totalStr(hero) >= enemyStr + 2) {
+  if (hero.id === 'juju' && shouldUseSkill(hero, 'Rallying Blow', skillCtx)) {
     useSkill(hero, 'Rallying Blow');
     rallyingBlowActive = true;
     trackSkill(hero.id, 'Rallying Blow', 'activated');
@@ -1974,7 +1957,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 
   // === SKILL: Cheap Shot (Eggo) — roll extra die, keep best ===
   let cheapShotActive = false;
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Cheap Shot') && enemyStr >= 4 && !hasTripleAxe) {
+  if (hero.id === 'eggo' && !hasTripleAxe && shouldUseSkill(hero, 'Cheap Shot', { enemyStr, atHydra: false })) {
     useSkill(hero, 'Cheap Shot');
     cheapShotActive = true;
     trackSkill(hero.id, 'Cheap Shot', 'activated');
@@ -2094,7 +2077,10 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus + (packLeaderBonus || 0) ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty + heistPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
 
   // === SKILL BURN (can reroll YOUR die OR ENEMY die) ===
-  if (heroTotal < enemyTotal + beatMargin && readySkillCount(hero) > 0) {
+  // Strategic: in prehydra phase, only Skill Burn if the fight is worth it
+  const burnPhase = getGamePhase();
+  const burnWorthIt = burnPhase !== 'prehydra' || enemyStr >= 4 || koLoadoutValue(hero) >= 4;
+  if (heroTotal < enemyTotal + beatMargin && readySkillCount(hero) > 0 && burnWorthIt) {
     // Option A: Reroll hero die
     const rerollHero = heroRollDie(hero);
     let rerollHeroVal = rerollHero.val;
@@ -2194,14 +2180,11 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 }
 
 function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
-  // AI strategy: in dungeon, only use KO prevention skills if:
-  // - hero has valuable loadout (equipment worth saving), OR
-  // - Hydra is NOT close (skills not needed yet)
-  // At Hydra, KO prevention is handled separately in hydraAttack
-  const saveSkillsForHydra = (G.hydraActive || G.relicsCollected >= 3) && koLoadoutValue(hero) < 4;
+  // Strategic AI: evaluate whether to spend resources preventing this KO
+  const preventKO = shouldPreventKO(hero);
 
   // === SKILL: Shield Wall (Juju) — prevent KO ===
-  if (hero.id === 'juju' && isSkillReady(hero, 'Shield Wall') && !saveSkillsForHydra) {
+  if (hero.id === 'juju' && preventKO && shouldUseSkill(hero, 'Shield Wall', { atHydra: false, enemyStr: enemyCard.str || 0 })) {
     useSkill(hero, 'Shield Wall');
     trackSkill(hero.id, 'Shield Wall', 'activated');
     trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
@@ -2210,7 +2193,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   }
 
   // === SKILL: Soothe (Gigi) — STR 4+ prevent KO ===
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Soothe') && (enemyCard.str || 0) >= 4 && !saveSkillsForHydra) {
+  if (hero.id === 'gigi' && preventKO && (enemyCard.str || 0) >= 4 && shouldUseSkill(hero, 'Soothe', { atHydra: false, enemyStr: enemyCard.str || 0 })) {
     useSkill(hero, 'Soothe');
     trackSkill(hero.id, 'Soothe', 'activated');
     trackSkill(hero.id, 'Soothe', 'savedFromKO');
@@ -2219,7 +2202,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
   }
 
   // === SKILL: Copycat (Eggo) — copy Shield Wall or Soothe from ally ===
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && !saveSkillsForHydra) {
+  if (hero.id === 'eggo' && preventKO && shouldUseSkill(hero, 'Copycat', { preventKO: true, atHydra: false })) {
     const juju = G.heroes.find(h => h.id === 'juju');
     if (juju && isSkillReady(juju, 'Shield Wall')) {
       useSkill(hero, 'Copycat');
@@ -2338,6 +2321,115 @@ function koLoadoutValue(hero) {
   hero.followers.forEach(f => { val += (f.str || 0) + 3; });
   hero.stalkers.forEach(() => { val -= 2; });
   return val;
+}
+
+// ========== STRATEGIC AI SYSTEM ==========
+function getGamePhase() {
+  if (G.hydraActive) return 'hydra';
+  if (G.relicsCollected >= 3) return 'prehydra';
+  if (G.tilesPlaced >= 10) return 'mid';
+  return 'early';
+}
+
+function shouldUseSkill(hero, skillName, context) {
+  if (!isSkillReady(hero, skillName)) return false;
+  const phase = getGamePhase();
+  const ctx = context || {};
+  const enemyStr = ctx.enemyStr || 0;
+  const atHydra = ctx.atHydra || false;
+
+  switch(skillName) {
+    case 'Siphon':
+      if (atHydra) return true;
+      // In dungeon: use on enemies that could realistically KO the hero
+      // Hero total = totalStr(hero) + avg die (3.5) vs enemy = enemyStr + avg die (3.5)
+      // Hero loses if enemy STR > hero STR. Use Siphon when it's close.
+      if (phase === 'early') return enemyStr >= 2;
+      if (phase === 'mid') return enemyStr >= 3;
+      return enemyStr >= 4; // prehydra: still use on real threats
+
+    case 'Shield Wall':
+      if (atHydra) return true;
+      // In dungeon: use if hero has equipment OR relics (something to lose)
+      return hero.equipment.length > 0 || hero.heldRelics.length > 0;
+
+    case 'Soothe':
+      // Pre-combat discard (STR 3-): always use, it's free advantage
+      if (ctx.preCombat && enemyStr <= 3) return true;
+      if (atHydra) return true;
+      // KO prevention: use if hero has something to lose
+      return hero.equipment.length > 0 || hero.heldRelics.length > 0;
+
+    case 'Spell Mirror':
+      if (atHydra) return true;
+      if (ctx.isLethal) return true;
+      if (phase === 'prehydra') return false;
+      if (ctx.isDangerous) return true; // early/mid: use on dangerous effects
+      return false;
+
+    case 'Pack Leader':
+      if (atHydra) return hero.followers.length > 0;
+      // In dungeon: use if bonus is meaningful (1+ followers and enemy is not trivial)
+      return hero.followers.length > 0 && enemyStr >= 2;
+
+    case 'Fireball': {
+      const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
+      if (atHydra) return exhaustedCount >= 1;
+      // In dungeon: use if bonus is 2+ and enemy is a real threat
+      return exhaustedCount >= 2 && enemyStr >= 3;
+    }
+
+    case 'Rallying Blow':
+      if (atHydra) return totalStr(hero) + 1 >= (ctx.headStr || 99);
+      // In dungeon: use when can win with worst die (free team recharge)
+      return totalStr(hero) >= enemyStr + 2;
+
+    case 'Cheap Shot':
+      if (atHydra) return true;
+      // In dungeon: use on any non-trivial enemy
+      return enemyStr >= 3;
+
+    case 'Heist':
+      if (atHydra) return false;
+      if (phase === 'prehydra') return false;
+      return enemyStr <= 3;
+
+    case 'Reality Warp':
+      if (phase === 'prehydra' || phase === 'hydra') return false;
+      return true;
+
+    case 'Herbalist':
+      return true;
+
+    case 'Wild Call':
+      return hero.followers.length < 2 && phase !== 'prehydra';
+
+    case 'Shadowstep':
+      if (atHydra) return true;
+      return phase === 'early' || phase === 'mid';
+
+    case 'Taunt':
+      if (atHydra) return true;
+      return phase === 'early' || phase === 'mid';
+
+    case 'Copycat':
+      if (atHydra) {
+        const lulu = G.heroes.find(h => h.id === 'lulu');
+        if (lulu && isSkillReady(lulu, 'Siphon')) return true;
+      }
+      if (ctx.preventKO) return true;
+      if (ctx.preCombatSiphon && enemyStr >= 5) return true;
+      return false;
+  }
+  return false;
+}
+
+function shouldPreventKO(hero) {
+  if (G.heroesInHydraArea.has(hero.id)) return true;
+  const loadout = koLoadoutValue(hero);
+  if (loadout < 2) return false;
+  if (loadout >= 6) return true;
+  return readySkillCount(hero) >= 3;
 }
 
 function applyKO(hero) {
@@ -2601,42 +2693,64 @@ function hydraAttack(hero) {
   // Maw penalty
   const mawPenalty = (head.name === 'The Maw' && hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').length === 0) ? -2 : 0;
 
-  // === COMBAT SKILLS AT HYDRA ===
+  // === COORDINATED COMBAT SKILLS AT HYDRA ===
+  // Strategic AI: coordinate support skills from ALL heroes before the attack
   let skillBonus = 0;
-
-  // Siphon (Lulu) — -2 to head effective STR for this fight
   let siphonSkillDrain = 0;
+  const hydraSkillCtx = { atHydra: true, headStr: head.effectiveStr };
   const luluForSiphon = G.heroes.find(h => h.id === 'lulu');
-  if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon')) {
+
+  // 1. Lulu Siphon — -2 to head (highest priority support skill)
+  if (luluForSiphon && shouldUseSkill(luluForSiphon, 'Siphon', hydraSkillCtx)) {
     useSkill(luluForSiphon, 'Siphon');
-    siphonSkillDrain = 2;
+    siphonSkillDrain += 2;
     trackSkill('lulu', 'Siphon', 'activated');
     const who = hero.id === 'lulu' ? '' : ` (helping ${hero.name})`;
     log(`    🔮 Siphon! Lulu${who} weakens head by 2 STR`, 'flame');
   }
 
-  // Pack Leader (Gigi) — +1 per follower
-  if (hero.id === 'gigi' && isSkillReady(hero, 'Pack Leader') && hero.followers.length > 0) {
+  // 2. Eggo Copycat — copy Siphon for additional -2 (coordinated with step 1)
+  if (hero.id === 'eggo' && shouldUseSkill(hero, 'Copycat', hydraSkillCtx)) {
+    if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon')) {
+      useSkill(hero, 'Copycat');
+      siphonSkillDrain += 2;
+      trackSkill(hero.id, 'Copycat', 'activated');
+      log(`    🎭 Copycat copies Siphon! Head -2 STR (total drain: -${siphonSkillDrain})`, 'flame');
+    }
+  }
+  // Non-attacking Eggo can also Copycat Siphon to support
+  if (hero.id !== 'eggo') {
+    const eggo = G.heroes.find(h => h.id === 'eggo');
+    if (eggo && G.heroesInHydraArea.has('eggo') && shouldUseSkill(eggo, 'Copycat', hydraSkillCtx)) {
+      if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon')) {
+        useSkill(eggo, 'Copycat');
+        siphonSkillDrain += 2;
+        trackSkill('eggo', 'Copycat', 'activated');
+        log(`    🎭 Copycat: Eggo copies Siphon to help ${hero.name}! Head -2 STR (total drain: -${siphonSkillDrain})`, 'flame');
+      }
+    }
+  }
+
+  // 3. Pack Leader (Gigi) — +1 per follower
+  if (hero.id === 'gigi' && shouldUseSkill(hero, 'Pack Leader', hydraSkillCtx)) {
     useSkill(hero, 'Pack Leader');
     skillBonus += hero.followers.length;
     trackSkill(hero.id, 'Pack Leader', 'activated');
     log(`    🐺 Pack Leader! +${hero.followers.length} STR (${hero.followers.length} followers)`, 'flame');
   }
 
-  // Fireball (Lulu) — +1 per exhausted skill
-  if (hero.id === 'lulu' && isSkillReady(hero, 'Fireball')) {
+  // 4. Fireball (Lulu) — +1 per exhausted skill
+  if (hero.id === 'lulu' && shouldUseSkill(hero, 'Fireball', hydraSkillCtx)) {
     const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
-    if (exhaustedCount >= 1) { // At Hydra, use even with 1 exhausted (every point counts)
-      useSkill(hero, 'Fireball');
-      skillBonus += exhaustedCount;
-      trackSkill(hero.id, 'Fireball', 'activated');
-      log(`    🔥 Fireball! +${exhaustedCount} STR (${exhaustedCount} exhausted skills)`, 'flame');
-    }
+    useSkill(hero, 'Fireball');
+    skillBonus += exhaustedCount;
+    trackSkill(hero.id, 'Fireball', 'activated');
+    log(`    🔥 Fireball! +${exhaustedCount} STR (${exhaustedCount} exhausted skills)`, 'flame');
   }
 
-  // Cheap Shot (Eggo) — roll extra die, keep best
+  // 5. Cheap Shot (Eggo) — roll extra die, keep best
   let cheapShotUsed = false;
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Cheap Shot') && !hasTripleAxe) {
+  if (hero.id === 'eggo' && !hasTripleAxe && shouldUseSkill(hero, 'Cheap Shot', hydraSkillCtx)) {
     useSkill(hero, 'Cheap Shot');
     const extraRoll = heroRollDie(hero);
     if (extraRoll.val > heroRoll.val) {
@@ -2648,10 +2762,9 @@ function hydraAttack(hero) {
     log(`    🎯 Cheap Shot! Extra die, keeping ${heroRoll.val}`, 'flame');
   }
 
-  // Rallying Blow (Juju) — roll 2 keep worst, if win all heroes recharge 1
+  // 6. Rallying Blow (Juju) — roll 2 keep worst, if win all heroes recharge 1
   let rallyingBlowActive = false;
-  if (hero.id === 'juju' && isSkillReady(hero, 'Rallying Blow') && totalStr(hero) + 1 >= (head.effectiveStr - siphonDrain - siphonSkillDrain)) {
-    // AI: use if Juju can win even with worst of 2 dice (i.e., even rolling 1)
+  if (hero.id === 'juju' && shouldUseSkill(hero, 'Rallying Blow', { atHydra: true, headStr: head.effectiveStr - siphonDrain - siphonSkillDrain })) {
     useSkill(hero, 'Rallying Blow');
     const r2 = heroRollDie(hero);
     if (r2.val < heroRoll.val) {
@@ -2661,16 +2774,6 @@ function hydraAttack(hero) {
     rallyingBlowActive = true;
     trackSkill(hero.id, 'Rallying Blow', 'activated');
     log(`    ⚔ Rallying Blow! Keeping worst die: ${heroRoll.val}`, 'flame');
-  }
-
-  // Copycat (Eggo) — copy Siphon from Lulu if available
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && siphonSkillDrain === 0) {
-    if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon')) {
-      useSkill(hero, 'Copycat');
-      siphonSkillDrain = 2;
-      trackSkill(hero.id, 'Copycat', 'activated');
-      log(`    🎭 Copycat copies Siphon! Head -2 STR`, 'flame');
-    }
   }
 
   let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty + skillBonus;
@@ -2779,10 +2882,11 @@ function hydraAttack(hero) {
     }
 
     // === KO PREVENTION SKILLS AT HYDRA ===
+    // At Hydra, always prevent KO (costs a relic otherwise)
     let hydraKOPrevented = false;
 
     // Shield Wall (Juju)
-    if (!hydraKOPrevented && hero.id === 'juju' && isSkillReady(hero, 'Shield Wall')) {
+    if (!hydraKOPrevented && hero.id === 'juju' && shouldUseSkill(hero, 'Shield Wall', { atHydra: true })) {
       useSkill(hero, 'Shield Wall');
       trackSkill(hero.id, 'Shield Wall', 'activated');
       trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
@@ -2790,7 +2894,7 @@ function hydraAttack(hero) {
       hydraKOPrevented = true;
     }
     // Soothe (Gigi) — heads are always STR 4+
-    if (!hydraKOPrevented && hero.id === 'gigi' && isSkillReady(hero, 'Soothe')) {
+    if (!hydraKOPrevented && hero.id === 'gigi' && shouldUseSkill(hero, 'Soothe', { atHydra: true })) {
       useSkill(hero, 'Soothe');
       trackSkill(hero.id, 'Soothe', 'activated');
       trackSkill(hero.id, 'Soothe', 'savedFromKO');
@@ -2798,7 +2902,7 @@ function hydraAttack(hero) {
       hydraKOPrevented = true;
     }
     // Copycat (Eggo) — copy Shield Wall or Soothe
-    if (!hydraKOPrevented && hero.id === 'eggo' && isSkillReady(hero, 'Copycat')) {
+    if (!hydraKOPrevented && hero.id === 'eggo' && shouldUseSkill(hero, 'Copycat', { atHydra: true, preventKO: true })) {
       const jujuH = G.heroes.find(h => h.id === 'juju');
       const gigiH = G.heroes.find(h => h.id === 'gigi');
       if (jujuH && isSkillReady(jujuH, 'Shield Wall')) {
@@ -2836,7 +2940,7 @@ function hydraAttack(hero) {
   }
 
   // === TAUNT (Juju): extra Hydra attack ===
-  if (hero.id === 'juju' && isSkillReady(hero, 'Taunt') && !G.gameOver && !hero.ko && G.heroesInHydraArea.has(hero.id)) {
+  if (hero.id === 'juju' && !G.gameOver && !hero.ko && G.heroesInHydraArea.has(hero.id) && shouldUseSkill(hero, 'Taunt', { atHydra: true })) {
     useSkill(hero, 'Taunt');
     trackSkill(hero.id, 'Taunt', 'activated');
     log(`  🗡 Taunt: ${hero.name} makes an additional Hydra attack!`, 'flame');
@@ -2844,7 +2948,7 @@ function hydraAttack(hero) {
   }
 
   // === SHADOWSTEP (Eggo): extra turn at Hydra ===
-  if (hero.id === 'eggo' && isSkillReady(hero, 'Shadowstep') && !G.gameOver && !hero.ko && G.heroesInHydraArea.has(hero.id)) {
+  if (hero.id === 'eggo' && !G.gameOver && !hero.ko && G.heroesInHydraArea.has(hero.id) && shouldUseSkill(hero, 'Shadowstep', { atHydra: true })) {
     useSkill(hero, 'Shadowstep');
     trackSkill(hero.id, 'Shadowstep', 'activated');
     log(`  👤 Shadowstep: ${hero.name} takes another turn at the Hydra!`, 'flame');
@@ -3768,7 +3872,7 @@ function runSilentGame() {
       if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero);
     }
     // Herbalist (Gigi): recharge ally skill (batch sim)
-    if (hero.id === 'gigi' && isSkillReady(hero, 'Herbalist')) {
+    if (hero.id === 'gigi' && shouldUseSkill(hero, 'Herbalist', { atHydra: G.heroesInHydraArea.has(hero.id) })) {
       const allies = G.heroes.filter(h => h.id !== hero.id);
       const neediest = allies.filter(h => h.skillStates.some(s => s === 'exhausted'))
           .sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
@@ -3779,7 +3883,7 @@ function runSilentGame() {
       }
     }
     // Wild Call (Gigi): draw Wonder until Follower (batch sim)
-    if (hero.id === 'gigi' && isSkillReady(hero, 'Wild Call') && hero.followers.length < 2 && (!G._tweaks || G._tweaks.followersEnabled)) {
+    if (hero.id === 'gigi' && shouldUseSkill(hero, 'Wild Call', { atHydra: false }) && (!G._tweaks || G._tweaks.followersEnabled)) {
       useSkill(hero, 'Wild Call');
       trackSkill(hero.id, 'Wild Call', 'activated');
       let foundFollower = null;
@@ -3815,7 +3919,7 @@ function runSilentGame() {
     } else {
       movePhase(hero);
       // Taunt (Juju): fight random enemy in dungeon (batch sim)
-      if (hero.id === 'juju' && isSkillReady(hero, 'Taunt') && !hero.ko && !G.gameOver && !G.hydraActive) {
+      if (hero.id === 'juju' && !hero.ko && !G.gameOver && !G.hydraActive && shouldUseSkill(hero, 'Taunt', { atHydra: false })) {
         if (G.mishapDeck.length > 0) {
           const enemies = MISHAP_CARDS.filter(c => c.type === 'enemy');
           if (enemies.length > 0) {
@@ -3827,7 +3931,7 @@ function runSilentGame() {
         }
       }
       // Shadowstep (Eggo): extra turn in dungeon (batch sim)
-      if (hero.id === 'eggo' && isSkillReady(hero, 'Shadowstep') && !G.gameOver && !hero.ko && !G.hydraActive) {
+      if (hero.id === 'eggo' && !G.gameOver && !hero.ko && !G.hydraActive && shouldUseSkill(hero, 'Shadowstep', { atHydra: false })) {
         useSkill(hero, 'Shadowstep');
         trackSkill(hero.id, 'Shadowstep', 'activated');
         hero.talentUsedThisTurn = false;
