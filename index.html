@@ -3756,9 +3756,9 @@ function generateReport(results) {
     },
     gigi: (agg) => {
       let c = `<b>Nature's Gift (gift Flame to ally):</b> Triggered ${agg.triggered}x total. `;
-      c += `Gifting Flame to another hero means THEIR talent fires next turn. It's a team-support talent that chains well. `;
+      c += `Gifting Flame to another hero means THEIR talent fires next turn: Juju gets +2 combat, Eggo gets Dodge, Lulu recharges a skill. `;
       if (agg.blocked > 0) c += `Blocked ${agg.blocked}x by Cursed Beggar. `;
-      c += `Hard to measure direct impact in simulation since it depends on who receives the gift. In real play, gifting to Juju (for +2) or Eggo (for Dodge) before a dangerous fight is the optimal play.`;
+      c += `Combined with Herbalist (which can also recharge Gigi's own skills), Gigi acts as the party's support engine — keeping allies' talents and skills cycling. The AI gifts Flame to the hero who benefits most based on upcoming threats.`;
       return c;
     },
     lulu: (agg) => {
