@@ -1796,7 +1796,7 @@ function combat(hero, enemyCard, tier) {
     if (fightRound > 0) log(`    Slayer: Round ${fightRound + 1}!`, 'combat');
 
     const result = singleFight(hero, enemyCard, tier, enemyStr,
-      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive, spellMirrored });
+      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored });
 
     if (result === 'win') {
       totalWins++;
@@ -1886,7 +1886,7 @@ function combat(hero, enemyCard, tier) {
 }
 
 function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
-  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, heistActive, rallyingBlowActive, spellMirrored } = bonuses;
+  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored } = bonuses;
 
   // === ENEMY ROLL ===
   let enemyTotal;
@@ -2068,7 +2068,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     const newBonusA = (hero.id === 'juju' && rerollHeroFlame && !hero.talentUsedThisTurn) ? 2 : (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0);
     const totalA = rerollHeroVal + heroStrValue + (combatBonus - (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0)) + newBonusA
       + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
-      + (packLeaderBonus || 0) + heistPenalty;
+      + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty;
 
     // Option B: Reroll enemy die (keep hero roll, enemy gets new roll)
     const rerollEnemy = rollDie(hero);
