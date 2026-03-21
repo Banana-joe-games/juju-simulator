@@ -2542,8 +2542,69 @@ function hydraAttack(hero) {
   // Maw penalty
   const mawPenalty = (head.name === 'The Maw' && hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').length === 0) ? -2 : 0;
 
-  let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
-  const effectiveHeadStr = head.effectiveStr - siphonDrain;
+  // === COMBAT SKILLS AT HYDRA ===
+  let skillBonus = 0;
+
+  // Siphon (Lulu) — -2 to head effective STR for this fight
+  let siphonSkillDrain = 0;
+  const luluForSiphon = G.heroes.find(h => h.id === 'lulu');
+  if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon')) {
+    useSkill(luluForSiphon, 'Siphon');
+    siphonSkillDrain = 2;
+    trackSkill('lulu', 'Siphon', 'activated');
+    const who = hero.id === 'lulu' ? '' : ` (helping ${hero.name})`;
+    log(`    🔮 Siphon! Lulu${who} weakens head by 2 STR`, 'flame');
+  }
+
+  // Pack Leader (Gigi) — +1 per follower
+  if (hero.id === 'gigi' && isSkillReady(hero, 'Pack Leader') && hero.followers.length > 0) {
+    useSkill(hero, 'Pack Leader');
+    skillBonus += hero.followers.length;
+    trackSkill(hero.id, 'Pack Leader', 'activated');
+    log(`    🐺 Pack Leader! +${hero.followers.length} STR (${hero.followers.length} followers)`, 'flame');
+  }
+
+  // Cheap Shot (Eggo) — roll extra die, keep best
+  let cheapShotUsed = false;
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Cheap Shot') && !hasTripleAxe) {
+    useSkill(hero, 'Cheap Shot');
+    const extraRoll = heroRollDie(hero);
+    if (extraRoll.val > heroRoll.val) {
+      heroRoll = extraRoll;
+      isFlame = (extraRoll.isFlame) && (!broodAlive || hydraSpellMirrored);
+    }
+    cheapShotUsed = true;
+    trackSkill(hero.id, 'Cheap Shot', 'activated');
+    log(`    🎯 Cheap Shot! Extra die, keeping ${heroRoll.val}`, 'flame');
+  }
+
+  // Rallying Blow (Juju) — roll 2 keep worst, if win all heroes recharge 1
+  let rallyingBlowActive = false;
+  if (hero.id === 'juju' && isSkillReady(hero, 'Rallying Blow') && totalStr(hero) + 1 >= (head.effectiveStr - siphonDrain - siphonSkillDrain)) {
+    // AI: use if Juju can win even with worst of 2 dice (i.e., even rolling 1)
+    useSkill(hero, 'Rallying Blow');
+    const r2 = heroRollDie(hero);
+    if (r2.val < heroRoll.val) {
+      heroRoll = r2;
+      isFlame = (r2.isFlame) && (!broodAlive || hydraSpellMirrored);
+    }
+    rallyingBlowActive = true;
+    trackSkill(hero.id, 'Rallying Blow', 'activated');
+    log(`    ⚔ Rallying Blow! Keeping worst die: ${heroRoll.val}`, 'flame');
+  }
+
+  // Copycat (Eggo) — copy Siphon from Lulu if available
+  if (hero.id === 'eggo' && isSkillReady(hero, 'Copycat') && siphonSkillDrain === 0) {
+    if (luluForSiphon && isSkillReady(luluForSiphon, 'Siphon')) {
+      useSkill(hero, 'Copycat');
+      siphonSkillDrain = 2;
+      trackSkill(hero.id, 'Copycat', 'activated');
+      log(`    🎭 Copycat copies Siphon! Head -2 STR`, 'flame');
+    }
+  }
+
+  let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty + skillBonus;
+  const effectiveHeadStr = head.effectiveStr - siphonDrain - siphonSkillDrain;
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${totalStr(hero)} + bonuses = ${heroTotal} vs ${effectiveHeadStr}`, 'combat');
 
@@ -2567,8 +2628,7 @@ function hydraAttack(hero) {
   if (heroTotal >= effectiveHeadStr) {
     head.destroyed = true;
     G.hydraDestroyedCount++;
-    // NOTE: hydraMaxHeads does NOT decrease on destroy. Max stays fixed at 6.
-    // Overflow = too many heads alive, not "you killed too many."
+    G.hydraMaxHeads--;  // Hydra permanently loses a head slot
     trackHydraHead(head.name, 'destroyed');
     log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max ${G.hydraMaxHeads})`, 'victory');
 
@@ -2624,6 +2684,7 @@ function hydraAttack(hero) {
       if (retryTotal >= effectiveHeadStr) {
         head.destroyed = true;
         G.hydraDestroyedCount++;
+        G.hydraMaxHeads--;
         trackHydraHead(head.name, 'destroyed');
         recalcHydraStr();
         log(`    Berserker Helmet wins! ${head.name} DESTROYED!`, 'victory');
@@ -2638,11 +2699,61 @@ function hydraAttack(hero) {
       hero._berserkerUsed = false;
     }
 
-    log(`    ${hero.name} is KO'd at the Hydra!`, 'ko');
-    trackHydraHead(head.name, 'causedKO');
-    applyKO(hero);
-    if (G.gameOver) return;
-    growHydraHead();
+    // === KO PREVENTION SKILLS AT HYDRA ===
+    let hydraKOPrevented = false;
+
+    // Shield Wall (Juju)
+    if (!hydraKOPrevented && hero.id === 'juju' && isSkillReady(hero, 'Shield Wall')) {
+      useSkill(hero, 'Shield Wall');
+      trackSkill(hero.id, 'Shield Wall', 'activated');
+      trackSkill(hero.id, 'Shield Wall', 'savedFromKO');
+      log(`    🛡 Shield Wall! KO prevented at Hydra!`, 'flame');
+      hydraKOPrevented = true;
+    }
+    // Soothe (Gigi) — heads are always STR 4+
+    if (!hydraKOPrevented && hero.id === 'gigi' && isSkillReady(hero, 'Soothe')) {
+      useSkill(hero, 'Soothe');
+      trackSkill(hero.id, 'Soothe', 'activated');
+      trackSkill(hero.id, 'Soothe', 'savedFromKO');
+      log(`    🌿 Soothe! Gigi avoids KO at Hydra!`, 'flame');
+      hydraKOPrevented = true;
+    }
+    // Copycat (Eggo) — copy Shield Wall or Soothe
+    if (!hydraKOPrevented && hero.id === 'eggo' && isSkillReady(hero, 'Copycat')) {
+      const jujuH = G.heroes.find(h => h.id === 'juju');
+      const gigiH = G.heroes.find(h => h.id === 'gigi');
+      if (jujuH && isSkillReady(jujuH, 'Shield Wall')) {
+        useSkill(hero, 'Copycat');
+        trackSkill(hero.id, 'Copycat', 'activated');
+        trackSkill(hero.id, 'Copycat', 'savedFromKO');
+        log(`    🎭 Copycat: copies Shield Wall! KO prevented!`, 'flame');
+        hydraKOPrevented = true;
+      } else if (gigiH && isSkillReady(gigiH, 'Soothe')) {
+        useSkill(hero, 'Copycat');
+        trackSkill(hero.id, 'Copycat', 'activated');
+        trackSkill(hero.id, 'Copycat', 'savedFromKO');
+        log(`    🎭 Copycat: copies Soothe! KO prevented!`, 'flame');
+        hydraKOPrevented = true;
+      }
+    }
+
+    if (hydraKOPrevented) {
+      // Skill saved the hero — head still grows but hero stays
+      growHydraHead();
+      if (G.gameOver) return;
+    } else {
+      log(`    ${hero.name} is KO'd at the Hydra!`, 'ko');
+      trackHydraHead(head.name, 'causedKO');
+      applyKO(hero);
+      if (G.gameOver) return;
+      growHydraHead();
+    }
+  }
+
+  // Rallying Blow bonus: if Juju won with it, all heroes recharge 1
+  if (rallyingBlowActive && heroTotal >= effectiveHeadStr) {
+    G.heroes.forEach(h => { rechargeOneSkill(h); });
+    log(`    ⚔ Rallying Blow victory! All heroes recharge 1 Skill`, 'wonder');
   }
 
   // === TAUNT (Juju): extra Hydra attack ===
