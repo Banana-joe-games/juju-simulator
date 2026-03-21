@@ -1,0 +1,2920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JUJU's Castle — Simulator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Cinzel:wght@400;700&display=swap');
+:root {
+  --bg: #0a0a0f;
+  --panel: #12121a;
+  --border: #1e1e2e;
+  --text: #c8c8d4;
+  --dim: #6a6a7a;
+  --accent: #d4a843;
+  --wonder: #2d8a4e;
+  --mishap: #c9a84c;
+  --misfortune: #b02030;
+  --legendary: #8a7230;
+  --flame: #e8652a;
+  --hydra: #7b2d8e;
+  --ko: #cc2244;
+  --heal: #44bb66;
+  --info: #4488cc;
+  --juju: #cc4444;
+  --gigi: #44aa44;
+  --lulu: #6644cc;
+  --eggo: #cc8833;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  height: 100vh;
+  overflow: hidden;
+}
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr 280px;
+  grid-template-rows: 48px 1fr 48px;
+  height: 100vh;
+  gap: 1px;
+  background: var(--border);
+}
+.header {
+  grid-column: 1 / -1;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+}
+.header h1 {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  color: var(--accent);
+  letter-spacing: 2px;
+}
+.header .controls {
+  display: flex; gap: 8px; margin-left: auto; align-items: center;
+}
+.header .controls label { font-size: 11px; color: var(--dim); }
+.btn {
+  background: var(--border);
+  color: var(--text);
+  border: 1px solid #2a2a3a;
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all .15s;
+}
+.btn:hover { background: #2a2a3a; border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+.btn.primary:hover { background: #e8b854; }
+.btn.danger { border-color: var(--ko); color: var(--ko); }
+.btn:disabled { opacity: .3; cursor: default; }
+select {
+  background: var(--border);
+  color: var(--text);
+  border: 1px solid #2a2a3a;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  border-radius: 3px;
+}
+.left-panel, .right-panel {
+  background: var(--panel);
+  overflow-y: auto;
+  padding: 12px;
+}
+.log-panel {
+  background: var(--bg);
+  overflow-y: auto;
+  padding: 12px 16px;
+  scroll-behavior: smooth;
+}
+.footer {
+  grid-column: 1 / -1;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 8px;
+}
+.footer .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.hero-card {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  transition: border-color .2s;
+}
+.hero-card.active { border-color: var(--accent); background: #1a1a25; }
+.hero-card .name { font-weight: 700; margin-bottom: 4px; }
+.hero-card .stat { color: var(--dim); }
+.hero-card .stat b { color: var(--text); }
+.skill-tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin: 1px 2px 1px 0;
+}
+.skill-tag.ready { background: #1a3a2a; color: var(--heal); border: 1px solid #2a5a3a; }
+.skill-tag.exhausted { background: #2a1a1a; color: #884444; border: 1px solid #3a2a2a; text-decoration: line-through; }
+.equip-tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin: 1px 2px 1px 0;
+  background: #2a2a1a;
+  color: var(--legendary);
+  border: 1px solid #3a3a2a;
+}
+.relic-tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin: 1px 2px 1px 0;
+  background: #2a1a3a;
+  color: var(--hydra);
+  border: 1px solid #3a2a4a;
+}
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  padding: 3px 0;
+  border-bottom: 1px dotted #1a1a2a;
+}
+.info-row .label { color: var(--dim); }
+.info-row .value { color: var(--text); font-weight: 600; }
+.log-entry {
+  padding: 3px 0;
+  border-bottom: 1px solid #0e0e16;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.log-entry.system { color: var(--dim); font-style: italic; }
+.log-entry.combat { color: #cc8866; }
+.log-entry.flame { color: var(--flame); }
+.log-entry.wonder { color: var(--wonder); }
+.log-entry.mishap { color: var(--mishap); }
+.log-entry.misfortune { color: var(--misfortune); }
+.log-entry.legendary { color: var(--legendary); }
+.log-entry.ko { color: var(--ko); font-weight: 600; }
+.log-entry.victory { color: var(--heal); font-weight: 700; font-size: 14px; }
+.log-entry.defeat { color: var(--ko); font-weight: 700; font-size: 14px; }
+.log-entry.hydra { color: var(--hydra); }
+.log-entry.turn-header {
+  color: var(--accent);
+  font-weight: 700;
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.choice-panel {
+  background: #1a1a28;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 10px;
+  margin: 8px 0;
+}
+.choice-panel .prompt { color: var(--accent); font-weight: 600; margin-bottom: 6px; }
+.choice-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--border);
+  color: var(--text);
+  border: 1px solid #2a2a3a;
+  padding: 6px 10px;
+  margin: 3px 0;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.choice-btn:hover { background: #2a2a3a; border-color: var(--accent); }
+.hydra-heads {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+}
+.head-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #2a1a3a;
+  color: var(--hydra);
+  border: 1px solid #4a2a5a;
+}
+.head-tag.dead { opacity: .3; text-decoration: line-through; }
+.map-display {
+  font-size: 9px;
+  line-height: 1.2;
+  background: #08080e;
+  padding: 6px;
+  border-radius: 3px;
+  margin-top: 6px;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--dim);
+  max-height: 200px;
+  overflow-y: auto;
+}
+input[type=range] {
+  width: 80px;
+  accent-color: var(--accent);
+}
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 48px 200px 1fr 200px 48px; }
+  .left-panel { grid-row: 2; }
+  .right-panel { grid-row: 4; }
+}
+/* Report Modal */
+.report-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.85);
+  z-index: 1000; display: flex; align-items: center; justify-content: center;
+}
+.report-modal {
+  background: var(--panel); border: 1px solid var(--accent);
+  border-radius: 8px; width: 90vw; max-width: 900px; max-height: 85vh;
+  overflow-y: auto; padding: 24px; position: relative;
+}
+.report-modal h2 { font-family:'Cinzel',serif; color:var(--accent); font-size:18px; margin-bottom:16px; letter-spacing:2px; }
+.report-modal h3 { color:var(--accent); font-size:13px; margin:16px 0 8px; border-bottom:1px solid var(--border); padding-bottom:4px; text-transform:uppercase; letter-spacing:1px; }
+.report-close { position:absolute; top:12px; right:16px; background:none; border:none; color:var(--dim); font-size:20px; cursor:pointer; }
+.report-close:hover { color:var(--text); }
+.report-section { margin-bottom: 16px; }
+.report-card {
+  background: var(--bg); border:1px solid var(--border); border-radius:4px;
+  padding:10px 12px; margin:6px 0; font-size:12px; line-height:1.6;
+}
+.report-card.op { border-left:3px solid var(--ko); }
+.report-card.weak { border-left:3px solid var(--dim); }
+.report-card.insight { border-left:3px solid var(--info); }
+.report-card.need { border-left:3px solid var(--wonder); }
+.report-card .tag {
+  display:inline-block; font-size:9px; padding:1px 6px; border-radius:2px;
+  margin-right:6px; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
+}
+.tag.op-tag { background:#3a1a1a; color:var(--ko); }
+.tag.weak-tag { background:#1a1a2a; color:var(--dim); }
+.tag.need-tag { background:#1a3a2a; color:var(--wonder); }
+.tag.insight-tag { background:#1a2a3a; color:var(--info); }
+.report-stat { display:flex; justify-content:space-between; padding:2px 0; font-size:11px; }
+.report-stat .rl { color:var(--dim); }
+.report-stat .rv { color:var(--text); font-weight:600; }
+.batch-bar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+.batch-bar label { font-size:11px; color:var(--dim); }
+.batch-bar input { width:60px; background:var(--bg); color:var(--text); border:1px solid var(--border); padding:3px 6px; font-family:inherit; font-size:11px; border-radius:3px; }
+.batch-progress { height:4px; background:var(--border); border-radius:2px; margin:8px 0; overflow:hidden; }
+.batch-progress .fill { height:100%; background:var(--accent); transition:width .1s; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>⚔ JUJU'S CASTLE — SIMULATOR</h1>
+    <div class="controls">
+      <label>Mode:</label>
+      <select id="modeSelect">
+        <option value="manual">Manual</option>
+        <option value="auto" selected>Autoplay</option>
+      </select>
+      <label>Speed:</label>
+      <input type="range" id="speedSlider" min="1" max="100" value="85">
+      <button class="btn primary" id="startBtn" onclick="startGame()">New Game</button>
+      <button class="btn" id="stepBtn" onclick="stepGame()" disabled>Next Step</button>
+      <button class="btn" id="autoBtn" onclick="toggleAuto()" disabled>▶ Auto</button>
+      <button class="btn danger" id="resetBtn" onclick="resetGame()">Reset</button>
+      <span style="color:var(--border);margin:0 4px">|</span>
+      <label>Batch:</label>
+      <input type="number" id="batchCount" value="50" min="5" max="500" style="width:50px;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:2px 4px;font-family:inherit;font-size:11px;border-radius:3px">
+      <button class="btn" id="batchBtn" onclick="runBatch()">Run Batch</button>
+      <button class="btn" id="reportBtn" onclick="showLastReport()" disabled>Report</button>
+    </div>
+  </div>
+  <div class="left-panel" id="heroPanel"></div>
+  <div class="log-panel" id="logPanel"></div>
+  <div class="right-panel" id="infoPanel"></div>
+  <div class="footer">
+    <span style="color:var(--dim);font-size:11px" id="statusBar">Ready. Press New Game.</span>
+    <div class="actions" id="choiceArea"></div>
+  </div>
+</div>
+<div id="reportOverlay" class="report-overlay" style="display:none">
+  <div class="report-modal">
+    <button class="report-close" onclick="closeReport()">&times;</button>
+    <div id="reportContent"></div>
+  </div>
+</div>
+<script>
+// ========== GAME DATA ==========
+const HEROES = [
+  { id:'juju', name:'Juju', title:'The Hero', str:3, flameFaces:[4,5,6], color:'var(--juju)',
+    talent:'Unwavering Power', talentDesc:'+2 to combat total',
+    skills:[
+      {name:'Deadly Strike',kind:'ATK',effect:'Gain +2 to Fate Die in combat'},
+      {name:'Paladin Resolve',kind:'MOV',effect:'Move 1 tile in any direction'},
+      {name:"Hero's Resolve",kind:'UTL',effect:'Defeat a Mishap enemy or remove a Stalker'},
+      {name:'Imagination Shield',kind:'UTL',effect:'If KO in fight, ignore it and fight again'}
+    ]},
+  { id:'gigi', name:'Gigi', title:'The Elf', str:2, flameFaces:[2,3,4], color:'var(--gigi)',
+    talent:"Nature's Gift", talentDesc:'Gift Flame to another player next turn',
+    skills:[
+      {name:'Aimed Shot',kind:'ATK',effect:'Gain +2 to Fate Die in combat'},
+      {name:'Little Helper',kind:'MOV',effect:'Move up to 2 tiles in any direction'},
+      {name:'Soft Steps',kind:'UTL',effect:'Ignore room if not Wonder'},
+      {name:'Elven Wisdom',kind:'UTL',effect:'Put drawn card at bottom, draw again'}
+    ]},
+  { id:'lulu', name:'Lulu', title:'The Mage', str:1, flameFaces:[1,3,6], color:'var(--lulu)',
+    talent:'Arcane Recharge', talentDesc:'Recharge 1 exhausted Skill',
+    skills:[
+      {name:'Fireball',kind:'ATK',effect:'+2 to any hero Fate Die in combat'},
+      {name:'Reality Door',kind:'MOV',effect:'Teleport self or hero to revealed room'},
+      {name:'Forbidden Knowledge',kind:'UTL',effect:'Recharge 1 skill (yours or ally)'},
+      {name:'Farsight',kind:'UTL',effect:'Draw Wonder instead of Misfortune'}
+    ]},
+  { id:'eggo', name:'Eggo', title:'The Rogue', str:2, flameFaces:[1,2,3], color:'var(--eggo)',
+    talent:'Dodge', talentDesc:'Cannot be KO this turn',
+    skills:[
+      {name:'Lowblow',kind:'ATK',effect:'Gain +2 to Fate Die in combat'},
+      {name:'Expert Looter',kind:'MOV',effect:'Roll before choosing direction, peek rooms'},
+      {name:'Eggroll',kind:'UTL',effect:'If you lose, move 2 tiles instead of KO'},
+      {name:'Halfboiled',kind:'UTL',effect:'Reroll a die (identical to Skill Burn)'}
+    ]}
+];
+
+const WONDER_CARDS = [
+  {name:'Priestess of Light',type:'encounter',effect:'recharge_all_skills'},
+  {name:'Good Genii',type:'encounter',effect:'remove_enemy'},
+  {name:'Dungeon Guardian',type:'encounter',effect:'move_to_revealed'},
+  {name:'Generous Merchant',type:'encounter',effect:'draw_legendary'},
+  {name:'Witchdoctor',type:'encounter',effect:'remove_stalker'},
+  {name:'Oracle',type:'encounter',effect:'peek_3_tiles'},
+  {name:'Wisp',type:'encounter',effect:'recharge_1_skill'},
+  {name:'Dungeon Master',type:'encounter',effect:'swap_rooms'},
+  {name:'Generous Merchant 2',type:'encounter',effect:'equip_full'},
+  {name:'Blacksmith',type:'encounter',effect:'swap_equipment'},
+  {name:'Page',type:'follower',str:0,effect:'inventory_+1'},
+  {name:'Spectral Horse',type:'follower',str:0,effect:'movement_+2'},
+  {name:'Archangel',type:'follower',str:0,effect:'flame_auto_win'},
+  {name:'Seasoned Adventurer',type:'follower',str:0,effect:'dd_draw_2_keep_1'},
+  {name:'Arcane Parrot',type:'follower',str:0,effect:'exhaust_skill_str+1'},
+  {name:'Veteran',type:'follower',str:0,effect:'roll_2_keep_best'},
+  {name:'Faithful Dog',type:'follower',str:0,effect:'reroll_flame'},
+  {name:'Warden Angel',type:'follower',str:0,effect:'discard_win_fight'},
+  {name:'Monster Hunter',type:'follower',str:0,effect:'skip_move_fight_enemy'}
+];
+
+const MISHAP_CARDS = [
+  {name:'Castle Architect',type:'encounter',effect:'move_2_extra'},
+  {name:'Barter Merchant',type:'encounter',effect:'swap_equipment'},
+  {name:'Leprechaun',type:'follower',str:0,effect:'swap_1_6'},
+  {name:'Drunkard',type:'follower',str:0,effect:'stop_on_enemy'},
+  {name:'Corrupted Squire',type:'stalker',effect:'exhaust_per_equip'},
+  {name:'Old Hag',type:'stalker',effect:'discard_followers'},
+  {name:'Mutt',type:'stalker',effect:'roll_1_discard_equip'},
+  {name:'Stink Bomb',type:'trap',effect:'lose_followers'},
+  {name:'Trap Door',type:'trap',effect:'go_back'},
+  {name:'Giant Web',type:'trap',effect:'exhaust_or_ko'},
+  {name:'Crumbling Floor',type:'trap',effect:'roll_1_2_ko'},
+  {name:'Trap Alarm',type:'trap',effect:'draw_dread'},
+  {name:'Magnetic Field',type:'trap',effect:'flame_or_discard_equip'},
+  {name:'Static Fog',type:'trap',effect:'block_room'},
+  {name:'Sacerdote Fishfolk',type:'enemy',str:1,effect:'roll_1_2_entrance'},
+  {name:'Wind Elemental',type:'enemy',str:1,effect:'move_to_revealed'},
+  {name:'Mud Golem',type:'enemy',str:2,effect:'must_beat_by_2'},
+  {name:"Jack o' Lantern",type:'enemy',str:2,effect:'rolls_2_best_double_lose'},
+  {name:'Rat Swarm',type:'enemy',str:3,effect:'push_to_room'},
+  {name:'Mimic',type:'enemy',str:3,effect:'draw_legendary'},
+  {name:'Thiefling Rats',type:'enemy',str:1,effect:'discard_1_equip'},
+  {name:'Djin',type:'enemy',str:1,effect:'only_flame_hits'},
+  {name:'Ghoul',type:'enemy',str:1,effect:'rolls_2_best'},
+  {name:'Blob',type:'enemy',str:2,effect:'no_weapon'},
+  {name:'Squelette',type:'enemy',str:2,effect:'base_only'},
+  {name:'Snakerogue',type:'enemy',str:2,effect:'exhaust_1_skill'},
+  {name:'Longlegs Spider',type:'enemy',str:2,effect:'only_even_hits'},
+  {name:'Frogman',type:'enemy',str:2,effect:'swallows_equip'},
+  {name:'Stone Gargoyle',type:'enemy',str:3,effect:'only_3plus_hits'}
+];
+
+const MISFORTUNE_CARDS = [
+  {name:'Fear Ghost',type:'stalker',effect:'-2_combat'},
+  {name:'Cursed Beggar',type:'stalker',effect:'no_flame_effect'},
+  {name:'Assassin',type:'stalker',effect:'roll_1_ko'},
+  {name:'Guillotine',type:'trap',effect:'fewer_2_skills_ko'},
+  {name:'Spectral Theft',type:'trap',effect:'discard_1_equip'},
+  {name:'The Tribute',type:'trap',effect:'ko_or_exhaust_all'},
+  {name:'Spike Trap',type:'trap',effect:'roll_1_3_ko'},
+  {name:'Hall of Mirrors',type:'trap',effect:'fight_self_4dice'},
+  {name:'Baba Yaga',type:'stalker',effect:'move_1_only'},
+  {name:'The Faceless One',type:'enemy',str:0,effect:'random_str'},
+  {name:'Mana Leech',type:'enemy',str:3,effect:'exhaust_2_or_minus2'},
+  {name:'Bully',type:'enemy',str:3,effect:'flee_or_str6'},
+  {name:'Mad Berserker',type:'enemy',str:4,effect:'fight_or_redirect'},
+  {name:'Stormcaller',type:'enemy',str:4,effect:'aoe_skill_drain'},
+  {name:'Bandit',type:'enemy',str:4,effect:'discard_equip_or_fight'},
+  {name:'Mindflayer',type:'enemy',str:5,effect:'top_of_deck'},
+  {name:'Stone Golem',type:'enemy',str:5,effect:'adjacent_dread'},
+  {name:'The Sphinx',type:'enemy',str:6,effect:'guess_or_fight'},
+  {name:'Fishguard',type:'enemy',str:0,effect:'plus2_per_relic'},
+  {name:'Slayer',type:'enemy',str:4,effect:'fight_twice'},
+  {name:'Mummy',type:'enemy',str:4,effect:'flame_minus2'},
+  {name:'Hound',type:'enemy',str:4,effect:'follows_on_loss'},
+  {name:'Ogre',type:'enemy',str:5,effect:'no_respawn_on_loss'},
+  {name:'Dragon',type:'enemy',str:5,effect:'gains_str_on_loss'},
+  {name:'Mycoid',type:'enemy',str:5,effect:'flame_counts_0'},
+  {name:'Golem',type:'enemy',str:6,effect:'exact_3_follower'},
+  {name:'Demon',type:'enemy',str:7,effect:'moves_2_per_round'}
+];
+
+const LEGENDARY_EQUIPMENT = [
+  {name:'Triple Axe',type:'weapon',str:2,effect:'roll_3_keep_best'},
+  {name:'Firebane',type:'weapon',str:2,effect:'exhaust_skill_+1'},
+  {name:'Demon Sword',type:'weapon',str:2,effect:'dd_+2'},
+  {name:'Wooden Spoon',type:'weapon',str:2,effect:'roll_1_auto_win'},
+  {name:'Doomhammer',type:'weapon',str:2,effect:'roll_gamble'},
+  {name:'Virtuous Sword',type:'weapon',str:3,effect:'+1_per_ready_skill'},
+  {name:'Siphon Blade',type:'weapon',str:1,effect:'drain_1'},
+  {name:'Vanga',type:'weapon',str:2,effect:'wonder_draw_legendary'},
+  {name:'Parasite Sword',type:'weapon',str:2,effect:'cannot_remove'},
+  {name:'Mystic Wand',type:'weapon',str:1,effect:'win_recharge_all'},
+  {name:'Supernova Gun',type:'weapon',str:2,effect:'win_roll_6_clear'},
+  {name:'Cursed Armour',type:'armour',str:-1,effect:'exhaust_all_recharge_1'},
+  {name:'Stivali delle Sette Leghe',type:'armour',str:0,effect:'choose_stop'},
+  {name:'Warlord Armour',type:'armour',str:0,effect:'double_base_if_weaker'},
+  {name:'Wizard Hat',type:'armour',str:0,effect:'turn_start_recharge'},
+  {name:'Darksight Helm',type:'armour',str:0,effect:'peek_adjacent'},
+  {name:'Ninja Tabi',type:'armour',str:0,effect:'move_2_dice'},
+  {name:'Berserker Helmet',type:'armour',str:0,effect:'retry_on_loss'}
+];
+
+const HYDRA_HEADS = [
+  {name:'The Nest',str:7,skillType:'passive',skill:'While alive, all heads gain +2 STR',strBonus:2},
+  {name:'The Brood',str:8,skillType:'passive',skill:'Flame has no special effect',noFlame:true},
+  {name:'The Wail',str:10,skillType:'onDefeat',skill:'On destroy: all heroes exhaust 1 Skill'},
+  {name:'The Spite',str:12,skillType:'onDefeat',skill:'On destroy: grow 1 extra head',growOnDefeat:true},
+  {name:'The Fangs',str:9,skillType:'onAttack',skill:'When targeted: all heroes exhaust 1 Skill'},
+  {name:'The Maw',str:8,skillType:'onAttack',skill:'When targeted: discard 1 Equipment or -2'}
+];
+
+const RELICS = [
+  {id:'hero_relic', name:'Hero Relic', owner:'juju'},
+  {id:'ranger_relic', name:'Ranger Relic', owner:'gigi'},
+  {id:'wizard_relic', name:'Wizard Relic', owner:'lulu'},
+  {id:'rogue_relic', name:'Rogue Relic', owner:'eggo'}
+];
+
+// ========== GAME STATE ==========
+let G = null;
+let autoRunning = false;
+let autoTimer = null;
+let batchResults = [];   // accumulated results across batch runs
+let lastReport = null;   // last generated report HTML
+
+function freshTracker() {
+  return {
+    // Per-hero tracking
+    heroes: {},
+    // Equipment tracking: { name: { drawn, equipped, usedEffect, wonWith, lostWith, discarded, survivedKO } }
+    equipment: {},
+    // Encounter tracking: { name: { drawn, won, lost, fled, avoided } }
+    encounters: {},
+    // Follower tracking: { name: { drawn, helpedWin, lost } }
+    followers: {},
+    // Stalker tracking: { name: { attached, turnsActive, causedKO } }
+    stalkers: {},
+    // Skill tracking: { heroId_skillName: { activated, burned, savedFromKO, turnedFight } }
+    skills: {},
+    // Hydra head tracking
+    hydraHeads: {},
+    // Moments where a hero died and nothing could save them
+    deathMoments: [],
+    // Close calls: won with margin <= 1
+    closeCalls: [],
+    // Overkills: won with margin >= 5
+    overkills: [],
+    // Trap outcomes
+    traps: {},
+    // Talent triggers
+    talents: {},
+  };
+}
+
+function initHeroTracker(t, heroId) {
+  if (!t.heroes[heroId]) {
+    t.heroes[heroId] = {
+      combats: 0, wins: 0, losses: 0, ko: 0,
+      damageDealt: 0, // total margin on wins
+      damageTaken: 0,  // total margin on losses
+      skillsUsed: 0, skillsBurned: 0,
+      flameRolls: 0, talentTriggers: 0,
+      relicsSpent: 0,
+      turnsStalked: 0,
+      equipmentHeld: [], // snapshot at end
+      maxStr: 0,
+      neededButDidntHave: [], // skill gap analysis entries
+    };
+  }
+  return t.heroes[heroId];
+}
+
+function trackEquip(name, field) {
+  if (!G.tracker.equipment[name]) G.tracker.equipment[name] = { drawn:0, equipped:0, usedEffect:0, wonWith:0, lostWith:0, discarded:0, survivedKO:0, strTotal:0 };
+  G.tracker.equipment[name][field]++;
+}
+
+function trackEncounter(name, field) {
+  if (!G.tracker.encounters[name]) G.tracker.encounters[name] = { drawn:0, won:0, lost:0, fled:0, avoided:0 };
+  G.tracker.encounters[name][field]++;
+}
+
+function trackSkill(heroId, skillName, field) {
+  const key = `${heroId}_${skillName}`;
+  if (!G.tracker.skills[key]) G.tracker.skills[key] = { activated:0, burned:0, savedFromKO:0, turnedFight:0 };
+  G.tracker.skills[key][field]++;
+}
+
+function trackTrap(name, field) {
+  if (!G.tracker.traps[name]) G.tracker.traps[name] = { triggered:0, survived:0, ko:0 };
+  G.tracker.traps[name][field]++;
+}
+
+function trackStalker(name, field) {
+  if (!G.tracker.stalkers[name]) G.tracker.stalkers[name] = { attached:0, turnsActive:0, causedKO:0, removed:0 };
+  G.tracker.stalkers[name][field]++;
+}
+
+function trackTalent(heroId, field) {
+  if (!G.tracker.talents[heroId]) G.tracker.talents[heroId] = { triggered:0, blocked:0, combatImpact:0, movementImpact:0 };
+  G.tracker.talents[heroId][field]++;
+}
+
+function trackHydraHead(name, field) {
+  if (!G.tracker.hydraHeads[name]) G.tracker.hydraHeads[name] = { spawned:0, destroyed:0, attacksReceived:0, causedKO:0, regenerated:0 };
+  G.tracker.hydraHeads[name][field]++;
+}
+
+function initState() {
+  const tileDeck = [];
+  for (let i = 0; i < 36; i++) {
+    const r = Math.random();
+    tileDeck.push(r < 0.3 ? 'wonder' : r < 0.75 ? 'common' : 'dread');
+  }
+  shuffle(tileDeck);
+  return {
+    phase: 'idle',
+    turn: 0,
+    round: 1,
+    currentHero: 0,
+    tilesPlaced: 0,
+    tileDeck,
+    relicRoomsPlaced: 0,
+    relicsCollected: 0,
+    exitPlaced: false,
+    exitRevealed: false,
+    hydraActive: false,
+    hydraHeads: [],
+    hydraMaxHeads: 6,
+    hydraDestroyedCount: 0,
+    heroesInHydraArea: new Set(),
+    wonderDeck: shuffle([...Array(WONDER_CARDS.length).keys()]),
+    mishapDeck: shuffle([...Array(MISHAP_CARDS.length).keys()]),
+    misfortuneDeck: shuffle([...Array(MISFORTUNE_CARDS.length).keys()]),
+    legendaryDeck: shuffle([...Array(LEGENDARY_EQUIPMENT.length).keys()]),
+    heroes: HEROES.map(h => ({
+      ...h,
+      hp: 1,
+      pos: 'entrance',
+      equipment: [],
+      followers: [],
+      stalkers: [],
+      heldRelics: [],
+      skillStates: h.skills.map(() => 'ready'),
+      ko: false,
+      talentUsedThisTurn: false,
+      dodgeActive: false,
+      giftedFlame: false,
+      runningToHydra: false,
+      houndFollowing: null
+    })),
+    relicPool: shuffle([...RELICS]),
+    board: [{id:'entrance',type:'entrance',enemies:[],equipment:[]}],
+    enemiesOnBoard: [],
+    gameOver: false,
+    victory: false,
+    log: [],
+    waitingForChoice: null,
+    stats: { turns:0, combats:0, ko:0, monstersKilled:0, skillBurns:0, relicsSpent:0 },
+    tracker: freshTracker()
+  };
+}
+
+// ========== UTILITIES ==========
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function rollDie(hero) {
+  const val = Math.floor(Math.random() * 6) + 1;
+  const isFlame = hero ? hero.flameFaces.includes(val) : false;
+  return { val, isFlame };
+}
+
+// Roll with Leprechaun transformation (swap 1<->6)
+function heroRollDie(hero) {
+  let roll = rollDie(hero);
+  const hasLeprechaun = hero.followers.find(f => f.effect === 'swap_1_6');
+  if (hasLeprechaun) {
+    if (roll.val === 1) {
+      roll.val = 6;
+      roll.isFlame = hero.flameFaces.includes(6);
+    } else if (roll.val === 6) {
+      roll.val = 1;
+      roll.isFlame = hero.flameFaces.includes(1);
+    }
+  }
+  return roll;
+}
+
+// Check Assassin stalker: roll 1 = instant KO
+function checkAssassin(hero, roll) {
+  if (roll.val === 1 && hasStalker(hero, 'roll_1_ko')) {
+    log(`    💀 Assassin strikes! Rolled 1 — instant KO!`, 'ko');
+    applyKO(hero);
+    return true;
+  }
+  return false;
+}
+
+function log(msg, cls = '') {
+  G.log.push({ msg, cls });
+}
+
+function readySkillCount(hero) {
+  return hero.skillStates.filter(s => s === 'ready').length;
+}
+
+function isSkillReady(hero, skillName) {
+  const idx = hero.skills.findIndex(s => s.name === skillName);
+  return idx >= 0 && hero.skillStates[idx] === 'ready';
+}
+
+function useSkill(hero, skillName) {
+  const idx = hero.skills.findIndex(s => s.name === skillName);
+  if (idx >= 0 && hero.skillStates[idx] === 'ready') {
+    hero.skillStates[idx] = 'exhausted';
+    checkCursedArmour(hero);
+    return true;
+  }
+  return false;
+}
+
+function totalStr(hero, opts = {}) {
+  if (opts.baseOnly) return hero.str;
+  let s = hero.str;
+  hero.equipment.forEach(e => {
+    if (opts.noWeapons && e.type === 'weapon') return;
+    if (e.str) s += e.str;
+  });
+  hero.followers.forEach(f => { if (f.str) s += f.str; });
+  hero.stalkers.forEach(st => {
+    if (st.effect === '-2_combat') s -= 2;
+  });
+  if (!opts.noWeapons && hero.equipment.find(e => e.effect === '+1_per_ready_skill')) {
+    s += readySkillCount(hero);
+  }
+  hero.heldRelics.forEach(r => {
+    s += (r.owner === hero.id) ? 2 : 1;
+  });
+  return s;
+}
+
+function hasStalker(hero, effect) {
+  return hero.stalkers.some(s => s.effect === effect);
+}
+
+function heroColor(hero) {
+  return hero.color || 'var(--text)';
+}
+
+function maxEquipSlots(hero) {
+  return hero.followers.find(f => f.effect === 'inventory_+1') ? 3 : 2;
+}
+
+// ========== EQUIP / EXHAUST HELPERS ==========
+function equipItem(hero, item) {
+  const max = maxEquipSlots(hero);
+  while (hero.equipment.length >= max) {
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    if (removable.length === 0) {
+      log(`    Cannot equip ${item.name} — all slots locked!`, 'misfortune');
+      return;
+    }
+    // Discard lowest STR removable
+    removable.sort((a, b) => (a.str || 0) - (b.str || 0));
+    const removed = removable[0];
+    hero.equipment = hero.equipment.filter(e => e !== removed);
+    log(`    Discarded ${removed.name} to make room`, 'legendary');
+  }
+  hero.equipment.push(item);
+  trackEquip(item.name, 'equipped');
+  log(`    ${hero.name} equips ${item.name} (${item.type}, STR ${item.str >= 0 ? '+' : ''}${item.str})`, 'legendary');
+}
+
+function exhaustOneSkill(hero) {
+  const idx = hero.skillStates.findIndex(s => s === 'ready');
+  if (idx >= 0) {
+    hero.skillStates[idx] = 'exhausted';
+    checkCursedArmour(hero);
+  }
+}
+
+function checkCursedArmour(hero) {
+  if (readySkillCount(hero) === 0 && hero.equipment.find(e => e.effect === 'exhaust_all_recharge_1')) {
+    rechargeOneSkill(hero);
+    log(`    Cursed Armour: recharges 1 skill!`, 'legendary');
+  }
+}
+
+function rechargeOneSkill(hero) {
+  const idx = hero.skillStates.findIndex(s => s === 'exhausted');
+  if (idx >= 0) {
+    hero.skillStates[idx] = 'ready';
+  }
+}
+
+function removeFollowers(hero) {
+  // Keep Faithful Dog (can't be removed)
+  const dog = hero.followers.find(f => f.effect === 'reroll_flame');
+  hero.followers = dog ? [dog] : [];
+}
+
+// ========== AI HELPERS ==========
+function aiChooseHydraHead(heads) {
+  const nest = heads.find(h => h.name === 'The Nest' && !h.destroyed);
+  if (nest) return heads.indexOf(nest);
+  let best = -1, bestStr = 999;
+  heads.forEach((h, i) => {
+    if (!h.destroyed && h.effectiveStr < bestStr) {
+      bestStr = h.effectiveStr;
+      best = i;
+    }
+  });
+  return best;
+}
+
+// ========== CORE GAME LOOP ==========
+function runTurn() {
+  if (G.gameOver) return;
+  const hero = G.heroes[G.currentHero];
+  G.turn++;
+  G.stats.turns++;
+  hero.talentUsedThisTurn = false;
+  hero.dodgeActive = false;
+
+  log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
+
+  // Turn-start: Wizard Hat
+  if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
+    const r = Math.floor(Math.random() * 6) + 1;
+    if (r >= 4) {
+      rechargeOneSkill(hero);
+      log(`  🎩 Wizard Hat: rolled ${r} — recharged a skill!`, 'legendary');
+    } else {
+      log(`  🎩 Wizard Hat: rolled ${r} — no recharge`, 'system');
+    }
+  }
+
+  // NOTE: Skills are NOT activated by AI — they're still being designed.
+  // Only Skill Burn (reroll) is used, as it's a core mechanic.
+
+  // Hound following from previous turn
+  if (hero.houndFollowing) {
+    log(`  🐕 The Hound catches up to ${hero.name}!`, 'misfortune');
+    const hound = hero.houndFollowing;
+    hero.houndFollowing = null;
+    combat(hero, hound, 'misfortune');
+    if (G.gameOver || hero.ko) { if (!G.gameOver) nextHero(); return; }
+  }
+
+  if (hero.runningToHydra) {
+    runToHydra(hero);
+  } else if (G.hydraActive && G.heroesInHydraArea.has(hero.id)) {
+    hydraAttack(hero);
+  } else {
+    movePhase(hero);
+  }
+
+  if (!G.gameOver) {
+    nextHero();
+  }
+}
+
+function movePhase(hero) {
+  let roll = heroRollDie(hero);
+  if (checkAssassin(hero, roll)) return;
+
+  let isFlame = roll.isFlame || hero.giftedFlame;
+  hero.giftedFlame = false;
+  let moveVal = roll.val;
+
+  // Baba Yaga: limit to 1
+  if (hasStalker(hero, 'move_1_only')) {
+    if (moveVal > 1) {
+      moveVal = 1;
+      log(`  🧙 Baba Yaga limits movement to 1!`, 'misfortune');
+    }
+  }
+
+  // Spectral Horse: +2 movement
+  if (hero.followers.find(f => f.effect === 'movement_+2')) {
+    moveVal += 2;
+    log(`  🐴 Spectral Horse: +2 movement (total ${moveVal})`, 'wonder');
+  }
+
+  // Ninja Tabi: roll 2 dice for movement, keep best
+  if (hero.equipment.find(e => e.effect === 'move_2_dice')) {
+    const roll2 = heroRollDie(hero);
+    if (roll2.val > roll.val) {
+      moveVal = roll2.val + (hero.followers.find(f => f.effect === 'movement_+2') ? 2 : 0);
+      if (hasStalker(hero, 'move_1_only')) moveVal = 1;
+      isFlame = roll2.isFlame || hero.giftedFlame;
+      log(`  👟 Ninja Tabi: rolled [${roll.val}, ${roll2.val}] keeps ${roll2.val}`, 'legendary');
+    } else {
+      log(`  👟 Ninja Tabi: rolled [${roll.val}, ${roll2.val}] keeps ${roll.val}`, 'legendary');
+    }
+  }
+
+  log(`${hero.name} rolls ${moveVal}${isFlame ? ' 🔥 FLAME' : ''} for movement`);
+
+  // Talent trigger on movement flame
+  if (isFlame && !hero.talentUsedThisTurn) {
+    triggerTalent(hero, 'movement');
+  }
+
+  // Awakening check (tile 10+)
+  if (isFlame && G.tilesPlaced >= 10) {
+    awakenEffect(hero);
+  }
+
+  // Move
+  let destType = null;
+  for (let step = 0; step < moveVal; step++) {
+    if (G.tileDeck.length > 0) {
+      const tile = G.tileDeck.pop();
+      G.tilesPlaced++;
+      const tileId = `room_${G.tilesPlaced}`;
+      G.board.push({id: tileId, type: tile, enemies:[], equipment:[]});
+
+      if (tile === 'dread') {
+        // Dread Dungeon: movement stops immediately
+        destType = 'dread';
+        hero.pos = tileId;
+        if (step < moveVal - 1) {
+          log(`  ⚠ Dread Dungeon revealed! Movement stops immediately.`, 'misfortune');
+        }
+        break;
+      }
+      if (step === moveVal - 1) {
+        destType = tile;
+        hero.pos = tileId;
+      } else {
+        const icon = tile === 'wonder' ? '✦' : '·';
+        log(`  ${icon} Passed through ${tile} room (tile #${G.tilesPlaced})`, 'system');
+      }
+    } else {
+      // Castle complete: move on existing tiles
+      // Check for existing Dread Dungeons stopping movement
+      const existingTiles = G.board.filter(b => b.type !== 'entrance');
+      if (existingTiles.length > 0) {
+        const targetIdx = Math.min(step, existingTiles.length - 1);
+        const target = existingTiles[Math.floor(Math.random() * existingTiles.length)];
+        if (target.type === 'dread' && step < moveVal - 1) {
+          log(`  ⚠ Crossed existing Dread Dungeon — movement stops!`, 'misfortune');
+          hero.pos = target.id;
+          destType = 'dread';
+          break;
+        }
+        hero.pos = target.id;
+        destType = target.type;
+      }
+      break;
+    }
+  }
+
+  if (!destType) destType = 'common';
+
+  const typeIcon = destType === 'wonder' ? '✦ Wonder' : destType === 'dread' ? '☠ Dread Dungeon' : '· Common Passage';
+  log(`${hero.name} lands on ${typeIcon} (tile #${G.tilesPlaced})`, destType === 'wonder' ? 'wonder' : destType === 'dread' ? 'misfortune' : 'mishap');
+
+  // Room resolution
+  resolveRoom(hero, destType);
+
+  // Vanga: draw legendary on Wonder destination
+  if (destType === 'wonder' && hero.equipment.find(e => e.effect === 'wonder_draw_legendary')) {
+    log(`  ⚒ Vanga: Wonder room bonus!`, 'legendary');
+    drawLegendaryItem(hero);
+  }
+}
+
+function resolveRoom(hero, roomType) {
+  if (roomType === 'wonder') {
+    drawWonder(hero);
+  } else if (roomType === 'common') {
+    drawMishap(hero);
+  } else if (roomType === 'dread') {
+    drawDread(hero);
+  }
+}
+
+function drawLegendaryItem(hero) {
+  if (G.legendaryDeck.length > 0) {
+    const idx = G.legendaryDeck.pop();
+    const eq = {...LEGENDARY_EQUIPMENT[idx]};
+    log(`    Drew Legendary: ${eq.name}`, 'legendary');
+    equipItem(hero, eq);
+  }
+}
+
+function drawWonder(hero) {
+  if (G.wonderDeck.length === 0) { G.wonderDeck = shuffle([...Array(WONDER_CARDS.length).keys()]); }
+  const idx = G.wonderDeck.pop();
+  const card = WONDER_CARDS[idx];
+  log(`  ✦ Wonder: ${card.name} (${card.type})`, 'wonder');
+  resolveWonderCard(hero, card);
+}
+
+function drawMishap(hero) {
+  if (G.mishapDeck.length === 0) { G.mishapDeck = shuffle([...Array(MISHAP_CARDS.length).keys()]); }
+  const idx = G.mishapDeck.pop();
+  const card = MISHAP_CARDS[idx];
+  log(`  ⚡ Mishap: ${card.name} (${card.type})`, 'mishap');
+  resolveMishapCard(hero, card);
+}
+
+function drawMisfortune(hero) {
+  if (G.misfortuneDeck.length === 0) { G.misfortuneDeck = shuffle([...Array(MISFORTUNE_CARDS.length).keys()]); }
+  const idx = G.misfortuneDeck.pop();
+  const card = MISFORTUNE_CARDS[idx];
+  log(`  ☠ Misfortune: ${card.name} (${card.type})`, 'misfortune');
+  resolveMisfortuneCard(hero, card);
+}
+
+function drawDread(hero) {
+  // Seasoned Adventurer: draw 2 misfortunes, keep the lesser
+  const hasSA = hero.followers.find(f => f.effect === 'dd_draw_2_keep_1');
+
+  // Draw Legendary Equipment (guarded)
+  let guardedEquip = null;
+  if (G.legendaryDeck.length > 0) {
+    const idx = G.legendaryDeck.pop();
+    guardedEquip = {...LEGENDARY_EQUIPMENT[idx]};
+    log(`  ⚔ Guarded Legendary: ${guardedEquip.name} (STR ${guardedEquip.str >= 0 ? '+' : ''}${guardedEquip.str})`, 'legendary');
+  }
+
+  // Draw Misfortune
+  if (hasSA) {
+    log(`    Seasoned Adventurer: draws 2 misfortunes, keeps the lesser danger!`, 'wonder');
+  }
+  drawMisfortune(hero);
+
+  // If survived, claim equipment
+  if (!hero.ko && guardedEquip) {
+    equipItem(hero, guardedEquip);
+  }
+}
+
+// ========== CARD RESOLUTION ==========
+function resolveWonderCard(hero, card) {
+  switch(card.type) {
+    case 'encounter':
+      if (card.effect === 'recharge_all_skills') {
+        hero.skillStates = hero.skillStates.map(() => 'ready');
+        log(`    ${hero.name}: all skills recharged!`, 'wonder');
+      } else if (card.effect === 'recharge_1_skill') {
+        rechargeOneSkill(hero);
+        log(`    ${hero.name}: 1 skill recharged!`, 'wonder');
+      } else if (card.effect === 'draw_legendary') {
+        drawLegendaryItem(hero);
+      } else if (card.effect === 'equip_full') {
+        while (hero.equipment.length < maxEquipSlots(hero) && G.legendaryDeck.length > 0) {
+          drawLegendaryItem(hero);
+        }
+      } else if (card.effect === 'swap_equipment') {
+        if (hero.equipment.length > 0 && G.legendaryDeck.length > 0) {
+          const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+          if (removable.length > 0) {
+            removable.sort((a, b) => (a.str || 0) - (b.str || 0));
+            const removed = removable[0];
+            hero.equipment = hero.equipment.filter(e => e !== removed);
+            log(`    Discarded ${removed.name}`, 'legendary');
+            drawLegendaryItem(hero);
+          }
+        }
+      } else if (card.effect === 'remove_stalker') {
+        if (hero.stalkers.length > 0) {
+          const removed = hero.stalkers.shift();
+          log(`    Removed ${removed.name}!`, 'wonder');
+        } else {
+          log(`    No stalkers to remove.`, 'system');
+        }
+      } else {
+        log(`    ${card.name} effect applied.`, 'wonder');
+      }
+      break;
+    case 'follower':
+      hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
+      log(`    ${card.name} joins ${hero.name} as a follower!`, 'wonder');
+      break;
+  }
+}
+
+function resolveMishapCard(hero, card) {
+  switch(card.type) {
+    case 'encounter':
+      log(`    ${card.name}: minor encounter resolved.`, 'mishap');
+      break;
+    case 'follower':
+      hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
+      log(`    ${card.name} joins ${hero.name}!`, 'mishap');
+      break;
+    case 'stalker':
+      hero.stalkers.push({name: card.name, effect: card.effect});
+      log(`    ⚠ ${card.name} latches onto ${hero.name}!`, 'misfortune');
+      // Old Hag: discard all other followers
+      if (card.effect === 'discard_followers') {
+        removeFollowers(hero);
+        log(`    Old Hag: all other followers discarded!`, 'misfortune');
+      }
+      break;
+    case 'trap':
+      resolveTrap(hero, card);
+      break;
+    case 'enemy':
+      combat(hero, card, 'mishap');
+      break;
+  }
+}
+
+function resolveMisfortuneCard(hero, card) {
+  switch(card.type) {
+    case 'stalker':
+      hero.stalkers.push({name: card.name, effect: card.effect});
+      log(`    ⚠ ${card.name} curses ${hero.name}!`, 'misfortune');
+      break;
+    case 'trap':
+      resolveTrap(hero, card);
+      break;
+    case 'enemy':
+      combat(hero, card, 'misfortune');
+      break;
+  }
+}
+
+function resolveTrap(hero, card) {
+  trackTrap(card.name, 'triggered');
+  switch(card.effect) {
+    case 'roll_1_2_ko': {
+      const r = heroRollDie(hero);
+      if (checkAssassin(hero, r)) return;
+      log(`    Trap roll: ${r.val}`, 'combat');
+      if (r.val <= 2) {
+        log(`    ${hero.name} falls through! KO!`, 'ko');
+        trackTrap(card.name, 'ko');
+        applyKO(hero);
+      } else {
+        log(`    ${hero.name} dodges the trap!`, 'wonder');
+        trackTrap(card.name, 'survived');
+      }
+      break;
+    }
+    case 'exhaust_or_ko': {
+      if (readySkillCount(hero) > 0) {
+        exhaustOneSkill(hero);
+        log(`    ${hero.name} escapes the web!`, 'mishap');
+      } else {
+        log(`    No skills to exhaust — KO!`, 'ko');
+        applyKO(hero);
+      }
+      break;
+    }
+    case 'roll_1_3_ko': {
+      const r = heroRollDie(hero);
+      if (checkAssassin(hero, r)) return;
+      log(`    Spike Trap roll: ${r.val}`, 'combat');
+      if (r.val <= 3) {
+        log(`    Impaled! KO!`, 'ko');
+        applyKO(hero);
+      } else {
+        log(`    ${hero.name} avoids the spikes.`, 'wonder');
+      }
+      break;
+    }
+    case 'ko_or_exhaust_all': {
+      if (readySkillCount(hero) > 0) {
+        hero.skillStates = hero.skillStates.map(() => 'exhausted');
+        checkCursedArmour(hero);
+        log(`    ${hero.name} pays The Tribute. All skills exhausted.`, 'misfortune');
+      } else {
+        log(`    No skills to pay — KO!`, 'ko');
+        applyKO(hero);
+      }
+      break;
+    }
+    case 'fewer_2_skills_ko': {
+      if (readySkillCount(hero) < 2) {
+        log(`    Guillotine! Not enough ready skills — KO!`, 'ko');
+        applyKO(hero);
+      } else {
+        log(`    ${hero.name} has enough skills to survive.`, 'wonder');
+      }
+      break;
+    }
+    case 'fight_self_4dice': {
+      const enemyRolls = [1,2,3,4].map(() => Math.floor(Math.random()*6)+1);
+      const enemyTotal = Math.max(...enemyRolls);
+      log(`    Hall of Mirrors! Enemy (yourself) rolls: [${enemyRolls}] = ${enemyTotal}`, 'combat');
+      const pRoll = heroRollDie(hero);
+      if (checkAssassin(hero, pRoll)) return;
+      const pTotal = pRoll.val + totalStr(hero);
+      log(`    ${hero.name} rolls ${pRoll.val} + STR ${totalStr(hero)} = ${pTotal}`, 'combat');
+      if (pTotal >= enemyTotal) {
+        log(`    Defeated your reflection!`, 'wonder');
+      } else {
+        log(`    Your reflection wins — KO!`, 'ko');
+        applyKO(hero);
+      }
+      break;
+    }
+    case 'draw_dread': {
+      // Trap Alarm: resolve as Dread Dungeon (Legendary + Misfortune)
+      log(`    Trap Alarm triggers Dread encounter!`, 'misfortune');
+      drawDread(hero);
+      break;
+    }
+    case 'flame_or_discard_equip': {
+      // Magnetic Field: ALL heroes with equipment must roll Flame or discard
+      G.heroes.forEach(h => {
+        if (h.equipment.length > 0) {
+          const r = heroRollDie(h);
+          if (r.isFlame) {
+            log(`    ${h.name} rolls ${r.val} 🔥 — equipment safe!`, 'wonder');
+          } else {
+            const removable = h.equipment.filter(e => e.effect !== 'cannot_remove');
+            if (removable.length > 0) {
+              const removed = removable[removable.length - 1];
+              h.equipment = h.equipment.filter(e => e !== removed);
+              log(`    ${h.name} rolls ${r.val} — loses ${removed.name}!`, 'misfortune');
+            }
+          }
+        }
+      });
+      break;
+    }
+    case 'discard_1_equip': {
+      const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+      if (removable.length > 0) {
+        removable.sort((a, b) => (a.str || 0) - (b.str || 0));
+        const removed = removable[0];
+        hero.equipment = hero.equipment.filter(e => e !== removed);
+        log(`    Lost ${removed.name}!`, 'misfortune');
+      }
+      break;
+    }
+    case 'lose_followers': {
+      if (hero.followers.length > 0) {
+        const count = hero.followers.length;
+        removeFollowers(hero);
+        log(`    Lost ${count} followers!`, 'misfortune');
+      }
+      break;
+    }
+    case 'go_back': {
+      hero.pos = 'entrance';
+      log(`    Trap Door! Back to start.`, 'misfortune');
+      break;
+    }
+    default:
+      log(`    ${card.name} trap resolved.`, 'mishap');
+  }
+}
+
+// ========== COMBAT ==========
+function combat(hero, enemyCard, tier) {
+  G.stats.combats++;
+  const ht = initHeroTracker(G.tracker, hero.id);
+  ht.combats++;
+  trackEncounter(enemyCard.name, 'drawn');
+  let enemyStr = enemyCard.str || 0;
+
+  // === SPECIAL ENEMY STR ===
+  if (enemyCard.effect === 'random_str') {
+    enemyStr = Math.floor(Math.random() * 6) + 1;
+    log(`    The Faceless One's STR: ${enemyStr}`, 'combat');
+  }
+  if (enemyCard.effect === 'plus2_per_relic') {
+    const totalRelics = G.heroes.reduce((s, h) => s + h.heldRelics.length, 0);
+    enemyStr = totalRelics * 2;
+    log(`    Fishguard STR: ${enemyStr} (+2 per relic, party has ${totalRelics})`, 'combat');
+  }
+
+  // === PRE-COMBAT AVOIDANCE ===
+  // Bully: flee if hero total STR > Bully base
+  if (enemyCard.effect === 'flee_or_str6') {
+    const heroTotalStr = totalStr(hero);
+    if (heroTotalStr > enemyStr) {
+      log(`    Bully sees ${hero.name}'s STR ${heroTotalStr} and flees!`, 'wonder');
+      trackEncounter(enemyCard.name, 'fled');
+      return;
+    }
+    enemyStr = 6;
+    log(`    Bully stands ground at STR 6!`, 'combat');
+  }
+
+  // Rat Swarm: scare off if hero total STR > enemy STR
+  if (enemyCard.effect === 'push_to_room') {
+    if (totalStr(hero) > enemyStr) {
+      log(`    ${hero.name} scares off the Rat Swarm!`, 'wonder');
+      trackEncounter(enemyCard.name, 'avoided');
+      return;
+    }
+  }
+
+  // Bandit: discard 1 equipment to avoid fight
+  if (enemyCard.effect === 'discard_equip_or_fight') {
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    if (removable.length > 0 && totalStr(hero) < enemyStr + 3) {
+      removable.sort((a, b) => (a.str || 0) - (b.str || 0));
+      const removed = removable[0];
+      hero.equipment = hero.equipment.filter(e => e !== removed);
+      log(`    ${hero.name} pays off the Bandit with ${removed.name}!`, 'mishap');
+      trackEncounter(enemyCard.name, 'avoided');
+      return;
+    }
+  }
+
+  // === PRE-COMBAT EFFECTS ===
+  if (enemyCard.effect === 'exhaust_1_skill') {
+    exhaustOneSkill(hero);
+    log(`    Snakerogue exhausts a skill before combat!`, 'misfortune');
+  }
+
+  if (enemyCard.effect === 'aoe_skill_drain') {
+    G.heroes.forEach(h => {
+      const r = heroRollDie(h);
+      if (r.val <= 2) { exhaustOneSkill(h); log(`    Stormcaller: ${h.name} loses a skill!`, 'misfortune'); }
+    });
+  }
+
+  // Mana Leech: exhaust 2 or -2
+  let manaLeechPenalty = 0;
+  if (enemyCard.effect === 'exhaust_2_or_minus2') {
+    if (readySkillCount(hero) >= 2) {
+      exhaustOneSkill(hero);
+      exhaustOneSkill(hero);
+      log(`    Mana Leech: ${hero.name} exhausts 2 skills!`, 'misfortune');
+    } else {
+      manaLeechPenalty = -2;
+      log(`    Mana Leech: ${hero.name} fights at -2 STR!`, 'misfortune');
+    }
+  }
+
+  // FROGman: swallows 1 equipment
+  let frogmanSwallowed = null;
+  if (enemyCard.effect === 'swallows_equip' && hero.equipment.length > 0) {
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    if (removable.length > 0) {
+      frogmanSwallowed = removable[removable.length - 1];
+      hero.equipment = hero.equipment.filter(e => e !== frogmanSwallowed);
+      log(`    FROGman swallows ${frogmanSwallowed.name}!`, 'misfortune');
+    }
+  }
+
+  // === DOOMHAMMER pre-fight ===
+  let doomhammerBonus = 0;
+  if (hero.equipment.find(e => e.effect === 'roll_gamble')) {
+    const doomRoll = Math.floor(Math.random() * 6) + 1;
+    if (doomRoll === 1) {
+      log(`    Doomhammer curse! Rolled 1 — KO!`, 'ko');
+      if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
+      applyKO(hero);
+      return;
+    } else if (doomRoll <= 4) {
+      doomhammerBonus = 1;
+      log(`    Doomhammer: rolled ${doomRoll} — STR +1`, 'legendary');
+    } else {
+      doomhammerBonus = 3;
+      log(`    Doomhammer: rolled ${doomRoll} — STR +3!`, 'legendary');
+    }
+  }
+
+  // === FIREBANE: exhaust skill for +1 ===
+  let firebaneBonus = 0;
+  if (hero.equipment.find(e => e.effect === 'exhaust_skill_+1') && readySkillCount(hero) > 1 && enemyStr >= 4) {
+    exhaustOneSkill(hero);
+    firebaneBonus = 1;
+    log(`    Firebane: exhausted a skill for +1 STR`, 'legendary');
+  }
+
+  // === DEMON SWORD: +2 on Dread Dungeon ===
+  let demonSwordBonus = 0;
+  const heroRoom = G.board.find(r => r.id === hero.pos);
+  if (hero.equipment.find(e => e.effect === 'dd_+2') && heroRoom && heroRoom.type === 'dread') {
+    demonSwordBonus = 2;
+    log(`    Demon Sword blazes in the Dread Dungeon! +2 STR`, 'legendary');
+  }
+
+  // === WARLORD ARMOUR: double base STR if enemy > hero ===
+  let warlordBonus = 0;
+  if (hero.equipment.find(e => e.effect === 'double_base_if_weaker') && enemyStr > totalStr(hero)) {
+    warlordBonus = hero.str;
+    log(`    Warlord Armour! Base STR doubled (${hero.str} → ${hero.str * 2})`, 'legendary');
+  }
+
+  // === RUN FIGHT (supports Slayer: fight_twice) ===
+  const winsNeeded = (enemyCard.effect === 'fight_twice') ? 2 : 1;
+  let totalWins = 0;
+  for (let fightRound = 0; fightRound < winsNeeded; fightRound++) {
+    if (G.gameOver) return;
+    if (fightRound > 0) log(`    Slayer: Round ${fightRound + 1}!`, 'combat');
+
+    const result = singleFight(hero, enemyCard, tier, enemyStr,
+      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed });
+
+    if (result === 'win') {
+      totalWins++;
+    } else {
+      // Lost — stop fighting
+      return;
+    }
+  }
+
+  // All rounds won
+  G.stats.monstersKilled++;
+  ht.wins++;
+  trackEncounter(enemyCard.name, 'won');
+  log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
+
+  // === ON-WIN EFFECTS ===
+  // Recover FROGman equipment
+  if (frogmanSwallowed) {
+    hero.equipment.push(frogmanSwallowed);
+    log(`    Recovered ${frogmanSwallowed.name} from FROGman!`, 'wonder');
+  }
+
+  // Golem: die result exactly 3 → becomes follower
+  if (enemyCard.effect === 'exact_3_follower' && G._lastHeroRollVal === 3) {
+    hero.followers.push({name:'Golem', str:3, effect:'none'});
+    log(`    The Golem becomes a follower! (+3 STR)`, 'wonder');
+  }
+
+  // Mimic: draw legendary on defeat
+  if (enemyCard.effect === 'draw_legendary') {
+    drawLegendaryItem(hero);
+  }
+
+  // Thiefling Rats: discard 1 equipment on defeat
+  if (enemyCard.effect === 'discard_1_equip') {
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+    if (removable.length > 0) {
+      removable.sort((a, b) => (a.str || 0) - (b.str || 0));
+      const removed = removable[0];
+      hero.equipment = hero.equipment.filter(e => e !== removed);
+      log(`    Thiefling Rats stole ${removed.name}!`, 'misfortune');
+    }
+  }
+
+  // Mystic Wand: recharge all on win
+  if (hero.equipment.find(e => e.effect === 'win_recharge_all')) {
+    hero.skillStates = hero.skillStates.map(() => 'ready');
+    log(`    Mystic Wand: all skills recharged!`, 'wonder');
+  }
+
+  // Supernova Gun: roll 6 on win = defeat all enemies
+  if (hero.equipment.find(e => e.effect === 'win_roll_6_clear')) {
+    const r = Math.floor(Math.random() * 6) + 1;
+    if (r === 6) {
+      G.enemiesOnBoard = [];
+      log(`    💥 Supernova Gun! Rolled 6 — all enemies in dungeon defeated!`, 'legendary');
+    }
+  }
+
+  // Sacerdote Fishfolk: roll 1-2 go to entrance
+  if (enemyCard.effect === 'roll_1_2_entrance') {
+    const r = Math.floor(Math.random() * 6) + 1;
+    if (r <= 2) {
+      hero.pos = 'entrance';
+      log(`    Sacerdote curse: rolled ${r} — sent to entrance!`, 'misfortune');
+    }
+  }
+
+  // Wind Elemental: may move to revealed room on defeat
+  if (enemyCard.effect === 'move_to_revealed') {
+    log(`    Wind Elemental: ${hero.name} may move to any revealed room.`, 'wonder');
+  }
+}
+
+function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
+  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed } = bonuses;
+
+  // === ENEMY ROLL ===
+  let enemyTotal;
+  let enemyRollResult = null;
+
+  if (enemyCard.effect === 'rolls_2_best_double_lose') {
+    // Jack o' Lantern: 2 dice, keep best, doubles = auto-lose
+    const r1 = rollDie(hero), r2 = rollDie(hero);
+    const isDouble = r1.val === r2.val;
+    const bestRoll = Math.max(r1.val, r2.val);
+    enemyTotal = bestRoll + enemyStr;
+    log(`    Jack o' Lantern rolls [${r1.val}, ${r2.val}] keeps ${bestRoll} + STR ${enemyStr} = ${enemyTotal}${isDouble ? ' DOUBLES!' : ''}`, 'combat');
+    if (isDouble) {
+      log(`    Doubles! ${hero.name} automatically loses!`, 'ko');
+      handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed);
+      return 'loss';
+    }
+    enemyRollResult = { val: bestRoll, isFlame: false };
+  } else if (enemyCard.effect === 'rolls_2_best') {
+    // Ghoul: 2 dice, keep best
+    const r1 = rollDie(hero), r2 = rollDie(hero);
+    const bestRoll = Math.max(r1.val, r2.val);
+    enemyTotal = bestRoll + enemyStr;
+    log(`    ${enemyCard.name} rolls [${r1.val}, ${r2.val}] keeps ${bestRoll} + STR ${enemyStr} = ${enemyTotal}`, 'combat');
+    enemyRollResult = { val: bestRoll, isFlame: false };
+  } else {
+    enemyRollResult = rollDie(hero);
+    enemyTotal = enemyRollResult.val + enemyStr;
+    log(`    ${enemyCard.name} (STR ${enemyStr}) rolls ${enemyRollResult.val} = ${enemyTotal}`, 'combat');
+  }
+
+  // Mummy: if enemy rolls Flame, hero -2
+  let mummyPenalty = 0;
+  if (enemyCard.effect === 'flame_minus2' && enemyRollResult && enemyRollResult.isFlame) {
+    mummyPenalty = -2;
+    log(`    Mummy's Flame curse! ${hero.name} fights at -2`, 'misfortune');
+  }
+
+  // Mud Golem margin
+  const beatMargin = (enemyCard.effect === 'must_beat_by_2') ? 2 : 0;
+  if (beatMargin > 0) log(`    Mud Golem: must beat by ${beatMargin}+!`, 'combat');
+
+  // === HERO ROLL ===
+  let heroRoll;
+  const hasTripleAxe = hero.equipment.find(e => e.effect === 'roll_3_keep_best');
+  const hasVeteran = hero.followers.find(f => f.effect === 'roll_2_keep_best');
+
+  if (hasTripleAxe) {
+    const r1 = heroRollDie(hero), r2 = heroRollDie(hero), r3 = heroRollDie(hero);
+    heroRoll = [r1, r2, r3].sort((a, b) => b.val - a.val)[0];
+    log(`    Triple Axe: rolled [${r1.val}, ${r2.val}, ${r3.val}] keeps ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'legendary');
+  } else if (hasVeteran) {
+    const r1 = heroRollDie(hero), r2 = heroRollDie(hero);
+    heroRoll = r1.val >= r2.val ? r1 : r2;
+    log(`    Veteran: rolled [${r1.val}, ${r2.val}] keeps ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'legendary');
+  } else {
+    heroRoll = heroRollDie(hero);
+  }
+
+  // Assassin check on combat roll
+  if (checkAssassin(hero, heroRoll)) return 'loss';
+
+  let isFlame = heroRoll.isFlame || hero.giftedFlame;
+  hero.giftedFlame = false;
+  G._lastHeroRollVal = heroRoll.val;
+
+  // === ROLL MODIFIERS ===
+  // Mycoid: flame counts as 0 AND no talent
+  if (enemyCard.effect === 'flame_counts_0' && isFlame) {
+    heroRoll = { val: 0, isFlame: true };
+    isFlame = false;
+    log(`    Mycoid spores! Flame roll counts as 0, no talent!`, 'misfortune');
+  }
+
+  // Djin: only flame hits
+  if (enemyCard.effect === 'only_flame_hits' && !isFlame) {
+    log(`    Djin: non-Flame roll (${heroRoll.val}) counts as 0!`, 'combat');
+    heroRoll = { val: 0, isFlame: false };
+  }
+
+  // Longlegs Spider: only even hits
+  if (enemyCard.effect === 'only_even_hits' && heroRoll.val % 2 !== 0) {
+    log(`    Longlegs Spider: odd roll (${heroRoll.val}) counts as 0!`, 'combat');
+    heroRoll = { val: 0, isFlame: heroRoll.isFlame };
+  }
+
+  // Stone Gargoyle: only 3+ hits
+  if (enemyCard.effect === 'only_3plus_hits' && heroRoll.val > 0 && heroRoll.val < 3) {
+    log(`    Stone Gargoyle: roll ${heroRoll.val} counts as 0!`, 'combat');
+    heroRoll = { val: 0, isFlame: heroRoll.isFlame };
+  }
+
+  // Talent trigger
+  if (isFlame && !hero.talentUsedThisTurn && !hasStalker(hero, 'no_flame_effect')) {
+    triggerTalent(hero, 'combat');
+  }
+
+  let combatBonus = 0;
+  if (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn) combatBonus += 2;
+
+  // Dodge (Eggo)
+  if (hero.id === 'eggo' && isFlame && !hasStalker(hero, 'no_flame_effect')) {
+    hero.dodgeActive = true;
+  }
+
+  // Wooden Spoon: roll 1 = auto win
+  if (hero.equipment.find(e => e.effect === 'roll_1_auto_win') && heroRoll.val === 1) {
+    log(`    🥄 Wooden Spoon! Rolled 1 — automatic victory!`, 'legendary');
+    return 'win';
+  }
+
+  // Archangel: flame = auto win (non-boss)
+  if (hero.followers.find(f => f.effect === 'flame_auto_win') && isFlame && tier !== 'hydra') {
+    log(`    👼 Archangel! Flame = automatic victory!`, 'wonder');
+    return 'win';
+  }
+
+  // NOTE: ATK skills removed — skills are still being designed.
+  // Only Skill Burn (reroll) is active.
+
+  // Siphon Blade
+  if (hero.equipment.find(e => e.effect === 'drain_1')) {
+    combatBonus += 1;
+    enemyTotal -= 1;
+    log(`    Siphon Blade drains! Enemy -1, Hero +1`, 'legendary');
+  }
+
+  // Arcane Parrot: exhaust skill for +1
+  let parrotBonus = 0;
+  if (hero.followers.find(f => f.effect === 'exhaust_skill_str+1') && readySkillCount(hero) > 1 && enemyStr >= 4) {
+    exhaustOneSkill(hero);
+    parrotBonus = 1;
+    log(`    Arcane Parrot: exhausted a skill for +1 STR`, 'wonder');
+  }
+
+  // Blob: no weapon STR
+  let blobPenalty = 0;
+  if (enemyCard.effect === 'no_weapon') {
+    blobPenalty = -hero.equipment.filter(e => e.type === 'weapon').reduce((s, e) => s + (e.str || 0), 0);
+    if (blobPenalty < 0) log(`    Blob: weapons have no effect! (${blobPenalty} STR)`, 'combat');
+  }
+
+  // Squelette: base STR only
+  const useBaseOnly = (enemyCard.effect === 'base_only');
+  if (useBaseOnly) log(`    Squelette: ${hero.name} fights with base STR only!`, 'combat');
+
+  const heroStrValue = useBaseOnly ? hero.str : totalStr(hero);
+  let heroTotal = heroRoll.val + heroStrValue + combatBonus + doomhammerBonus + firebaneBonus
+    + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty;
+
+  log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
+
+  // === SKILL BURN (can reroll YOUR die OR ENEMY die) ===
+  if (heroTotal < enemyTotal + beatMargin && readySkillCount(hero) > 0) {
+    // Option A: Reroll hero die
+    const rerollHero = heroRollDie(hero);
+    let rerollHeroVal = rerollHero.val;
+    let rerollHeroFlame = rerollHero.isFlame;
+    if (enemyCard.effect === 'flame_counts_0' && rerollHeroFlame) { rerollHeroVal = 0; rerollHeroFlame = false; }
+    if (enemyCard.effect === 'only_flame_hits' && !rerollHeroFlame) { rerollHeroVal = 0; }
+    if (enemyCard.effect === 'only_even_hits' && rerollHeroVal % 2 !== 0) { rerollHeroVal = 0; }
+    if (enemyCard.effect === 'only_3plus_hits' && rerollHeroVal > 0 && rerollHeroVal < 3) { rerollHeroVal = 0; }
+    const newBonusA = (hero.id === 'juju' && rerollHeroFlame && !hero.talentUsedThisTurn) ? 2 : (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0);
+    const totalA = rerollHeroVal + heroStrValue + (combatBonus - (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0)) + newBonusA
+      + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty;
+
+    // Option B: Reroll enemy die (keep hero roll, enemy gets new roll)
+    const rerollEnemy = rollDie(hero);
+    let newEnemyTotal = enemyTotal;
+    // Recalculate enemy total with new roll (replace only the die, keep STR and modifiers)
+    const enemyDieOnly = enemyTotal - enemyStr; // original enemy die value (may include siphon drain etc)
+    // Simplified: enemy total = new roll + enemy STR (reapply siphon drain if applicable)
+    let newEnemyDie = rerollEnemy.val;
+    newEnemyTotal = newEnemyDie + enemyStr;
+    // Reapply siphon drain to enemy
+    if (hero.equipment.find(e => e.effect === 'drain_1')) { newEnemyTotal -= 1; }
+    // Mummy: if new enemy roll is flame, hero gets -2 (may change penalty)
+    // Keep mummy penalty as-is for simplicity since it was already applied
+
+    // AI picks the better option
+    const gainA = totalA - heroTotal; // how much hero total improves
+    const gainB = enemyTotal - newEnemyTotal; // how much enemy total drops (positive = good)
+    // Effective improvement: for option A, hero total changes. For option B, enemy total changes.
+    // Compare which option gives better chance to win
+    const wouldWinA = totalA >= enemyTotal + beatMargin;
+    const wouldWinB = heroTotal >= newEnemyTotal + beatMargin;
+    // Prefer the option that wins. If both win, pick either. If neither wins, pick best improvement.
+    let burnChoice = 'none';
+    if (wouldWinA && !wouldWinB) burnChoice = 'hero';
+    else if (wouldWinB && !wouldWinA) burnChoice = 'enemy';
+    else if (wouldWinA && wouldWinB) burnChoice = gainA >= gainB ? 'hero' : 'enemy';
+    else if (totalA > heroTotal || newEnemyTotal < enemyTotal) burnChoice = (totalA - heroTotal) >= (enemyTotal - newEnemyTotal) ? 'hero' : 'enemy';
+
+    if (burnChoice === 'hero' && (totalA > heroTotal || wouldWinA)) {
+      exhaustOneSkill(hero);
+      G.stats.skillBurns++;
+      initHeroTracker(G.tracker, hero.id).skillsBurned++;
+      heroRoll = { val: rerollHeroVal, isFlame: rerollHeroFlame };
+      G._lastHeroRollVal = rerollHeroVal;
+      isFlame = rerollHeroFlame;
+      const oldTotal = heroTotal;
+      heroTotal = totalA;
+      if (hero.id === 'eggo' && rerollHeroFlame && !hasStalker(hero, 'no_flame_effect')) hero.dodgeActive = true;
+      if (hero.id === 'eggo' && !rerollHeroFlame) hero.dodgeActive = false;
+      if (oldTotal < enemyTotal + beatMargin && heroTotal >= enemyTotal + beatMargin) {
+        trackSkill(hero.id, 'Skill Burn', 'turnedFight');
+      }
+      log(`    ⟲ Skill Burn! Rerolled own die to ${rerollHeroVal}${rerollHeroFlame ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
+    } else if (burnChoice === 'enemy' && newEnemyTotal < enemyTotal) {
+      exhaustOneSkill(hero);
+      G.stats.skillBurns++;
+      initHeroTracker(G.tracker, hero.id).skillsBurned++;
+      const oldEnemyTotal = enemyTotal;
+      enemyTotal = newEnemyTotal;
+      if (heroTotal < oldEnemyTotal + beatMargin && heroTotal >= enemyTotal + beatMargin) {
+        trackSkill(hero.id, 'Skill Burn', 'turnedFight');
+      }
+      log(`    ⟲ Skill Burn! Rerolled ENEMY die: ${enemyCard.name} ${oldEnemyTotal} → ${enemyTotal}`, 'flame');
+    }
+  }
+
+  // === RESOLUTION ===
+  if (heroTotal >= enemyTotal + beatMargin) {
+    const margin = heroTotal - (enemyTotal + beatMargin);
+    initHeroTracker(G.tracker, hero.id).damageDealt += margin;
+    if (margin <= 1) G.tracker.closeCalls.push({ hero: hero.name, enemy: enemyCard.name, margin, heroTotal, enemyTotal: enemyTotal + beatMargin });
+    if (margin >= 5) G.tracker.overkills.push({ hero: hero.name, enemy: enemyCard.name, margin });
+    // Track equipment that helped win
+    hero.equipment.forEach(e => trackEquip(e.name, 'wonWith'));
+    return 'win';
+  } else {
+    const margin = (enemyTotal + beatMargin) - heroTotal;
+    const ht = initHeroTracker(G.tracker, hero.id);
+    ht.losses++;
+    ht.damageTaken += margin;
+    trackEncounter(enemyCard.name, 'lost');
+    hero.equipment.forEach(e => trackEquip(e.name, 'lostWith'));
+    // Skill gap: what would have saved them?
+    if (margin <= 2) {
+      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: 'A +2 ATK skill or Skill Burn would have won this fight', type: 'close_loss' });
+    } else if (margin <= 4 && hero.equipment.length === 0) {
+      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: 'Had no equipment — a weapon would have helped', type: 'no_equip' });
+    } else if (margin > 4) {
+      ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: `Outmatched by ${margin} — needed STR buff, damage reduction, or avoidance skill`, type: 'outmatched' });
+    }
+    log(`  ✗ ${hero.name} loses to ${enemyCard.name}! (${heroTotal} vs ${enemyTotal}${beatMargin ? '+' + beatMargin : ''})`, 'ko');
+    handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed);
+    return 'loss';
+  }
+}
+
+function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed) {
+  // Warden Angel: discard to win instead
+  const wardenIdx = hero.followers.findIndex(f => f.effect === 'discard_win_fight');
+  if (wardenIdx >= 0) {
+    const warden = hero.followers[wardenIdx];
+    hero.followers.splice(wardenIdx, 1);
+    log(`    👼 Warden Angel sacrifices himself! ${hero.name} wins instead!`, 'wonder');
+    G.stats.monstersKilled++;
+    if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
+    trackSkill(hero.id, 'Warden Angel', 'savedFromKO');
+    return;
+  }
+
+  // Dodge check (Eggo)
+  if (hero.dodgeActive) {
+    log(`    🔥 DODGE! ${hero.name} avoids KO!`, 'flame');
+    trackSkill(hero.id, 'Dodge (Talent)', 'savedFromKO');
+    return;
+  }
+
+  // NOTE: Imagination Shield, Eggroll etc. not activated — skills still being designed.
+
+  // Berserker Helmet: retry on loss
+  if (hero.equipment.find(e => e.effect === 'retry_on_loss') && !hero._berserkerUsed) {
+    hero._berserkerUsed = true;
+    log(`    ⚔ Berserker Helmet! ${hero.name} fights again!`, 'legendary');
+    const retry = heroRollDie(hero);
+    if (checkAssassin(hero, retry)) { hero._berserkerUsed = false; return; }
+    const retryTotal = retry.val + totalStr(hero);
+    const enemyRetry = rollDie(hero);
+    const enemyRetryTotal = enemyRetry.val + (enemyCard.str || 0);
+    log(`    Retry: ${hero.name} ${retryTotal} vs ${enemyCard.name} ${enemyRetryTotal}`, 'combat');
+    if (retryTotal >= enemyRetryTotal) {
+      log(`    Berserker Helmet wins the retry!`, 'wonder');
+      G.stats.monstersKilled++;
+      if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
+      hero._berserkerUsed = false;
+      return;
+    }
+    hero._berserkerUsed = false;
+    log(`    Berserker Helmet retry failed!`, 'ko');
+  }
+
+  // Dragon: +1 STR on loss
+  if (enemyCard.effect === 'gains_str_on_loss') {
+    enemyCard.str = (enemyCard.str || 5) + 1;
+    log(`    Dragon grows stronger! Now STR ${enemyCard.str}`, 'misfortune');
+  }
+
+  // Hound: follows hero on loss
+  if (enemyCard.effect === 'follows_on_loss') {
+    hero.houndFollowing = {...enemyCard};
+    log(`    🐕 The Hound will follow ${hero.name} to the next destination!`, 'misfortune');
+    return; // Hound doesn't KO, just follows
+  }
+
+  // Ogre: no respawn, stay on tile
+  if (enemyCard.effect === 'no_respawn_on_loss') {
+    G.stats.ko++;
+    hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove');
+    removeFollowers(hero);
+    log(`    Ogre pins ${hero.name}! No respawn — stuck until rescued.`, 'ko');
+    return;
+  }
+
+  applyKO(hero);
+}
+
+function partyRelicTotal() {
+  return G.heroes.reduce((s, h) => s + h.heldRelics.length, 0);
+}
+
+function spendPartyRelic(reason) {
+  let bestDonor = null;
+  let bestRelic = null;
+  let bestScore = -999;
+  G.heroes.forEach(h => {
+    h.heldRelics.forEach(r => {
+      const isMatched = (r.owner === h.id);
+      const score = (isMatched ? 0 : 10) + h.heldRelics.length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestDonor = h;
+        bestRelic = r;
+      }
+    });
+  });
+  if (!bestDonor || !bestRelic) return null;
+  bestDonor.heldRelics = bestDonor.heldRelics.filter(r => r.id !== bestRelic.id);
+  G.stats.relicsSpent++;
+  return { donor: bestDonor, relic: bestRelic };
+}
+
+function koLoadoutValue(hero) {
+  let val = 0;
+  hero.equipment.forEach(e => { val += (e.str || 0) + 2; });
+  hero.followers.forEach(f => { val += (f.str || 0) + 3; });
+  hero.stalkers.forEach(() => { val -= 2; });
+  return val;
+}
+
+function applyKO(hero) {
+  const atHydra = G.heroesInHydraArea.has(hero.id);
+  const totalRelics = partyRelicTotal();
+
+  if (atHydra) {
+    if (totalRelics > 0) {
+      const { donor, relic } = spendPartyRelic('hydra_save');
+      const who = donor.id === hero.id ? hero.name : `${donor.name} (for ${hero.name})`;
+      log(`    💎 ${relic.name} spent by ${who}! Survives Hydra KO. (party: ${partyRelicTotal()} relics left)`, 'hydra');
+      initHeroTracker(G.tracker, donor.id).relicsSpent++;
+    } else {
+      log(`  💀 ${hero.name} falls at the Hydra — NO RELICS — GAME OVER!`, 'defeat');
+      G.gameOver = true;
+      G.tracker.deathMoments.push({ hero: hero.name, context: 'KO at Hydra with 0 relics', turn: G.turn });
+      return;
+    }
+    G.stats.ko++;
+    initHeroTracker(G.tracker, hero.id).ko++;
+    const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove');
+    const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove').map(e => e.name).join(', ') || 'nothing';
+    hero.equipment = parasiteSword ? [parasiteSword] : [];
+    removeFollowers(hero);
+    hero.pos = 'entrance';
+    hero.runningToHydra = true;
+    G.heroesInHydraArea.delete(hero.id);
+    log(`    ${hero.name} KO'd at Hydra! Dropped: ${droppedEquip}. Respawned. Must run back.`, 'ko');
+    return;
+  }
+
+  // Dungeon KO: relic save decision
+  const loadout = koLoadoutValue(hero);
+  const shouldSpend = totalRelics > 0 && (
+    (loadout >= 6 && totalRelics > 1) ||
+    (loadout >= 10)
+  );
+
+  if (shouldSpend) {
+    const { donor, relic } = spendPartyRelic('dungeon_save');
+    const who = donor.id === hero.id ? hero.name : `${donor.name} (for ${hero.name})`;
+    log(`    💎 ${relic.name} spent by ${who}! KO prevented. (party: ${partyRelicTotal()} relics left)`, 'hydra');
+    return;
+  }
+
+  G.stats.ko++;
+  initHeroTracker(G.tracker, hero.id).ko++;
+  const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove');
+  const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove').map(e => e.name).join(', ') || 'nothing';
+  if (parasiteSword) trackEquip(parasiteSword.name, 'survivedKO');
+  hero.equipment = parasiteSword ? [parasiteSword] : [];
+  removeFollowers(hero);
+  hero.stalkers = [];
+  hero.pos = 'entrance';
+  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}. Respawned at Entrance.`, 'ko');
+}
+
+// ========== TALENTS ==========
+function triggerTalent(hero, context) {
+  if (hero.talentUsedThisTurn) return;
+  if (hasStalker(hero, 'no_flame_effect')) {
+    log(`    Cursed Beggar blocks ${hero.name}'s talent!`, 'misfortune');
+    trackTalent(hero.id, 'blocked');
+    return;
+  }
+  hero.talentUsedThisTurn = true;
+  trackTalent(hero.id, 'triggered');
+  if (context === 'combat') trackTalent(hero.id, 'combatImpact');
+  if (context === 'movement') trackTalent(hero.id, 'movementImpact');
+  switch(hero.id) {
+    case 'juju':
+      if (context === 'combat') {
+        log(`    🔥 Unwavering Power! +2 to combat total`, 'flame');
+      }
+      break;
+    case 'gigi': {
+      const allies = G.heroes.filter(h => h.id !== hero.id);
+      const target = allies.length > 0 ? allies[Math.floor(Math.random() * allies.length)] : hero;
+      target.giftedFlame = true;
+      log(`    🔥 Nature's Gift! ${hero.name} gifts Flame to ${target.name}'s next turn`, 'flame');
+      break;
+    }
+    case 'lulu':
+      rechargeOneSkill(hero);
+      log(`    🔥 Arcane Recharge! ${hero.name} recharges a skill`, 'flame');
+      break;
+    case 'eggo':
+      hero.dodgeActive = true;
+      log(`    🔥 Dodge active! ${hero.name} cannot be KO'd this turn`, 'flame');
+      break;
+  }
+}
+
+// ========== AWAKENING ==========
+function awakenEffect(hero) {
+  if (!G.exitPlaced) {
+    G.exitPlaced = true;
+    log(`  🚪 The EXIT has been placed!`, 'hydra');
+  } else if (G.relicPool.length > 0) {
+    G.relicRoomsPlaced++;
+    log(`  💎 Relic Room #${G.relicRoomsPlaced} placed!`, 'hydra');
+    const relic = G.relicPool.pop();
+    G.relicsCollected++;
+    const matchedHero = G.heroes.find(h => h.id === relic.owner);
+    const leastRelics = [...G.heroes].sort((a, b) => a.heldRelics.length - b.heldRelics.length)[0];
+    let recipient;
+    if (matchedHero && matchedHero.heldRelics.length <= leastRelics.heldRelics.length) {
+      recipient = matchedHero;
+    } else {
+      recipient = leastRelics;
+    }
+    recipient.heldRelics.push(relic);
+    const bonus = relic.owner === recipient.id ? '+2' : '+1';
+    log(`    ${recipient.name} claims ${relic.name}! (${bonus} STR, ${G.relicsCollected}/4 total)`, 'hydra');
+    if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
+      G.exitRevealed = true;
+      spawnHydra();
+    }
+  }
+}
+
+function spawnHydra() {
+  log(`\n  🐉 THE HYDRA AWAKENS! 🐉`, 'defeat');
+  const pool = shuffle([...HYDRA_HEADS]);
+  G.hydraHeads = pool.slice(0, 3).map(h => ({...h, destroyed: false, effectiveStr: h.str}));
+  G.hydraActive = true;
+  recalcHydraStr();
+  G.hydraHeads.forEach(h => {
+    trackHydraHead(h.name, 'spawned');
+    log(`    Head: ${h.name} (STR ${h.effectiveStr}) — ${h.skill}`, 'hydra');
+  });
+  log(`    ${G.hydraHeads.length} heads active. Max: ${G.hydraMaxHeads}.`, 'hydra');
+}
+
+function recalcHydraStr() {
+  const nestAlive = G.hydraHeads.some(h => h.name === 'The Nest' && !h.destroyed);
+  const nestBonus = nestAlive ? 2 : 0;
+  G.hydraHeads.forEach(h => {
+    h.effectiveStr = h.str + (h.name !== 'The Nest' ? nestBonus : 0);
+  });
+}
+
+// ========== HYDRA COMBAT ==========
+function hydraAttack(hero) {
+  const aliveHeads = G.hydraHeads.filter(h => !h.destroyed);
+  if (aliveHeads.length === 0) {
+    log(`  🎉 All heads destroyed — VICTORY!`, 'victory');
+    G.victory = true;
+    G.gameOver = true;
+    return;
+  }
+
+  const targetIdx = aiChooseHydraHead(G.hydraHeads);
+  const head = G.hydraHeads[targetIdx];
+  log(`  ${hero.name} attacks ${head.name} (STR ${head.effectiveStr})`, 'hydra');
+
+  const broodAlive = G.hydraHeads.some(h => h.name === 'The Brood' && !h.destroyed);
+
+  // On Attack effects
+  if (head.skillType === 'onAttack') {
+    if (head.name === 'The Fangs') {
+      G.heroes.forEach(h => { if (G.heroesInHydraArea.has(h.id)) exhaustOneSkill(h); });
+      log(`    The Fangs: all heroes exhaust 1 Skill!`, 'misfortune');
+    }
+    if (head.name === 'The Maw') {
+      const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove');
+      if (removable.length > 0) {
+        const removed = removable[removable.length - 1];
+        hero.equipment = hero.equipment.filter(e => e !== removed);
+        log(`    The Maw devours ${removed.name}!`, 'misfortune');
+      } else {
+        log(`    The Maw: no equipment — hero gets -2!`, 'misfortune');
+      }
+    }
+  }
+
+  // Hero roll
+  let heroRoll;
+  const hasTripleAxe = hero.equipment.find(e => e.effect === 'roll_3_keep_best');
+  const hasVeteran = hero.followers.find(f => f.effect === 'roll_2_keep_best');
+
+  if (hasTripleAxe) {
+    const r1 = heroRollDie(hero), r2 = heroRollDie(hero), r3 = heroRollDie(hero);
+    heroRoll = [r1, r2, r3].sort((a, b) => b.val - a.val)[0];
+    log(`    Triple Axe: [${r1.val}, ${r2.val}, ${r3.val}] keeps ${heroRoll.val}`, 'legendary');
+  } else if (hasVeteran) {
+    const r1 = heroRollDie(hero), r2 = heroRollDie(hero);
+    heroRoll = r1.val >= r2.val ? r1 : r2;
+    log(`    Veteran: [${r1.val}, ${r2.val}] keeps ${heroRoll.val}`, 'legendary');
+  } else {
+    heroRoll = heroRollDie(hero);
+  }
+
+  if (checkAssassin(hero, heroRoll)) {
+    applyKO(hero);
+    if (G.gameOver) return;
+    growHydraHead();
+    return;
+  }
+
+  let isFlame = (heroRoll.isFlame || hero.giftedFlame) && !broodAlive;
+  hero.giftedFlame = false;
+
+  if (isFlame && !hero.talentUsedThisTurn && !hasStalker(hero, 'no_flame_effect')) {
+    triggerTalent(hero, 'combat');
+  }
+
+  let combatBonus = 0;
+  if (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn) combatBonus += 2;
+  if (hero.id === 'eggo' && isFlame) hero.dodgeActive = true;
+
+  // Doomhammer at Hydra
+  let doomhammerBonus = 0;
+  if (hero.equipment.find(e => e.effect === 'roll_gamble')) {
+    const doomRoll = Math.floor(Math.random() * 6) + 1;
+    if (doomRoll === 1) {
+      log(`    Doomhammer curse! Rolled 1 — KO!`, 'ko');
+      applyKO(hero);
+      if (G.gameOver) return;
+      growHydraHead();
+      return;
+    } else if (doomRoll <= 4) { doomhammerBonus = 1; }
+    else { doomhammerBonus = 3; }
+    log(`    Doomhammer: rolled ${doomRoll} — STR +${doomhammerBonus}`, 'legendary');
+  }
+
+  // Firebane at Hydra
+  let firebaneBonus = 0;
+  if (hero.equipment.find(e => e.effect === 'exhaust_skill_+1') && readySkillCount(hero) > 1) {
+    exhaustOneSkill(hero);
+    firebaneBonus = 1;
+    log(`    Firebane: +1 STR`, 'legendary');
+  }
+
+  // Siphon Blade at Hydra (per-combat only, head returns to full after)
+  let siphonBonus = 0;
+  let siphonDrain = 0;
+  if (hero.equipment.find(e => e.effect === 'drain_1')) {
+    siphonBonus = 1;
+    siphonDrain = 1;
+    log(`    Siphon Blade: drain 1 from head`, 'legendary');
+  }
+
+  // Maw penalty
+  const mawPenalty = (head.name === 'The Maw' && hero.equipment.filter(e => e.effect !== 'cannot_remove').length === 0) ? -2 : 0;
+
+  let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
+  const effectiveHeadStr = head.effectiveStr - siphonDrain;
+
+  log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${totalStr(hero)} + bonuses = ${heroTotal} vs ${effectiveHeadStr}`, 'combat');
+
+  // Skill Burn (can reroll YOUR die OR ENEMY/HEAD die)
+  if (heroTotal < effectiveHeadStr && readySkillCount(hero) > 0) {
+    // Option A: Reroll hero die
+    const rerollH = heroRollDie(hero);
+    const newFlameA = (rerollH.isFlame) && !broodAlive;
+    const newBonusA = (hero.id === 'juju' && newFlameA && !hero.talentUsedThisTurn) ? 2 : combatBonus;
+    const totalA = rerollH.val + totalStr(hero) + newBonusA + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
+
+    // Option B: Reroll head die (head gets new roll, hero keeps current)
+    const rerollE = rollDie(hero);
+    const newHeadTotal = rerollE.val + head.effectiveStr - siphonDrain;
+
+    const wouldWinA = totalA >= effectiveHeadStr;
+    const wouldWinB = heroTotal >= newHeadTotal;
+    let burnChoice = 'none';
+    if (wouldWinA && !wouldWinB) burnChoice = 'hero';
+    else if (wouldWinB && !wouldWinA) burnChoice = 'enemy';
+    else if (wouldWinA && wouldWinB) burnChoice = (totalA - effectiveHeadStr) >= (heroTotal - newHeadTotal) ? 'hero' : 'enemy';
+    else if (totalA > heroTotal || newHeadTotal < effectiveHeadStr) burnChoice = (totalA - heroTotal) >= (effectiveHeadStr - newHeadTotal) ? 'hero' : 'enemy';
+
+    if (burnChoice === 'hero' && (totalA > heroTotal || wouldWinA)) {
+      exhaustOneSkill(hero);
+      G.stats.skillBurns++;
+      heroTotal = totalA;
+      isFlame = newFlameA;
+      if (hero.id === 'eggo' && newFlameA) hero.dodgeActive = true;
+      if (hero.id === 'eggo' && !newFlameA) hero.dodgeActive = false;
+      log(`    ⟲ Skill Burn! Rerolled own die: ${rerollH.val}${newFlameA ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
+    } else if (burnChoice === 'enemy' && newHeadTotal < effectiveHeadStr) {
+      exhaustOneSkill(hero);
+      G.stats.skillBurns++;
+      const oldHead = effectiveHeadStr;
+      // Note: we update the effective target for this fight only
+      // Using a local variable to track the new head target
+      log(`    ⟲ Skill Burn! Rerolled HEAD die: ${head.name} target ${oldHead} → ${newHeadTotal}`, 'flame');
+      // Adjust comparison: check win vs new head total
+      if (heroTotal >= newHeadTotal) {
+        // We need to proceed to victory below, so we lower effectiveHeadStr locally
+        // Hack: set heroTotal high enough to win vs original effectiveHeadStr
+        heroTotal = effectiveHeadStr; // exactly enough to win
+      }
+    }
+  }
+
+  if (heroTotal >= effectiveHeadStr) {
+    head.destroyed = true;
+    G.hydraDestroyedCount++;
+    G.hydraMaxHeads--;
+    log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max now ${G.hydraMaxHeads})`, 'victory');
+
+    // On Defeat effects
+    if (head.skillType === 'onDefeat') {
+      if (head.name === 'The Wail') {
+        G.heroes.forEach(h => { if (G.heroesInHydraArea.has(h.id)) exhaustOneSkill(h); });
+        log(`    The Wail's death cry! All heroes exhaust 1 Skill`, 'misfortune');
+      }
+      if (head.growOnDefeat) {
+        log(`    The Spite: grows 1 extra head!`, 'misfortune');
+        growHydraHead();
+      }
+    }
+    recalcHydraStr();
+
+    // Mystic Wand on Hydra win
+    if (hero.equipment.find(e => e.effect === 'win_recharge_all')) {
+      hero.skillStates = hero.skillStates.map(() => 'ready');
+      log(`    Mystic Wand: all skills recharged!`, 'wonder');
+    }
+
+    // Supernova Gun at Hydra
+    if (hero.equipment.find(e => e.effect === 'win_roll_6_clear')) {
+      const r = Math.floor(Math.random() * 6) + 1;
+      if (r === 6) {
+        G.enemiesOnBoard = [];
+        log(`    💥 Supernova Gun! Rolled 6 — all dungeon enemies cleared!`, 'legendary');
+      }
+    }
+
+    if (G.hydraHeads.every(h => h.destroyed)) {
+      log(`\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
+      G.victory = true;
+      G.gameOver = true;
+    }
+  } else {
+    log(`  ✗ Attack fails! ${heroTotal} < ${effectiveHeadStr}`, 'ko');
+
+    // Dodge
+    if (hero.dodgeActive) {
+      log(`    🔥 DODGE! ${hero.name} avoids consequences!`, 'flame');
+      return;
+    }
+
+    // Berserker Helmet retry at Hydra
+    if (hero.equipment.find(e => e.effect === 'retry_on_loss') && !hero._berserkerUsed) {
+      hero._berserkerUsed = true;
+      log(`    ⚔ Berserker Helmet retry!`, 'legendary');
+      const retry = heroRollDie(hero);
+      const retryTotal = retry.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
+      log(`    Retry: ${retryTotal} vs ${effectiveHeadStr}`, 'combat');
+      if (retryTotal >= effectiveHeadStr) {
+        head.destroyed = true;
+        G.hydraDestroyedCount++;
+        G.hydraMaxHeads--;
+        recalcHydraStr();
+        log(`    Berserker Helmet wins! ${head.name} DESTROYED!`, 'victory');
+        hero._berserkerUsed = false;
+        if (G.hydraHeads.every(h => h.destroyed)) {
+          log(`\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
+          G.victory = true;
+          G.gameOver = true;
+        }
+        return;
+      }
+      hero._berserkerUsed = false;
+    }
+
+    log(`    ${hero.name} is KO'd at the Hydra!`, 'ko');
+    applyKO(hero);
+    if (G.gameOver) return;
+    growHydraHead();
+  }
+}
+
+function growHydraHead() {
+  const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
+  if (aliveCount >= G.hydraMaxHeads) {
+    log(`  💀 OVERFLOW! Hydra exceeds max heads (${aliveCount}/${G.hydraMaxHeads}) — GAME OVER!`, 'defeat');
+    G.gameOver = true;
+    return;
+  }
+  const usedNames = new Set(G.hydraHeads.map(h => h.name));
+  const available = HYDRA_HEADS.filter(h => !usedNames.has(h.name));
+  if (available.length > 0) {
+    const newHead = {...available[Math.floor(Math.random() * available.length)], destroyed: false};
+    G.hydraHeads.push(newHead);
+    recalcHydraStr();
+    log(`    New head grows: ${newHead.name} (STR ${newHead.effectiveStr})`, 'misfortune');
+  } else {
+    const dead = G.hydraHeads.find(h => h.destroyed);
+    if (dead) {
+      dead.destroyed = false;
+      recalcHydraStr();
+      log(`    ${dead.name} regenerates!`, 'misfortune');
+    }
+  }
+}
+
+function runToHydra(hero) {
+  const roll = heroRollDie(hero);
+  if (checkAssassin(hero, roll)) return;
+  log(`  ${hero.name} sprints toward the Hydra (rolled ${roll.val})`, 'system');
+  if (Math.random() < 0.4 + roll.val * 0.1) {
+    hero.runningToHydra = false;
+    G.heroesInHydraArea.add(hero.id);
+    hero.pos = 'hydra';
+    log(`  ${hero.name} reaches the Hydra!`, 'hydra');
+  } else {
+    log(`  ${hero.name} is still running...`, 'system');
+  }
+}
+
+function monsterMovementPhase() {
+  if (G.tilesPlaced < 10) return;
+}
+
+// ========== TURN MANAGEMENT ==========
+function nextHero() {
+  G.currentHero = (G.currentHero + 1) % 4;
+  if (G.currentHero === 0) {
+    G.round++;
+    monsterMovementPhase();
+    if (G.hydraActive) {
+      const anyoneAtHydra = G.heroes.some(h => G.heroesInHydraArea.has(h.id));
+      if (!anyoneAtHydra && G.exitRevealed) {
+        log(`  🐉 Hydra Area empty! Head grows!`, 'misfortune');
+        growHydraHead();
+      }
+      G.heroes.forEach(h => {
+        if (!G.heroesInHydraArea.has(h.id) && !h.runningToHydra) {
+          if (G.relicsCollected >= 4) {
+            h.runningToHydra = true;
+            log(`  ${h.name} begins running to the Hydra!`, 'hydra');
+          }
+        }
+      });
+    }
+  }
+}
+
+// ========== UI RENDERING ==========
+function renderHeroes() {
+  const panel = document.getElementById('heroPanel');
+  panel.innerHTML = `<div class="section-title">Heroes</div>`;
+  G.heroes.forEach((h, i) => {
+    const isActive = i === G.currentHero && !G.gameOver;
+    const skills = h.skills.map((s, si) =>
+      `<span class="skill-tag ${h.skillStates[si]}">${s.name}</span>`
+    ).join('');
+    const equip = h.equipment.map(e =>
+      `<span class="equip-tag">${e.name} ${e.str >= 0 ? '+' : ''}${e.str}</span>`
+    ).join('') || '<span style="color:var(--dim);font-size:10px">empty</span>';
+    const followers = h.followers.map(f =>
+      `<span style="font-size:10px;color:var(--wonder)">${f.name}</span>`
+    ).join(', ');
+    const stalkers = h.stalkers.map(s =>
+      `<span style="font-size:10px;color:var(--ko)">${s.name}</span>`
+    ).join(', ');
+    const relics = h.heldRelics.map(r => {
+      const matched = r.owner === h.id;
+      return `<span class="relic-tag" style="${matched ? 'background:#1a2a3a;color:#55aaff;border-color:#2a4a6a' : ''}">${r.name}${matched ? ' ★+2' : ' +1'}</span>`;
+    }).join('') || '<span style="color:var(--dim);font-size:10px">none</span>';
+    panel.innerHTML += `
+      <div class="hero-card ${isActive ? 'active' : ''}" style="border-left: 3px solid ${h.color}">
+        <div class="name" style="color:${h.color}">${h.name} ${h.title}</div>
+        <div class="stat">STR <b>${totalStr(h)}</b> (base ${h.str}) · 🔥 ${h.flameFaces.join(',')}</div>
+        <div class="stat">Talent: <b>${h.talent}</b></div>
+        <div class="stat">${h.dodgeActive ? '🛡Dodge ' : ''}${h.runningToHydra ? '🏃Running' : ''}</div>
+        <div style="margin-top:3px">Relics: ${relics}</div>
+        <div style="margin-top:4px">${skills}</div>
+        <div style="margin-top:3px">Equip: ${equip}</div>
+        ${followers ? `<div style="margin-top:2px">👥 ${followers}</div>` : ''}
+        ${stalkers ? `<div style="margin-top:2px">👁 ${stalkers}</div>` : ''}
+      </div>`;
+  });
+}
+
+function renderInfo() {
+  const panel = document.getElementById('infoPanel');
+  let html = `<div class="section-title">Game State</div>`;
+  html += `
+    <div class="info-row"><span class="label">Turn</span><span class="value">${G.turn}</span></div>
+    <div class="info-row"><span class="label">Round</span><span class="value">${G.round}</span></div>
+    <div class="info-row"><span class="label">Tiles Placed</span><span class="value">${G.tilesPlaced}/36 ${G.tilesPlaced >= 10 ? '🔥 AWAKE' : ''}</span></div>
+    <div class="info-row"><span class="label">Relic Rooms</span><span class="value">${G.relicRoomsPlaced}/4 placed · ${G.relicsCollected}/4 collected</span></div>
+    <div class="info-row"><span class="label">Exit</span><span class="value">${G.exitPlaced ? (G.exitRevealed ? '🐉 HYDRA' : '🚪 Locked') : 'Not placed'}</span></div>
+  `;
+  if (G.hydraActive) {
+    html += `<div class="section-title" style="margin-top:12px">Hydra</div>`;
+    html += `<div class="info-row"><span class="label">Max Heads</span><span class="value">${G.hydraMaxHeads}</span></div>`;
+    html += `<div class="hydra-heads">`;
+    G.hydraHeads.forEach(h => {
+      html += `<div class="head-tag ${h.destroyed ? 'dead' : ''}">${h.name} ${h.effectiveStr}</div>`;
+    });
+    html += `</div>`;
+    html += `<div class="info-row" style="margin-top:6px"><span class="label">Heroes at Hydra</span><span class="value">${[...G.heroesInHydraArea].join(', ') || 'none'}</span></div>`;
+  }
+  html += `<div class="section-title" style="margin-top:12px">Statistics</div>`;
+  const relicDetail = G.heroes.map(h => `${h.name}:${h.heldRelics.length}`).join(' · ');
+  const relicTotal = partyRelicTotal();
+  html += `
+    <div class="info-row"><span class="label">Party Relics</span><span class="value">${relicTotal}/4 (${relicDetail})</span></div>
+    <div class="info-row"><span class="label">Total Turns</span><span class="value">${G.stats.turns}</span></div>
+    <div class="info-row"><span class="label">Combats</span><span class="value">${G.stats.combats}</span></div>
+    <div class="info-row"><span class="label">Monsters Killed</span><span class="value">${G.stats.monstersKilled}</span></div>
+    <div class="info-row"><span class="label">KO Events</span><span class="value">${G.stats.ko}</span></div>
+    <div class="info-row"><span class="label">Skill Burns</span><span class="value">${G.stats.skillBurns}</span></div>
+    <div class="info-row"><span class="label">Relics Spent</span><span class="value">${G.stats.relicsSpent}</span></div>
+  `;
+  html += `<div class="section-title" style="margin-top:12px">Decks</div>`;
+  html += `
+    <div class="info-row"><span class="label">Wonders</span><span class="value">${G.wonderDeck.length}/${WONDER_CARDS.length}</span></div>
+    <div class="info-row"><span class="label">Mishaps</span><span class="value">${G.mishapDeck.length}/${MISHAP_CARDS.length}</span></div>
+    <div class="info-row"><span class="label">Misfortunes</span><span class="value">${G.misfortuneDeck.length}/${MISFORTUNE_CARDS.length}</span></div>
+    <div class="info-row"><span class="label">Legendary</span><span class="value">${G.legendaryDeck.length}/${LEGENDARY_EQUIPMENT.length}</span></div>
+    <div class="info-row"><span class="label">Tiles</span><span class="value">${G.tileDeck.length}/36</span></div>
+  `;
+  panel.innerHTML = html;
+}
+
+function renderLog() {
+  const panel = document.getElementById('logPanel');
+  const startIdx = panel.children.length;
+  for (let i = startIdx; i < G.log.length; i++) {
+    const entry = G.log[i];
+    const div = document.createElement('div');
+    div.className = `log-entry ${entry.cls}`;
+    div.textContent = entry.msg;
+    panel.appendChild(div);
+  }
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function render() {
+  if (!G) return;
+  renderHeroes();
+  renderInfo();
+  renderLog();
+  const status = G.gameOver
+    ? (G.victory ? `🎉 VICTORY in ${G.turn} turns!` : `💀 GAME OVER at turn ${G.turn}`)
+    : `Turn ${G.turn} · Round ${G.round} · ${G.heroes[G.currentHero].name}'s turn`;
+  document.getElementById('statusBar').textContent = status;
+}
+
+// ========== ANALYSIS ENGINE ==========
+function generateReport(results) {
+  const n = results.length;
+  const wins = results.filter(r => r.victory).length;
+  const winRate = ((wins / n) * 100).toFixed(1);
+  const avgTurns = (results.reduce((s, r) => s + r.turn, 0) / n).toFixed(1);
+  const avgKO = (results.reduce((s, r) => s + r.stats.ko, 0) / n).toFixed(1);
+  const avgCombats = (results.reduce((s, r) => s + r.stats.combats, 0) / n).toFixed(1);
+  const avgRelicsSpent = (results.reduce((s, r) => s + r.stats.relicsSpent, 0) / n).toFixed(1);
+  const avgSkillBurns = (results.reduce((s, r) => s + r.stats.skillBurns, 0) / n).toFixed(1);
+  const heroNames = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'};
+  const heroIds = ['juju','gigi','lulu','eggo'];
+
+  let html = `<h2>PLAYTEST REPORT</h2>`;
+  html += `<p style="color:var(--dim);font-size:11px;margin-bottom:12px">Skills are disabled. Only Innate Talents, Equipment, Followers, and Skill Burn (reroll) affect outcomes. This shows what the game looks like before skills are added.</p>`;
+  html += `<div class="report-section"><h3>Overview (${n} games)</h3>`;
+  html += `<div class="report-card">`;
+  html += `<div class="report-stat"><span class="rl">Win Rate</span><span class="rv" style="color:${winRate > 50 ? 'var(--heal)' : 'var(--ko)'}">${winRate}% (${wins}/${n})</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Avg Turns</span><span class="rv">${avgTurns}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Avg Combats</span><span class="rv">${avgCombats}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Avg KOs</span><span class="rv">${avgKO}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Avg Skill Burns</span><span class="rv">${avgSkillBurns}</span></div>`;
+  html += `<div class="report-stat"><span class="rl">Avg Relics Spent</span><span class="rv">${avgRelicsSpent}</span></div>`;
+  // Overview commentary
+  let overviewNote = '';
+  if (winRate > 70) overviewNote = `Win rate is high (${winRate}%). Without skills this means the base stats + equipment are already strong enough to win consistently. When you add skills the win rate will go even higher. Consider making the dungeon or Hydra harder to compensate.`;
+  else if (winRate > 50) overviewNote = `Win rate is balanced (${winRate}%). Adding skills should push it higher, so current difficulty is a good baseline.`;
+  else if (winRate > 30) overviewNote = `Win rate is low-ish (${winRate}%). Skills will be important to make the game winnable. This is a good baseline if you want skills to feel impactful.`;
+  else overviewNote = `Win rate is very low (${winRate}%). Even with skills, winning will be hard. Consider reducing enemy density or Hydra STR.`;
+  if (avgKO > 3) overviewNote += ` Heroes average ${avgKO} KOs/game which is high and will feel punishing.`;
+  if (avgSkillBurns > 5) overviewNote += ` High Skill Burn usage (${avgSkillBurns}/game) means heroes rely heavily on rerolls. Skills that provide alternatives to Skill Burn would feel meaningful.`;
+  html += `</div><div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Analysis</span>${overviewNote}</div></div>`;
+
+  // === PER-HERO ANALYSIS ===
+  html += `<div class="report-section"><h3>Hero Performance</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Without skills active. Shows each hero's raw combat effectiveness based on base STR, equipment, and talents only.</p>`;
+  heroIds.forEach(hid => {
+    const agg = { combats:0, wins:0, losses:0, ko:0, skillsBurned:0, damageDealt:0, damageTaken:0, relicsSpent:0, gaps:[] };
+    results.forEach(r => {
+      const ht = r.tracker.heroes[hid];
+      if (!ht) return;
+      agg.combats += ht.combats;
+      agg.wins += ht.wins;
+      agg.losses += ht.losses;
+      agg.ko += ht.ko;
+      agg.skillsBurned += ht.skillsBurned;
+      agg.damageDealt += ht.damageDealt;
+      agg.damageTaken += ht.damageTaken;
+      agg.relicsSpent += ht.relicsSpent;
+      ht.neededButDidntHave.forEach(g => agg.gaps.push(g));
+    });
+    const wr = agg.combats > 0 ? ((agg.wins / agg.combats) * 100).toFixed(0) : 'N/A';
+    const avgMarginW = agg.wins > 0 ? (agg.damageDealt / agg.wins).toFixed(1) : '0';
+    const avgMarginL = agg.losses > 0 ? (agg.damageTaken / agg.losses).toFixed(1) : '0';
+    html += `<div class="report-card">`;
+    html += `<b style="color:var(--${hid})">${heroNames[hid]}</b>`;
+    html += `<div class="report-stat"><span class="rl">Combats</span><span class="rv">${agg.combats} (${wr}% win)</span></div>`;
+    html += `<div class="report-stat"><span class="rl">KOs</span><span class="rv">${agg.ko} (${(agg.ko/n).toFixed(1)}/game)</span></div>`;
+    html += `<div class="report-stat"><span class="rl">Avg Win Margin</span><span class="rv">+${avgMarginW}</span></div>`;
+    html += `<div class="report-stat"><span class="rl">Avg Loss Margin</span><span class="rv">-${avgMarginL}</span></div>`;
+    html += `<div class="report-stat"><span class="rl">Skill Burns</span><span class="rv">${agg.skillsBurned}</span></div>`;
+    html += `<div class="report-stat"><span class="rl">Relics Spent</span><span class="rv">${agg.relicsSpent}</span></div>`;
+    html += `</div>`;
+
+    // Skill gap analysis for this hero
+    if (agg.gaps.length > 0) {
+      const gapTypes = {};
+      agg.gaps.forEach(g => {
+        const key = g.type;
+        if (!gapTypes[key]) gapTypes[key] = { count: 0, examples: [], totalMargin: 0 };
+        gapTypes[key].count++;
+        gapTypes[key].totalMargin += g.margin;
+        if (gapTypes[key].examples.length < 3) gapTypes[key].examples.push(g);
+      });
+      Object.entries(gapTypes).forEach(([type, data]) => {
+        if (data.count < 2) return; // skip noise
+        const avgM = (data.totalMargin / data.count).toFixed(1);
+        const ex = data.examples[0];
+        let suggestion = '';
+        if (type === 'close_loss') {
+          suggestion = `${heroNames[hid]} lost ${data.count} close fights (avg margin: ${avgM}). A +2 ATK skill or STR buff would have turned ${Math.min(data.count, Math.ceil(data.count * 0.7))} of these into wins.`;
+        } else if (type === 'no_equip') {
+          suggestion = `${heroNames[hid]} fought ${data.count} times without equipment. A skill that grants temporary STR or an equipment-retrieval ability would help.`;
+        } else if (type === 'outmatched') {
+          suggestion = `${heroNames[hid]} was outmatched ${data.count} times (avg margin: ${avgM}). Needs avoidance (flee/redirect), damage reduction, or a way to weaken enemies before combat.`;
+        }
+        if (suggestion) {
+          html += `<div class="report-card need"><span class="tag need-tag">Skill Gap</span>${suggestion}</div>`;
+        }
+      });
+    }
+  });
+  html += `</div>`;
+
+  // === EQUIPMENT BALANCE ===
+  html += `<div class="report-section"><h3>Equipment Balance</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Win rate = % of combats won while holding this item. High win rates are expected for high-STR weapons, but 100% means the item removes all combat risk.</p>`;
+  const equipAgg = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.equipment).forEach(([name, data]) => {
+      if (!equipAgg[name]) equipAgg[name] = { equipped:0, wonWith:0, lostWith:0, survivedKO:0 };
+      equipAgg[name].equipped += data.equipped;
+      equipAgg[name].wonWith += data.wonWith;
+      equipAgg[name].lostWith += data.lostWith;
+      equipAgg[name].survivedKO += data.survivedKO;
+    });
+  });
+  const equipData = LEGENDARY_EQUIPMENT.reduce((m,e) => { m[e.name] = e; return m; }, {});
+  Object.entries(equipAgg).filter(([,d]) => d.equipped >= 2).sort((a,b) => {
+    const wrA = a[1].wonWith / Math.max(1, a[1].wonWith + a[1].lostWith);
+    const wrB = b[1].wonWith / Math.max(1, b[1].wonWith + b[1].lostWith);
+    return wrB - wrA;
+  }).forEach(([name, d]) => {
+    const total = d.wonWith + d.lostWith;
+    const wr = total > 0 ? ((d.wonWith / total) * 100).toFixed(0) : 'N/A';
+    const isOP = total >= 5 && wr >= 85;
+    const isWeak = total >= 5 && wr <= 30;
+    const cls = isOP ? 'op' : isWeak ? 'weak' : '';
+    const tag = isOP ? '<span class="tag op-tag">OP</span>' : isWeak ? '<span class="tag weak-tag">Weak</span>' : '';
+    const eq = equipData[name] || {};
+    let comment = '';
+    if (isOP) {
+      if ((eq.str || 0) >= 2 && eq.type === 'weapon') {
+        comment = ` The +${eq.str} STR alone makes most Mishap enemies trivial (STR 1-3). Combined with base hero STR, the hero rarely faces a real threat. Consider: lower STR to +1, or add a drawback/condition.`;
+      }
+      if (eq.effect === 'roll_3_keep_best') comment = ` Rolling 3 dice and keeping best nearly guarantees a 5-6 roll. The variance reduction is too strong. Consider: roll 2 keep best, or 3 dice but you must use the middle value.`;
+      if (eq.effect === 'roll_gamble') comment = ` The gamble rarely matters because +2 base STR is already strong. The 1-in-6 KO risk is too low to balance the +3 upside. Consider: wider KO range (1-2) or lower base STR to +1.`;
+      if (eq.effect === 'roll_1_auto_win') comment = ` Auto-win on 1 is a 1/6 chance per fight on top of +2 STR. It's a win-more weapon. Consider: auto-win but with 0 STR, or auto-win only against enemies of STR 3 or less.`;
+      if (eq.effect === 'dd_+2') comment = ` +2 base plus +2 in Dread Dungeons means +4 total where it matters most. Dread fights become trivial. Consider: +1 in Dread instead of +2, or make it conditional (only on first fight).`;
+      if (eq.effect === 'exhaust_skill_+1') comment = ` The +2 STR base is already strong. The exhaust-for-+1 is just gravy. Consider: lower base to +1, making the exhaust decision more meaningful.`;
+      if (eq.effect === 'win_roll_6_clear') comment = ` +2 STR is standard strong, but the "roll 6 clear all enemies" effect barely triggers. Not OP for the effect, just for the raw STR. Consider: lower to +1 STR, or make the clear effect trigger on 5-6.`;
+      if (eq.effect === '+1_per_ready_skill') comment = ` +3 base plus +1 per ready skill means +7 with all skills ready. That's higher than most Misfortune enemies. Consider: +1 base with the scaling, or cap the bonus at +2 from skills.`;
+      if (eq.effect === 'wonder_draw_legendary') comment = ` +2 STR is already strong. The Vanga effect (draw legendary on Wonder) accelerates equipment stacking. Consider: +1 STR, or the effect only triggers once per game.`;
+      if (eq.effect === 'drain_1') comment = ` Drain is a +2 swing (+1 hero, -1 enemy). Combined with +1 base that's effectively +3. Consider: drain only applies to enemies STR 3+, or base STR 0.`;
+      if (eq.effect === 'cannot_remove') comment = ` Surviving KO is powerful since KO strips all equipment. +2 STR on top makes it a must-keep. Consider: +1 STR, or the curse prevents Flame effects while equipped.`;
+      if (eq.effect === 'peek_adjacent') comment = ` Not OP due to its effect (peek is spatial and barely matters in sim). High win rate is from other equipment. May show differently in real play.`;
+      if (!comment && isOP) comment = ` High win rate likely from raw STR bonus stacking with hero base. Consider lowering STR or adding a conditional drawback.`;
+    }
+    if (isWeak) {
+      comment = ` Heroes still lose fights despite having this. The benefit may be too situational or the STR too low to matter.`;
+    }
+    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> (STR ${eq.str >= 0 ? '+' : ''}${eq.str || 0}) — equipped ${d.equipped}x, win rate ${wr}% (${d.wonWith}W/${d.lostWith}L)${d.survivedKO ? `, survived ${d.survivedKO} KOs` : ''}${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
+  });
+  html += `</div>`;
+
+  // === ENCOUNTER BALANCE ===
+  html += `<div class="report-section"><h3>Encounter Balance</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Only showing enemies with extreme win/loss rates. Balanced enemies (30-70% loss rate) are working as intended.</p>`;
+  const encAgg = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.encounters).forEach(([name, data]) => {
+      if (!encAgg[name]) encAgg[name] = { drawn:0, won:0, lost:0, fled:0, avoided:0 };
+      Object.keys(data).forEach(k => encAgg[name][k] += data[k]);
+    });
+  });
+  Object.entries(encAgg).filter(([,d]) => d.drawn >= 3).sort((a,b) => {
+    const lrA = a[1].lost / Math.max(1, a[1].won + a[1].lost);
+    const lrB = b[1].lost / Math.max(1, b[1].won + b[1].lost);
+    return lrB - lrA;
+  }).forEach(([name, d]) => {
+    const fights = d.won + d.lost;
+    if (fights === 0) return;
+    const lossRate = ((d.lost / fights) * 100).toFixed(0);
+    const isOP = fights >= 4 && lossRate >= 70;
+    const isWeak = fights >= 4 && lossRate <= 10;
+    if (!isOP && !isWeak) return;
+    const cls = isOP ? 'op' : 'weak';
+    const tag = isOP ? '<span class="tag op-tag">OP</span>' : '<span class="tag weak-tag">Weak</span>';
+    let comment = '';
+    if (isOP) comment = `Heroes lose ${lossRate}% of the time (${d.lost}L/${d.won}W in ${d.drawn} games). This enemy may be too punishing without skills. Consider: lower STR by 1, add a flee condition, or let heroes use a follower to reduce damage.`;
+    if (isWeak) comment = `Heroes win ${100-Number(lossRate)}% of the time (${d.won}W/${d.lost}L in ${d.drawn} games). Too easy even without skills. Consider: +1 STR, or add a twist that makes the fight less straightforward.`;
+    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — ${comment}</div>`;
+  });
+  if (Object.entries(encAgg).filter(([,d]) => d.drawn >= 3).every(([,d]) => { const f=d.won+d.lost; return f<4||(d.lost/Math.max(1,f)*100>10&&d.lost/Math.max(1,f)*100<70); })) {
+    html += `<div class="report-card insight"><span class="tag insight-tag">OK</span>No extreme outliers detected. All enemies with enough data fall in the 10-70% loss range.</div>`;
+  }
+  html += `</div>`;
+
+  // === TALENT ANALYSIS ===
+  html += `<div class="report-section"><h3>Talent Analysis</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Talents trigger on Flame (3/6 faces = 50% chance per roll). "Combat impact" = Flame rolled during a fight. "Movement impact" = Flame rolled for movement (triggers Awakening after tile 10).</p>`;
+  const talentComments = {
+    juju: (agg) => {
+      const perGame = (agg.combatImpact / n).toFixed(1);
+      let c = `<b>Unwavering Power (+2 combat):</b> Triggered in combat ${agg.combatImpact}x (${perGame}/game). `;
+      if (perGame >= 1.5) c += `Strong impact. Juju gets a meaningful STR boost in roughly half his fights. The +2 is reliable enough to make him the party's main fighter.`;
+      else if (perGame >= 0.8) c += `Moderate impact. Triggers about once per game in combat. Useful but not game-defining. Consider whether +2 is enough or if it should be +3 on a less frequent trigger.`;
+      else c += `Low combat impact. Juju's talent mostly helps with Awakening (movement flames) rather than fights. Consider making it trigger on movement too, or increasing the combat bonus.`;
+      return c;
+    },
+    gigi: (agg) => {
+      let c = `<b>Nature's Gift (gift Flame to ally):</b> Triggered ${agg.triggered}x total. `;
+      c += `Gifting Flame to another hero means THEIR talent fires next turn. It's a team-support talent that chains well. `;
+      if (agg.blocked > 0) c += `Blocked ${agg.blocked}x by Cursed Beggar. `;
+      c += `Hard to measure direct impact in simulation since it depends on who receives the gift. In real play, gifting to Juju (for +2) or Eggo (for Dodge) before a dangerous fight is the optimal play.`;
+      return c;
+    },
+    lulu: (agg) => {
+      let c = `<b>Arcane Recharge (recharge 1 skill):</b> Triggered ${agg.triggered}x total. `;
+      c += `Recharging skills is extremely valuable once skills are added. Right now it recharges Skill Burn availability, which is useful but not as impactful. `;
+      c += `This talent will become much stronger once you add real skill effects. Watch that it doesn't make Lulu's skills effectively unlimited.`;
+      return c;
+    },
+    eggo: (agg) => {
+      const dodgeSaves = Object.entries(results.reduce((s,r) => { const sk = r.tracker.skills; Object.entries(sk).forEach(([k,v]) => { if (k.includes('Dodge')) { s[k] = (s[k]||0) + v.savedFromKO; } }); return s; }, {}));
+      const saves = dodgeSaves.reduce((s,[,v]) => s+v, 0);
+      let c = `<b>Dodge (immune to KO this turn):</b> Triggered ${agg.triggered}x total. `;
+      if (saves > 0) c += `Prevented ${saves} KOs across ${n} games (${(saves/n).toFixed(1)}/game). `;
+      if (saves/n >= 0.5) c += `Very strong defensive talent. Eggo is significantly harder to kill than other heroes. `;
+      else c += `Dodge activates often but most of the time Eggo wasn't going to be KO'd anyway. The insurance value is real though. `;
+      c += `Consider: Dodge only lasts for ONE combat, not the whole turn, to add a decision layer.`;
+      return c;
+    }
+  };
+  heroIds.forEach(hid => {
+    const agg = { triggered:0, blocked:0, combatImpact:0, movementImpact:0 };
+    results.forEach(r => {
+      const t = r.tracker.talents[hid];
+      if (!t) return;
+      Object.keys(agg).forEach(k => agg[k] += (t[k] || 0));
+    });
+    if (agg.triggered + agg.blocked === 0) return;
+    const comment = talentComments[hid] ? talentComments[hid](agg) : '';
+    html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]}</b> — triggered ${agg.triggered}x, blocked ${agg.blocked}x<br>${comment}</div>`;
+  });
+  html += `</div>`;
+
+  // === HYDRA HEAD ANALYSIS ===
+  html += `<div class="report-section"><h3>Hydra Heads</h3>`;
+  const headAgg = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.hydraHeads).forEach(([name, data]) => {
+      if (!headAgg[name]) headAgg[name] = { spawned:0, destroyed:0, causedKO:0, regenerated:0 };
+      Object.keys(data).forEach(k => headAgg[name][k] += (data[k] || 0));
+    });
+  });
+  const hydraRef = HYDRA_HEADS.reduce((m,h) => { m[h.name] = h; return m; }, {});
+  const headComments = {
+    'The Nest': (d, ref) => `STR ${ref.str}. While alive, all other heads get +2 STR. ${d.destroyed === 0 ? 'Never destroyed in simulation. This means the +2 buff is always active, making every other head 2 points harder. If heroes can\'t kill STR 7, they can\'t kill anything. Consider: lower to STR 5-6 so heroes can realistically prioritize it, or change the passive to +1.' : `Destroyed ${d.destroyed}x. When it goes down, the fight gets much easier. Good design.`}`,
+    'The Brood': (d, ref) => `STR ${ref.str}. Disables all Flame effects (talents, Awakening). ${d.destroyed === 0 ? 'Never destroyed. Flame suppression means: no Juju +2, no Eggo Dodge, no Lulu recharge. This head neutralizes all talents permanently. Consider: lower STR to 6-7 so heroes can kill it, or make the suppression partial (e.g., only blocks talents, not Flame-triggered equipment).' : `Destroyed ${d.destroyed}x. Good counterplay target.`}`,
+    'The Wail': (d, ref) => `STR ${ref.str}. On destroy: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. At STR 10 this head is nearly unkillable without skills. Heroes need total 10+ to beat it. Consider: lower to STR 8, or make the on-destroy effect less punishing (exhaust only the attacker).' : `Destroyed ${d.destroyed}x. The skill exhaust on death is a fair cost for removing a head.`}`,
+    'The Spite': (d, ref) => `STR ${ref.str}. On destroy: grow 1 extra head. ${d.destroyed === 0 ? 'Never destroyed. At STR 12 this is essentially a wall. Even with max equipment (+3 weapon, +2 base, roll 6) heroes barely reach 11. Consider: lower to STR 9-10, since the growth penalty already makes it risky to destroy.' : `Destroyed ${d.destroyed}x. Growing a head on death is a great mechanic that creates tension.`}`,
+    'The Fangs': (d, ref) => `STR ${ref.str}. When targeted: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. The on-attack trigger means heroes LOSE skills just for trying. At STR 9 it\'s also hard to kill. This head punishes aggression too much. Consider: lower to STR 7, or change to "attacker only exhaust 1" instead of all heroes.' : `Destroyed ${d.destroyed}x. Punishing but fair if killable.`}`,
+    'The Maw': (d, ref) => `STR ${ref.str}. When targeted: discard 1 Equipment or -2. ${d.destroyed === 0 ? 'Never destroyed. Heroes must sacrifice equipment just to attempt an attack. At STR 8 with Nest bonus (+2 = 10), heroes need 10+ after losing equipment. Consider: lower to STR 6, or change to "discard OR -1" instead of -2.' : `Destroyed ${d.destroyed}x. Equipment sacrifice adds an interesting cost.`}`
+  };
+  Object.entries(headAgg).sort((a,b) => b[1].spawned - a[1].spawned).forEach(([name, d]) => {
+    const killRate = d.spawned > 0 ? ((d.destroyed / d.spawned) * 100).toFixed(0) : 'N/A';
+    const isHard = d.spawned >= 3 && killRate <= 30;
+    const isEasy = d.spawned >= 3 && killRate >= 80;
+    const cls = isHard ? 'op' : isEasy ? 'weak' : '';
+    const tag = isHard ? '<span class="tag op-tag">Hard</span>' : isEasy ? '<span class="tag weak-tag">Easy</span>' : '';
+    const ref = hydraRef[name] || {};
+    const comment = headComments[name] ? headComments[name](d, ref) : '';
+    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — spawned ${d.spawned}x, destroyed ${d.destroyed}x (${killRate}%), caused ${d.causedKO} KOs${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
+  });
+  html += `</div>`;
+
+  // === TRAP ANALYSIS ===
+  html += `<div class="report-section"><h3>Trap Lethality</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Traps that never KO anyone are "free" cards that don't create real danger. Consider adding teeth, or accept them as breather cards.</p>`;
+  const trapAgg = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.traps).forEach(([name, data]) => {
+      if (!trapAgg[name]) trapAgg[name] = { triggered:0, survived:0, ko:0 };
+      Object.keys(data).forEach(k => trapAgg[name][k] += (data[k] || 0));
+    });
+  });
+  const trapComments = {
+    'Hall of Mirrors': 'You fight yourself with 4 dice but no STR. Since the "enemy" has 0 STR and heroes have equipment + base STR, the hero almost always wins. Consider: the mirror copies your full STR, or rolls 4 dice AND adds your base STR.',
+    'Spike Trap': 'Roll 1-3 = KO. That\'s 50% lethality on paper, but heroes have Skill Burn and talents to survive. If it never KOs, heroes may be too strong at the point it appears. Check if it appears early enough.',
+    'The Tribute': 'Exhaust all OR go KO. Heroes always choose exhaust since they have skills. It\'s a resource drain, not a KO threat. Working as designed if you want resource pressure. Add "exhaust all AND lose 1 equipment" to add real teeth.',
+    'Guillotine': 'KO if fewer than 2 ready skills. By the time this triggers, heroes usually have 2+ ready. Consider: KO if fewer than 3, or KO if no equipment.',
+    'Static Fog': 'Blocks movement through a room. In simulation this barely matters (no real spatial board). In real play this could be more impactful.',
+    'Spectral Theft': 'Discard 1 equipment. Never KOs directly but losing equipment hurts. Working as designed as resource pressure.',
+    'Trap Alarm': 'Triggers a full Dread encounter (Legendary + Misfortune). Can lead to KO from the Misfortune, but the Legendary reward softens the blow.',
+    'Magnetic Field': 'All heroes roll Flame or lose equipment. With 50% Flame chance and multiple heroes, someone usually loses something. This is group pressure, not individual lethality.',
+    'Trap Door': 'Send back to entrance. No KO, just tempo loss. Consider: also exhaust 1 skill, or lose followers.',
+    'Crumbling Floor': 'Roll 1-2 = KO (33% chance). If 0% in practice, heroes are rerolling with Skill Burn. Working as intended pressure.',
+    'Giant Web': 'Exhaust 1 skill or KO. Usually a skill exhaust. Resource drain trap.'
+  };
+  Object.entries(trapAgg).filter(([,d]) => d.triggered >= 2).sort((a,b) => {
+    const lA = a[1].ko / Math.max(1, a[1].triggered);
+    const lB = b[1].ko / Math.max(1, b[1].triggered);
+    return lB - lA;
+  }).forEach(([name, d]) => {
+    const lethality = ((d.ko / Math.max(1, d.triggered)) * 100).toFixed(0);
+    const isLethal = lethality >= 50;
+    const isHarmless = d.ko === 0 && d.triggered >= 3;
+    const cls = isLethal ? 'op' : isHarmless ? 'weak' : '';
+    const tag = isLethal ? '<span class="tag op-tag">Lethal</span>' : isHarmless ? '<span class="tag weak-tag">Harmless</span>' : '';
+    const comment = trapComments[name] || '';
+    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — ${d.triggered} triggers, ${d.ko} KOs (${lethality}%)${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
+  });
+  html += `</div>`;
+
+  // === COMBAT TENSION ===
+  const totalCloseCalls = results.reduce((s, r) => s + r.tracker.closeCalls.length, 0);
+  const totalOverkills = results.reduce((s, r) => s + r.tracker.overkills.length, 0);
+  html += `<div class="report-section"><h3>Combat Tension</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Close calls = won by 0-1 margin. Overkills = won by 5+ margin. A good game has close calls in roughly 30-50% of fights. Too many overkills = fights feel pointless. Too many close calls = feels punishing.</p>`;
+  html += `<div class="report-card insight">`;
+  html += `Close calls: <b>${totalCloseCalls}</b> (${(totalCloseCalls/n).toFixed(1)}/game) | Overkills: <b>${totalOverkills}</b> (${(totalOverkills/n).toFixed(1)}/game)<br><br>`;
+  if (totalOverkills > totalCloseCalls * 2) {
+    html += `<span class="tag weak-tag">Low Tension</span> Most fights are decided before the dice roll because hero STR is much higher than enemy STR. <b>Suggestion:</b> Increase average enemy STR by 1 across Mishap enemies, or reduce base weapon STR. This will create more close calls and make Skill Burn feel more important.`;
+  } else if (totalCloseCalls > totalOverkills * 3) {
+    html += `<span class="tag op-tag">High Tension</span> Fights are very tight. Heroes often win by the skin of their teeth. <b>What this means for design:</b> Any skill that gives +1 or +2 in combat will feel extremely impactful, because that's the typical margin between winning and losing. <b>Risk:</b> If KO rate is also high (${avgKO}+/game), players will feel the game is unfair. <b>Suggestion:</b> Either accept tight fights and add more KO-prevention skills, or slightly reduce enemy STR to create breathing room.`;
+  } else {
+    html += `<b>Balanced.</b> Good mix of close fights and comfortable wins. Skills that give +2 combat will turn roughly ${totalCloseCalls > 0 ? Math.round(totalCloseCalls * 0.6) : '?'} fights from close to comfortable, which feels satisfying without being broken.`;
+  }
+  html += `</div></div>`;
+
+  // === DESIGN SUGGESTIONS ===
+  html += `<div class="report-section"><h3>Design Suggestions</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Based on all data above. These are skill ideas and balance tweaks derived from what the heroes actually struggle with.</p>`;
+  const allGaps = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.heroes).forEach(([hid, ht]) => {
+      if (!allGaps[hid]) allGaps[hid] = {};
+      ht.neededButDidntHave.forEach(g => {
+        if (!allGaps[hid][g.type]) allGaps[hid][g.type] = 0;
+        allGaps[hid][g.type]++;
+      });
+    });
+  });
+  heroIds.forEach(hid => {
+    const gaps = allGaps[hid] || {};
+    const heroData = { combats:0, ko:0, wins:0, losses:0 };
+    results.forEach(r => {
+      const ht = r.tracker.heroes[hid];
+      if (ht) { heroData.combats += ht.combats; heroData.ko += ht.ko; heroData.wins += ht.wins; heroData.losses += ht.losses; }
+    });
+    const suggestions = [];
+    const closeLosses = gaps.close_loss || 0;
+    const noEquipLosses = gaps.no_equip || 0;
+    const outmatched = gaps.outmatched || 0;
+    if (closeLosses >= n * 0.3) {
+      suggestions.push(`Lost ${closeLosses} close fights (margin 1-2). A skill that gives +2 to Fate Die would have turned ~${Math.ceil(closeLosses * 0.7)} of these into wins. Alternatively: a "reduce enemy STR by 2" skill, a "negate enemy special effect" skill, or a "if you lose by 1-2, draw instead of KO" passive. Note: Skill Burn already covers rerolling both your die and the enemy die, so a pure reroll skill would be redundant.`);
+    }
+    if (noEquipLosses >= n * 0.2) {
+      suggestions.push(`Fought ${noEquipLosses} times without equipment and lost. Needs a skill that compensates: "bare-handed +2", equipment retrieval, or summon a temporary weapon.`);
+    }
+    if (outmatched >= n * 0.3) {
+      suggestions.push(`Was outmatched ${outmatched} times (margin 4+). Needs: a flee/redirect skill ("step aside, enemy moves to another room"), damage cap ("you can't lose more than 1 STR worth"), or enemy debuff ("reduce enemy STR by 2 before rolling").`);
+    }
+    if (heroData.ko / n > 2) {
+      suggestions.push(`Averages ${(heroData.ko/n).toFixed(1)} KOs/game. Needs better survival: a KO-prevention skill, a "respawn with 1 equipment" passive, or stalker resistance.`);
+    }
+    if (heroData.combats > 0 && heroData.wins / heroData.combats < 0.4) {
+      suggestions.push(`Combat win rate is only ${((heroData.wins/heroData.combats)*100).toFixed(0)}%. Base STR (${HEROES.find(h=>h.id===hid).str}) may be too low without skills. Consider: a permanent passive (+1 STR in specific conditions) or movement skills to avoid fights.`);
+    }
+    if (suggestions.length > 0) {
+      html += `<div class="report-card need"><span class="tag need-tag">Skill Ideas</span><b style="color:var(--${hid})">${heroNames[hid]}</b><ul style="margin:4px 0 0 16px;padding:0">`;
+      suggestions.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
+      html += `</ul></div>`;
+    }
+  });
+
+  if (winRate < 30) {
+    html += `<div class="report-card op"><span class="tag op-tag">Too Hard</span>Win rate ${winRate}% without skills. Adding skills will raise this, but if skills only give +2 per fight and heroes need 4+ more to compete, the game may stay too hard. Consider: lower Hydra head STR by 2 across the board, or reduce tile deck Dread % from 25% to 15%.</div>`;
+  } else if (winRate > 70) {
+    html += `<div class="report-card weak"><span class="tag weak-tag">Too Easy</span>Win rate ${winRate}% even WITHOUT skills. Once skills are added, this will climb to 85-90%+. The game will feel like it plays itself. <b>Action items:</b> Increase Hydra head STR by 1-2, increase Dread room %, or reduce equipment STR across the board. Target: 40-55% base win rate without skills, so skills push it to 60-70%.</div>`;
+  } else {
+    html += `<div class="report-card insight"><span class="tag insight-tag">Good Baseline</span>Win rate ${winRate}% without skills is a solid foundation. Skills should push this to 60-75%, making them feel meaningful without trivializing the game.</div>`;
+  }
+
+  // Skill Burn summary
+  html += `<div class="report-card insight"><span class="tag insight-tag">Skill Burn</span>`;
+  const sbData = {};
+  results.forEach(r => { Object.entries(r.tracker.skills).forEach(([k,v]) => { if (k.includes('Skill Burn') && v.turnedFight > 0) { const hid = k.split('_')[0]; sbData[hid] = (sbData[hid]||0) + v.turnedFight; } }); });
+  if (Object.keys(sbData).length > 0) {
+    html += `Skill Burn (exhaust a skill to reroll YOUR die or ENEMY die) turned fights: `;
+    html += Object.entries(sbData).map(([hid,c]) => `<b style="color:var(--${hid})">${heroNames[hid]}</b>: ${c}x`).join(', ');
+    html += `.<br>The AI picks whichever reroll (own or enemy) gives the best chance to win. Skills you create should compete with "just rerolling" in value. If a skill isn't worth more than a reroll, players will always Skill Burn instead of activating it.`;
+  } else {
+    html += `No Skill Burns turned fights in this batch. Heroes won or lost decisively without needing rerolls.`;
+  }
+  html += `</div>`;
+
+  // Dodge talent saves (still relevant, it's a talent not a skill)
+  const dodgeSaves = results.reduce((s,r) => { const sk = r.tracker.skills; let c = 0; Object.entries(sk).forEach(([k,v]) => { if (k.includes('Dodge')) c += v.savedFromKO; }); return s+c; }, 0);
+  if (dodgeSaves > 0) {
+    html += `<div class="report-card insight"><span class="tag insight-tag">Dodge Talent</span>Eggo's Dodge talent (not a skill) prevented <b>${dodgeSaves}</b> KOs across ${n} games (${(dodgeSaves/n).toFixed(1)}/game). This is the strongest defensive ability in the game currently. Any KO-prevention skill you design for other heroes should be compared against this benchmark.</div>`;
+  }
+
+  // Warden Angel saves
+  const wardenSaves = results.reduce((s,r) => { const sk = r.tracker.skills; let c = 0; Object.entries(sk).forEach(([k,v]) => { if (k.includes('Warden Angel')) c += v.savedFromKO; }); return s+c; }, 0);
+  if (wardenSaves > 0) {
+    html += `<div class="report-card insight"><span class="tag insight-tag">Warden Angel</span>Warden Angel follower saved heroes from <b>${wardenSaves}</b> KOs. This follower acts like a free Relic. If it appears too often, it reduces the tension of combat and the value of Relics.</div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+// ========== BATCH RUN ==========
+function runSilentGame() {
+  G = initState();
+  HEROES.forEach(h => initHeroTracker(G.tracker, h.id));
+  let safety = 0;
+  while (!G.gameOver && safety < 2000) {
+    const hero = G.heroes[G.currentHero];
+    G.turn++;
+    G.stats.turns++;
+    hero.talentUsedThisTurn = false;
+    hero.dodgeActive = false;
+
+    // Turn-start effects
+    if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
+      if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero);
+    }
+    // NOTE: No skill activations — skills still being designed
+
+    // Hound
+    if (hero.houndFollowing) {
+      combat(hero, hero.houndFollowing, 'misfortune');
+      hero.houndFollowing = null;
+      if (G.gameOver) break;
+    }
+
+    if (hero.runningToHydra) {
+      runToHydra(hero);
+    } else if (G.hydraActive && G.heroesInHydraArea.has(hero.id)) {
+      hydraAttack(hero);
+    } else {
+      movePhase(hero);
+    }
+
+    if (!G.gameOver) nextHero();
+    safety++;
+  }
+
+  // Track stalker turns at end
+  G.heroes.forEach(h => {
+    h.stalkers.forEach(s => trackStalker(s.name, 'turnsActive'));
+  });
+
+  return {
+    victory: G.victory,
+    turn: G.turn,
+    stats: {...G.stats},
+    tracker: G.tracker,
+    heroes: G.heroes.map(h => ({id:h.id, equipment:h.equipment.map(e=>e.name), relics:h.heldRelics.length, ko:initHeroTracker(G.tracker,h.id).ko}))
+  };
+}
+
+function runBatch() {
+  const count = parseInt(document.getElementById('batchCount').value) || 50;
+  document.getElementById('batchBtn').disabled = true;
+  document.getElementById('statusBar').textContent = `Running batch: 0/${count}...`;
+
+  batchResults = [];
+  // Suppress log output during batch
+  const origLog = log;
+  const silentLog = (msg, cls) => { G.log.push({msg, cls}); };
+
+  let i = 0;
+  function batchStep() {
+    const batchSize = Math.min(5, count - i);
+    for (let j = 0; j < batchSize; j++) {
+      batchResults.push(runSilentGame());
+      i++;
+    }
+    document.getElementById('statusBar').textContent = `Running batch: ${i}/${count}...`;
+    if (i < count) {
+      setTimeout(batchStep, 0);
+    } else {
+      lastReport = generateReport(batchResults);
+      document.getElementById('batchBtn').disabled = false;
+      document.getElementById('reportBtn').disabled = false;
+      document.getElementById('statusBar').textContent = `Batch complete: ${count} games. Click Report to view analysis.`;
+      showLastReport();
+    }
+  }
+  setTimeout(batchStep, 10);
+}
+
+function showLastReport() {
+  if (!lastReport) return;
+  document.getElementById('reportContent').innerHTML = lastReport;
+  document.getElementById('reportOverlay').style.display = 'flex';
+}
+
+function closeReport() {
+  document.getElementById('reportOverlay').style.display = 'none';
+}
+
+// Also generate single-game report on game end
+function onGameEnd() {
+  if (!G) return;
+  G.heroes.forEach(h => {
+    h.stalkers.forEach(s => trackStalker(s.name, 'turnsActive'));
+  });
+  const result = {
+    victory: G.victory,
+    turn: G.turn,
+    stats: {...G.stats},
+    tracker: G.tracker,
+    heroes: G.heroes.map(h => ({id:h.id, equipment:h.equipment.map(e=>e.name), relics:h.heldRelics.length, ko:initHeroTracker(G.tracker,h.id).ko}))
+  };
+  lastReport = generateReport([result]);
+  document.getElementById('reportBtn').disabled = false;
+}
+
+// ========== CONTROLS ==========
+function startGame() {
+  stopAuto();
+  G = initState();
+  log('═══════════════════════════════════════', 'system');
+  log('  JUJU\'S CASTLE — NEW GAME', 'turn-header');
+  log('═══════════════════════════════════════', 'system');
+  log('Party: Juju (STR 3), Gigi (STR 2), Lulu (STR 1), Eggo (STR 2)', 'system');
+  log('All heroes start at the Entrance. 36 rooms to explore.', 'system');
+  log(`Legendary Equipment deck: ${LEGENDARY_EQUIPMENT.length} items`, 'system');
+  log('', 'system');
+  document.getElementById('logPanel').innerHTML = '';
+  document.getElementById('stepBtn').disabled = false;
+  document.getElementById('autoBtn').disabled = false;
+  render();
+  if (document.getElementById('modeSelect').value === 'auto') {
+    toggleAuto();
+  }
+}
+
+function stepGame() {
+  if (!G || G.gameOver) return;
+  runTurn();
+  if (G.gameOver) onGameEnd();
+  render();
+}
+
+function toggleAuto() {
+  if (autoRunning) {
+    stopAuto();
+  } else {
+    autoRunning = true;
+    document.getElementById('autoBtn').textContent = '⏸ Pause';
+    document.getElementById('autoBtn').classList.add('primary');
+    autoStep();
+  }
+}
+
+function autoStep() {
+  if (!autoRunning || !G || G.gameOver) {
+    stopAuto();
+    if (G && G.gameOver) onGameEnd();
+    render();
+    return;
+  }
+  runTurn();
+  render();
+  const speed = document.getElementById('speedSlider').value;
+  const delay = Math.max(10, 1000 - speed * 10);
+  autoTimer = setTimeout(autoStep, delay);
+}
+
+function stopAuto() {
+  autoRunning = false;
+  if (autoTimer) clearTimeout(autoTimer);
+  autoTimer = null;
+  document.getElementById('autoBtn').textContent = '▶ Auto';
+  document.getElementById('autoBtn').classList.remove('primary');
+}
+
+function resetGame() {
+  stopAuto();
+  G = null;
+  document.getElementById('logPanel').innerHTML = '';
+  document.getElementById('heroPanel').innerHTML = '';
+  document.getElementById('infoPanel').innerHTML = '';
+  document.getElementById('statusBar').textContent = 'Ready. Press New Game.';
+  document.getElementById('stepBtn').disabled = true;
+  document.getElementById('autoBtn').disabled = true;
+}
+
+document.getElementById('statusBar').textContent = 'Ready. Press New Game.';
+</script>
+</body>
+</html>
