@@ -4233,9 +4233,9 @@ function generateReport(results) {
     html += `</div>`;
   }
 
-  // === DESIGN SUGGESTIONS ===
-  html += `<div class="report-section"><h3>Design Suggestions</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Based on all data above. These are skill ideas and balance tweaks derived from what the heroes actually struggle with.</p>`;
+  // === HERO STRUGGLE ANALYSIS ===
+  html += `<div class="report-section"><h3>Hero Struggle Analysis</h3>`;
+  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Where each hero struggles despite having skills. Cross-reference with Skill Analysis above to see if existing skills address these problems or if they're being used/burned suboptimally.</p>`;
   const allGaps = {};
   results.forEach(r => {
     Object.entries(r.tracker.heroes).forEach(([hid, ht]) => {
@@ -4253,28 +4253,42 @@ function generateReport(results) {
       const ht = r.tracker.heroes[hid];
       if (ht) { heroData.combats += ht.combats; heroData.ko += ht.ko; heroData.wins += ht.wins; heroData.losses += ht.losses; }
     });
-    const suggestions = [];
+    const heroSkills = HEROES.find(h => h.id === hid).skills;
+    const issues = [];
     const closeLosses = gaps.close_loss || 0;
     const noEquipLosses = gaps.no_equip || 0;
     const outmatched = gaps.outmatched || 0;
     if (closeLosses >= n * 0.3) {
-      suggestions.push(`Lost ${closeLosses} close fights (margin 1-2). A skill that gives +2 to Fate Die would have turned ~${Math.ceil(closeLosses * 0.7)} of these into wins. Alternatively: a "reduce enemy STR by 2" skill, a "negate enemy special effect" skill, or a "if you lose by 1-2, draw instead of KO" passive. Note: Skill Burn already covers rerolling both your die and the enemy die, so a pure reroll skill would be redundant.`);
+      // Check if hero has skills that should address this
+      const hasAtkSkill = heroSkills.some(s => s.kind === 'Combat');
+      const atkKeys = heroSkills.filter(s => s.kind === 'Combat').map(s => hid + '_' + s.name);
+      const atkUsed = atkKeys.reduce((sum, k) => sum + (skillAgg[k] ? skillAgg[k].activated : 0), 0);
+      const atkBurned = atkKeys.reduce((sum, k) => sum + (skillAgg[k] ? skillAgg[k].burned : 0), 0);
+      if (hasAtkSkill && atkBurned > atkUsed) {
+        issues.push(`Lost ${closeLosses} close fights (margin 1-2) — BUT has Combat skills that are being burned more than used (${atkBurned} burned vs ${atkUsed} used). The AI prefers rerolling over activating them. Check Skill Analysis: are the combat skills too situational?`);
+      } else if (hasAtkSkill) {
+        issues.push(`Lost ${closeLosses} close fights (margin 1-2) despite using Combat skills ${atkUsed}x. The skills help but aren't enough. Consider: higher STR bonus, or a passive that triggers automatically on close fights.`);
+      } else {
+        issues.push(`Lost ${closeLosses} close fights (margin 1-2) with no Combat skill to help. This hero relies purely on STR and Skill Burn for combat.`);
+      }
     }
     if (noEquipLosses >= n * 0.2) {
-      suggestions.push(`Fought ${noEquipLosses} times without equipment and lost. Needs a skill that compensates: "bare-handed +2", equipment retrieval, or summon a temporary weapon.`);
+      issues.push(`Fought without equipment ${noEquipLosses} times and lost. Gets KO'd and loses gear, then fights naked. A skill that works better WITHOUT equipment or an equipment-recovery mechanic would help.`);
     }
     if (outmatched >= n * 0.3) {
-      suggestions.push(`Was outmatched ${outmatched} times (margin 4+). Needs: a flee/redirect skill ("step aside, enemy moves to another room"), damage cap ("you can't lose more than 1 STR worth"), or enemy debuff ("reduce enemy STR by 2 before rolling").`);
+      const hasSiphon = hid === 'lulu' || heroSkills.some(s => s.effect && s.effect.includes('-2'));
+      issues.push(`Outmatched ${outmatched} times (margin 4+). ${hasSiphon ? 'Siphon (-2 STR) exists but doesn\'t close a 4+ gap alone.' : 'No debuff skill available.'} Consider: cross-turn Siphon usage (is Lulu using it for this hero?) or stronger equipment.`);
     }
     if (heroData.ko / n > 2) {
-      suggestions.push(`Averages ${(heroData.ko/n).toFixed(1)} KOs/game. Needs better survival: a KO-prevention skill, a "respawn with 1 equipment" passive, or stalker resistance.`);
+      const hasKOPrevention = heroSkills.some(s => s.effect && (s.effect.includes('KO') || s.effect.includes('Prevent')));
+      issues.push(`${(heroData.ko/n).toFixed(1)} KOs/game. ${hasKOPrevention ? 'Has KO prevention skill but still goes down often. Is it being burned instead of saved?' : 'No KO prevention skill.'} Check if Shield Wall (Juju cross-turn) is being used to protect this hero.`);
     }
     if (heroData.combats > 0 && heroData.wins / heroData.combats < 0.4) {
-      suggestions.push(`Combat win rate is only ${((heroData.wins/heroData.combats)*100).toFixed(0)}%. Base STR (${HEROES.find(h=>h.id===hid).str}) is low. Consider: stronger equipment options, better skill synergies, or movement abilities to avoid tough fights.`);
+      issues.push(`Combat win rate only ${((heroData.wins/heroData.combats)*100).toFixed(0)}%. Base STR ${HEROES.find(h=>h.id===hid).str} may be too low even with skills.`);
     }
-    if (suggestions.length > 0) {
-      html += `<div class="report-card need"><span class="tag need-tag">Skill Ideas</span><b style="color:var(--${hid})">${heroNames[hid]}</b><ul style="margin:4px 0 0 16px;padding:0">`;
-      suggestions.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
+    if (issues.length > 0) {
+      html += `<div class="report-card need"><span class="tag need-tag">Struggles</span><b style="color:var(--${hid})">${heroNames[hid]}</b><ul style="margin:4px 0 0 16px;padding:0">`;
+      issues.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
       html += `</ul></div>`;
     }
   });
