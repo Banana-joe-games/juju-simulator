@@ -4314,14 +4314,21 @@ function generateSingleGameReport() {
   const arrivals = G.tracker.hydraArrivals || [];
   if (arrivals.length > 0) {
     html += `<div class="report-section"><h3>Hydra Arrival</h3>`;
-    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:6px">What each hero had when they arrived at the Hydra. This shows if they were prepared or depleted.</p>`;
+    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:6px">What each hero had when they reached the Hydra. Multiple entries = hero was KO'd and had to run back.</p>`;
+    // Track how many times each hero arrived
+    const arrivalCount = {};
     arrivals.forEach(a => {
+      arrivalCount[a.heroId] = (arrivalCount[a.heroId] || 0) + 1;
+      const visitNum = arrivalCount[a.heroId];
+      const isReturn = visitNum > 1;
       const skillList = a.skillNames.map(s => `<span style="color:${s.ready?'var(--heal)':'#884444'}">${s.name}</span>`).join(', ');
       const equipList = a.equipment.length > 0 ? a.equipment.join(', ') : 'none';
       const followerList = a.followers.length > 0 ? a.followers.join(', ') : 'none';
       const relicList = a.relics.length > 0 ? a.relics.join(', ') : 'none';
-      html += `<div class="report-card" style="border-left:3px solid var(--${a.heroId})">`;
-      html += `<b style="color:var(--${a.heroId})">${a.hero}</b> arrived turn <b>${a.turn}</b> — Total STR: <b>${a.totalStr}</b><br>`;
+      const label = isReturn ? ` <span style="color:var(--ko)">(return #${visitNum} after KO)</span>` : ' <span style="color:var(--wonder)">(first arrival)</span>';
+      const borderStyle = isReturn ? 'border-left:3px dashed var(--ko)' : 'border-left:3px solid var(--' + a.heroId + ')';
+      html += `<div class="report-card" style="${borderStyle}">`;
+      html += `<b style="color:var(--${a.heroId})">${a.hero}</b> turn <b>${a.turn}</b>${label} — Total STR: <b>${a.totalStr}</b><br>`;
       html += `<div style="font-size:11px;margin-top:3px">`;
       html += `Skills: ${a.readySkills}/${a.totalSkills} ready → ${skillList}<br>`;
       html += `Equipment: ${equipList}<br>`;
