@@ -801,6 +801,7 @@ function runTurn() {
   G.stats.turns++;
   hero.talentUsedThisTurn = false;
   hero.dodgeActive = false;
+  hero.ko = false;
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
 
@@ -1816,6 +1817,7 @@ function applyKO(hero) {
     }
     G.stats.ko++;
     initHeroTracker(G.tracker, hero.id).ko++;
+    hero.ko = true;
     const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove');
     const droppedEquip = hero.equipment.filter(e => e.effect !== 'cannot_remove').map(e => e.name).join(', ') || 'nothing';
     hero.equipment = parasiteSword ? [parasiteSword] : [];
@@ -1850,6 +1852,7 @@ function applyKO(hero) {
   removeFollowers(hero);
   hero.stalkers = [];
   hero.pos = 'entrance';
+  hero.ko = true;
   log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}. Respawned at Entrance.`, 'ko');
 }
 
