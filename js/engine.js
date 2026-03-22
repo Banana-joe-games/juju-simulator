@@ -88,6 +88,7 @@ function resetTweaks() {
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
   document.getElementById('tw_hydraKOGrowth').checked = true;
+  document.getElementById('tw_hydraRecycling').checked = false;
   document.getElementById('tw_hydraStartingHeads').value = 2; document.getElementById('tw_hydraStartingHeads_v').textContent = '2';
 
   document.getElementById('tw_gilEnabled').checked = false;
@@ -161,7 +162,8 @@ function readTweaks() {
     gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 4,
     debugMode: document.getElementById('tw_debugMode').checked,
     hydraKOGrowth: document.getElementById('tw_hydraKOGrowth') ? document.getElementById('tw_hydraKOGrowth').checked : true,
-    hydraStartingHeads: parseInt(document.getElementById('tw_hydraStartingHeads').value) || 2
+    hydraStartingHeads: parseInt(document.getElementById('tw_hydraStartingHeads').value) || 2,
+    hydraRecycling: document.getElementById('tw_hydraRecycling') ? document.getElementById('tw_hydraRecycling').checked : false
   };
 }
 
@@ -195,6 +197,7 @@ function getTweaksDiff(tweaks) {
 
   if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||2) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||4) + ' Gil)');
   if (tweaks.hydraKOGrowth === false) diffs.push('Hydra KO Growth: OFF (KO at Hydra does not grow heads)');
+  if (tweaks.hydraRecycling) diffs.push('Hydra Recycling: ON (heads return to pool, victory = all 6 down)');
   if (tweaks.hydraStartingHeads && tweaks.hydraStartingHeads !== 2) diffs.push('Hydra Starting Heads: ' + tweaks.hydraStartingHeads);
   return diffs;
 }
@@ -3377,12 +3380,25 @@ function awakenEffect(hero) {
 function spawnHydra() {
   if (G.tracker.pacing.hydraSpawn === 0) G.tracker.pacing.hydraSpawn = G.turn;
   log(`\n  🐉 THE HYDRA AWAKENS! 🐉`, 'defeat');
+  const recycling = G._tweaks && G._tweaks.hydraRecycling;
   const pool = shuffle([...HYDRA_HEADS]);
-  const startingHeads = (G._tweaks && G._tweaks.hydraStartingHeads) || 2;
-  G.hydraHeads = pool.slice(0, Math.min(startingHeads, 6)).map(function(h) {
-    var baseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[h.name] !== undefined) ? G._tweaks.hydraHeads[h.name] : h.str;
-    return {...h, str: baseStr, destroyed: false, effectiveStr: baseStr};
-  });
+
+  if (recycling) {
+    // RECYCLING MODE: all 6 heads exist, some face-up some face-down
+    const startCount = (G._tweaks && G._tweaks.hydraStartingHeads) || 3;
+    G.hydraHeads = pool.map(function(h, i) {
+      var baseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[h.name] !== undefined) ? G._tweaks.hydraHeads[h.name] : h.str;
+      return {...h, str: baseStr, destroyed: i >= startCount, effectiveStr: baseStr};
+    });
+  } else {
+    // NON-RECYCLING: only pick startingHeads
+    const startingHeads = (G._tweaks && G._tweaks.hydraStartingHeads) || 2;
+    G.hydraHeads = pool.slice(0, Math.min(startingHeads, 6)).map(function(h) {
+      var baseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[h.name] !== undefined) ? G._tweaks.hydraHeads[h.name] : h.str;
+      return {...h, str: baseStr, destroyed: false, effectiveStr: baseStr};
+    });
+  }
+
   G.hydraActive = true;
   recalcHydraStr();
   G.tracker.hydraStartingHeads = G.hydraHeads.map(h => h.name);
@@ -3482,7 +3498,8 @@ function recalcHydraStr() {
 function hydraAttack(hero) {
   const aliveHeads = G.hydraHeads.filter(h => !h.destroyed);
   if (aliveHeads.length === 0) {
-    log(`  🎉 All heads destroyed — VICTORY!`, 'victory');
+    const recyclingVic = G._tweaks && G._tweaks.hydraRecycling;
+    log(recyclingVic ? `  🎉 All heads silenced — VICTORY!` : `  🎉 All heads destroyed — VICTORY!`, 'victory');
     G.victory = true;
     G.gameOver = true;
     return;
@@ -3786,7 +3803,8 @@ function hydraAttack(hero) {
   if (heroTotal >= effectiveHeadStr) {
     head.destroyed = true;
     G.hydraDestroyedCount++;
-    G.hydraMaxHeads--;  // Hydra permanently loses a head slot
+    const recyclingMode = G._tweaks && G._tweaks.hydraRecycling;
+    if (!recyclingMode) G.hydraMaxHeads--;  // Hydra permanently loses a head slot (non-recycling only)
     trackHydraHead(head.name, 'destroyed');
     // Update Copycat win tracking after hydra fight resolves
     if (hero._lastCopycatEntry) {
@@ -3795,7 +3813,11 @@ function hydraAttack(hero) {
     }
     G.tracker.hydraHeadKillOrder.push({ head: head.name, turn: G.turn, killedBy: hero.id });
     initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
-    log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max ${G.hydraMaxHeads})`, 'victory');
+    if (recyclingMode) {
+      log(`  ⚔ ${head.name} silenced! (${G.hydraHeads.filter(h=>!h.destroyed).length} active, ${G.hydraHeads.filter(h=>h.destroyed).length} in pool)`, 'victory');
+    } else {
+      log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max ${G.hydraMaxHeads})`, 'victory');
+    }
 
     // On Defeat effects
     if (head.skillType === 'onDefeat') {
@@ -3804,38 +3826,53 @@ function hydraAttack(hero) {
         log(`    The Wail's death cry! All heroes exhaust 1 Skill`, 'misfortune');
       }
       if (head.growOnDefeat) {
-        // Spite: grow head but NEVER cause overflow, and never revive itself.
-        // Uses dedicated logic — does NOT call growHydraHead() to avoid overflow trigger.
-        const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
-        if (aliveCount < G.hydraMaxHeads) {
-          const usedNames = new Set(G.hydraHeads.map(h => h.name));
-          const poolAvailable = HYDRA_HEADS.filter(h => !usedNames.has(h.name));
-          if (poolAvailable.length > 0) {
-            // Add from unused pool
-            const picked = poolAvailable[Math.floor(Math.random() * poolAvailable.length)];
-            const headBaseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[picked.name] !== undefined) ? G._tweaks.hydraHeads[picked.name] : picked.str;
-            const newHead = {...picked, str: headBaseStr, destroyed: false};
-            G.hydraHeads.push(newHead);
-            trackHydraHead(newHead.name, 'spawned');
+        if (recyclingMode) {
+          // RECYCLING: Spite flips a face-down head (not itself) face-up. Never causes overflow.
+          const spiteRevivable = G.hydraHeads.filter(h => h.destroyed && h.name !== head.name);
+          if (spiteRevivable.length > 0) {
+            const picked = spiteRevivable[Math.floor(Math.random() * spiteRevivable.length)];
+            picked.destroyed = false;
+            trackHydraHead(picked.name, 'spawned');
             recalcHydraStr();
-            G.tracker.hydraGrowthLog.push({ head: newHead.name, turn: G.turn, source: 'spite_on_defeat' });
-            log(`    The Spite: ${newHead.name} grows from pool! (STR ${newHead.effectiveStr})`, 'misfortune');
+            G.tracker.hydraGrowthLog.push({ head: picked.name, turn: G.turn, source: 'spite_on_defeat' });
+            log(`    The Spite: ${picked.name} rises again! (STR ${picked.effectiveStr})`, 'misfortune');
           } else {
-            // Revive a destroyed head (but NOT Spite itself)
-            const revivable = G.hydraHeads.filter(h => h.destroyed && h.name !== head.name);
-            if (revivable.length > 0) {
-              const picked = revivable[Math.floor(Math.random() * revivable.length)];
-              picked.destroyed = false;
-              trackHydraHead(picked.name, 'spawned');
-              recalcHydraStr();
-              G.tracker.hydraGrowthLog.push({ head: picked.name, turn: G.turn, source: 'spite_on_defeat' });
-              log(`    The Spite: ${picked.name} regenerates!`, 'misfortune');
-            } else {
-              log(`    The Spite: no heads to grow or revive — no effect.`, 'system');
-            }
+            log(`    The Spite: no face-down heads to flip — no effect.`, 'system');
           }
         } else {
-          log(`    The Spite: at max heads — no growth (Spite cannot cause overflow).`, 'system');
+          // NON-RECYCLING: Spite grow head but NEVER cause overflow, and never revive itself.
+          // Uses dedicated logic — does NOT call growHydraHead() to avoid overflow trigger.
+          const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
+          if (aliveCount < G.hydraMaxHeads) {
+            const usedNames = new Set(G.hydraHeads.map(h => h.name));
+            const poolAvailable = HYDRA_HEADS.filter(h => !usedNames.has(h.name));
+            if (poolAvailable.length > 0) {
+              // Add from unused pool
+              const picked = poolAvailable[Math.floor(Math.random() * poolAvailable.length)];
+              const headBaseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[picked.name] !== undefined) ? G._tweaks.hydraHeads[picked.name] : picked.str;
+              const newHead = {...picked, str: headBaseStr, destroyed: false};
+              G.hydraHeads.push(newHead);
+              trackHydraHead(newHead.name, 'spawned');
+              recalcHydraStr();
+              G.tracker.hydraGrowthLog.push({ head: newHead.name, turn: G.turn, source: 'spite_on_defeat' });
+              log(`    The Spite: ${newHead.name} grows from pool! (STR ${newHead.effectiveStr})`, 'misfortune');
+            } else {
+              // Revive a destroyed head (but NOT Spite itself)
+              const revivable = G.hydraHeads.filter(h => h.destroyed && h.name !== head.name);
+              if (revivable.length > 0) {
+                const picked = revivable[Math.floor(Math.random() * revivable.length)];
+                picked.destroyed = false;
+                trackHydraHead(picked.name, 'spawned');
+                recalcHydraStr();
+                G.tracker.hydraGrowthLog.push({ head: picked.name, turn: G.turn, source: 'spite_on_defeat' });
+                log(`    The Spite: ${picked.name} regenerates!`, 'misfortune');
+              } else {
+                log(`    The Spite: no heads to grow or revive — no effect.`, 'system');
+              }
+            }
+          } else {
+            log(`    The Spite: at max heads — no growth (Spite cannot cause overflow).`, 'system');
+          }
         }
       }
     }
@@ -3862,7 +3899,7 @@ function hydraAttack(hero) {
     }
 
     if (G.hydraHeads.every(h => h.destroyed)) {
-      log(`\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
+      log(recyclingMode ? `\n  🎉🎉🎉 ALL HEADS SILENCED! VICTORY! 🎉🎉🎉` : `\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
       G.victory = true;
       G.gameOver = true;
       trace('game', 'end', {victory: true, turn: G.turn, cause: 'all_heads_destroyed'});
@@ -3886,7 +3923,8 @@ function hydraAttack(hero) {
       if (retryTotal >= effectiveHeadStr) {
         head.destroyed = true;
         G.hydraDestroyedCount++;
-        G.hydraMaxHeads--;
+        const recyclingBerserker = G._tweaks && G._tweaks.hydraRecycling;
+        if (!recyclingBerserker) G.hydraMaxHeads--;
         trackHydraHead(head.name, 'destroyed');
         G.tracker.hydraHeadKillOrder.push({ head: head.name, turn: G.turn, killedBy: hero.id });
         initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
@@ -3894,7 +3932,7 @@ function hydraAttack(hero) {
         log(`    Berserker Helmet wins! ${head.name} DESTROYED!`, 'victory');
         hero._berserkerUsed = false;
         if (G.hydraHeads.every(h => h.destroyed)) {
-          log(`\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
+          log(recyclingBerserker ? `\n  🎉🎉🎉 ALL HEADS SILENCED! VICTORY! 🎉🎉🎉` : `\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
           G.victory = true;
           G.gameOver = true;
           trace('game', 'end', {victory: true, turn: G.turn, cause: 'all_heads_destroyed'});
@@ -3975,6 +4013,7 @@ function hydraAttack(hero) {
 function growHydraHead(source) {
   const tw = G._tweaks || {};
   const koGrowthEnabled = tw.hydraKOGrowth !== false; // default true
+  const recycling = tw.hydraRecycling;
 
   // If KO growth disabled and this is a hero KO source, skip entirely
   if (!koGrowthEnabled && source === 'hero_ko') {
@@ -3982,6 +4021,33 @@ function growHydraHead(source) {
     return;
   }
 
+  if (recycling) {
+    // RECYCLING MODE: flip a random face-down head face-up
+    const faceDown = G.hydraHeads.filter(h => h.destroyed);
+    if (faceDown.length === 0) {
+      // All 6 are face-up — OVERFLOW
+      const overflowEnabled = tw.overflowGameOver !== false;
+      if (overflowEnabled) {
+        log(`  💀 OVERFLOW! All 6 heads active and growth triggered — GAME OVER!`, 'defeat');
+        G.gameOver = true;
+        G.tracker.deathMoments.push({ hero: 'party', context: 'Hydra overflow: all 6 heads active, growth triggered', turn: G.turn });
+        trace('game', 'end', {victory: false, turn: G.turn, cause: 'hydra_overflow'});
+      } else {
+        log(`  ⚠ All 6 heads active — no head to flip (overflow disabled)`, 'system');
+      }
+      return;
+    }
+    const picked = faceDown[Math.floor(Math.random() * faceDown.length)];
+    picked.destroyed = false;
+    recalcHydraStr();
+    trackHydraHead(picked.name, 'spawned');
+    G.tracker.hydraGrowthLog.push({ head: picked.name, turn: G.turn, source: source || 'unknown' });
+    trace('hydra', 'grow', {source: source || 'unknown', newHead: picked.name, aliveCount: G.hydraHeads.filter(h => !h.destroyed).length, maxHeads: G.hydraMaxHeads});
+    log(`    ${picked.name} rises again! (STR ${picked.effectiveStr})`, 'misfortune');
+    return;
+  }
+
+  // NON-RECYCLING MODE: existing behavior
   const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
   const overflowEnabled = !G._tweaks || G._tweaks.overflowGameOver !== false;
   if (aliveCount >= G.hydraMaxHeads) {
