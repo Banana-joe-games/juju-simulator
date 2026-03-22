@@ -87,6 +87,7 @@ function resetTweaks() {
   document.getElementById('tw_skills').checked = true;
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
+  document.getElementById('tw_hydraKOGrowth').checked = true;
 
   document.getElementById('tw_gilEnabled').checked = false;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
@@ -157,7 +158,8 @@ function readTweaks() {
     gilPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
     gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 2,
     gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 4,
-    debugMode: document.getElementById('tw_debugMode').checked
+    debugMode: document.getElementById('tw_debugMode').checked,
+    hydraKOGrowth: document.getElementById('tw_hydraKOGrowth') ? document.getElementById('tw_hydraKOGrowth').checked : true
   };
 }
 
@@ -190,6 +192,7 @@ function getTweaksDiff(tweaks) {
   if (!tweaks.overflowGameOver) diffs.push('Hydra Overflow: NOT game over (heads just stop growing)');
 
   if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||2) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||4) + ' Gil)');
+  if (tweaks.hydraKOGrowth === false) diffs.push('Hydra KO Growth: OFF (KO at Hydra does not grow heads)');
   return diffs;
 }
 
@@ -3750,9 +3753,23 @@ function hydraAttack(hero) {
 }
 
 function growHydraHead(source) {
+  const tw = G._tweaks || {};
+  const koGrowthEnabled = tw.hydraKOGrowth !== false; // default true
+
+  // If KO growth disabled and this is a hero KO source, skip entirely
+  if (!koGrowthEnabled && source === 'hero_ko') {
+    log(`  (Hydra KO Growth OFF — no head grows from KO)`, 'system');
+    return;
+  }
+
   const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
   const overflowEnabled = !G._tweaks || G._tweaks.overflowGameOver !== false;
   if (aliveCount >= G.hydraMaxHeads) {
+    // Spite cannot trigger overflow when KO growth is off
+    if (!koGrowthEnabled && source === 'spite_on_defeat') {
+      log(`  (Spite growth blocked — would cause overflow)`, 'system');
+      return;
+    }
     if (overflowEnabled) {
       log(`  💀 OVERFLOW! Hydra exceeds max heads (${aliveCount}/${G.hydraMaxHeads}) — GAME OVER!`, 'defeat');
       G.gameOver = true;
