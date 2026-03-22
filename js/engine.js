@@ -2996,6 +2996,8 @@ function applyKO(hero) {
     G.heroesInHydraArea.delete(hero.id);
     trace('ko', 'applied', {hero: hero.id, cause: 'hydra', relicUsed: totalRelics > 0, shieldWall: false, dodge: false, equipmentDropped: hasShadowCloak ? [] : hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').map(e => e.name), followersLost: hero.followers.map(f => f.name)});
     log(`    ${hero.name} KO'd at Hydra! Respawned. Must run back.`, 'ko');
+    // Ensure another hero is sent if nobody else is at Hydra
+    ensureHydraUrgency();
     return;
   }
 
@@ -3290,6 +3292,66 @@ function spawnHydra() {
     };
   });
   log(`    ${G.hydraHeads.length} heads active. Max: ${G.hydraMaxHeads}.`, 'hydra');
+
+  // Immediately send closest hero as scout
+  ensureHydraUrgency();
+}
+
+// Ensure at least one hero is always running to or at the Hydra after awakening.
+// Called: on spawn, each round, and after a hero KO at Hydra.
+function ensureHydraUrgency() {
+  if (!G.hydraActive || !G.exitHex) return;
+  if (G.gameOver) return;
+
+  const anyoneAtHydra = G.heroes.some(h => G.heroesInHydraArea.has(h.id));
+  const anyoneRunning = G.heroes.some(h => h.runningToHydra);
+
+  if (anyoneAtHydra || anyoneRunning) {
+    // Someone is there or on the way — also send others if all relics collected
+    if (G.relicsCollected >= 4) {
+      G.heroes.forEach(h => {
+        if (!G.heroesInHydraArea.has(h.id) && !h.runningToHydra) {
+          h.runningToHydra = true;
+          log(`  ${h.name} begins running to the Hydra!`, 'hydra');
+        }
+      });
+    }
+    return;
+  }
+
+  // Nobody at Hydra and nobody running — pick the best scout
+  const candidates = G.heroes.filter(h => !G.heroesInHydraArea.has(h.id) && !h.runningToHydra && h.pos !== 'hydra');
+  if (candidates.length === 0) return;
+
+  // Score: shortest distance to Hydra (min of hex distance and BFS distance)
+  candidates.forEach(h => {
+    const hexDist = hexDistance(h.pos.q, h.pos.r, G.exitHex.q, G.exitHex.r);
+    const bfsPath = G.hexMap.findPath(h.pos.q, h.pos.r, G.exitHex.q, G.exitHex.r);
+    const bfsDist = bfsPath ? bfsPath.length - 1 : Infinity;
+    h._hydraScore = Math.min(hexDist, bfsDist);
+    h._hydroStr = totalStr(h);
+  });
+
+  // Sort: closest first, then highest STR as tiebreaker
+  candidates.sort((a, b) => {
+    if (a._hydraScore !== b._hydraScore) return a._hydraScore - b._hydraScore;
+    return b._hydroStr - a._hydroStr;
+  });
+
+  const scout = candidates[0];
+  scout.runningToHydra = true;
+  log(`  🏃 ${scout.name} scouts toward the Hydra! (distance: ${scout._hydraScore})`, 'hydra');
+
+  // Clean up temp properties
+  candidates.forEach(h => { delete h._hydraScore; delete h._hydroStr; });
+
+  // If all relics collected, send everyone else too
+  if (G.relicsCollected >= 4) {
+    candidates.slice(1).forEach(h => {
+      h.runningToHydra = true;
+      log(`  ${h.name} begins running to the Hydra!`, 'hydra');
+    });
+  }
 }
 
 function recalcHydraStr() {
@@ -4072,14 +4134,7 @@ function nextHero() {
     G.crownUsedThisRound = false;
     monsterMovementPhase();
     if (G.hydraActive) {
-      G.heroes.forEach(h => {
-        if (!G.heroesInHydraArea.has(h.id) && !h.runningToHydra) {
-          if (G.relicsCollected >= 4) {
-            h.runningToHydra = true;
-            log(`  ${h.name} begins running to the Hydra!`, 'hydra');
-          }
-        }
-      });
+      ensureHydraUrgency();
     }
   }
 }
