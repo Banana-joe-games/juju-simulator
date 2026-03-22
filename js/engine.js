@@ -926,24 +926,28 @@ function movePhase(hero) {
   let placedNewTiles = 0;
 
   if (intent.type === 'explore') {
-    // STRAIGHT LINE movement: choose direction, move [roll] new tiles
-    // Explored tiles are JUMPED OVER (don't count as steps)
-    // Exception: Dread Dungeon ALWAYS stops you (explored or not)
+    // STRAIGHT LINE movement: move [roll] hexes total in chosen direction.
+    // Every hex counts as 1 step (explored or not).
+    // Explored tiles: pass through (don't stop, don't resolve).
+    // Unexplored tiles: place new tile from deck, pass through.
+    // You STOP on your final hex (step == moveVal) OR on any Dread Dungeon.
+    // After Hydra reveal: free movement (handled separately).
     const dir = HEX_DIRS[intent.dirIndex];
     let stepsUsed = 0;
     let scanQ = currentQ, scanR = currentR;
-    const maxScan = 20; // safety limit to prevent infinite loops
-    let scanned = 0;
 
-    while (stepsUsed < moveVal && scanned < maxScan) {
-      scanQ += dir.q;
-      scanR += dir.r;
-      scanned++;
+    while (stepsUsed < moveVal) {
+      const nextQ = scanQ + dir.q;
+      const nextR = scanR + dir.r;
 
-      if (!G.hexMap.isInBounds(scanQ, scanR)) {
-        // Hit edge of map — stop here
+      if (!G.hexMap.isInBounds(nextQ, nextR)) {
+        // Hit edge of map — stop at current position
         break;
       }
+
+      scanQ = nextQ;
+      scanR = nextR;
+      stepsUsed++;
 
       if (G.hexMap.has(scanQ, scanR)) {
         // Explored tile — check for Dread Dungeon
@@ -956,12 +960,22 @@ function movePhase(hero) {
           log('  ⚠ Dread Dungeon blocks the path! Movement stops.', 'misfortune');
           break;
         }
-        // Otherwise: JUMP OVER — don't count as step, don't stop
+        // Explored non-DD: pass through unless it's our last step
+        if (stepsUsed >= moveVal) {
+          // Final step — land here
+          currentQ = scanQ;
+          currentR = scanR;
+          destTileType = existing.type;
+        }
+        // Otherwise keep going (pass through)
         continue;
       }
 
       // Unexplored hex — place new tile
-      if (G.tileDeck.length === 0) break;
+      if (G.tileDeck.length === 0) {
+        // No more tiles: stop at last valid position
+        break;
+      }
       const tileType = G.tileDeck.pop();
       G.tilesPlaced++;
       placedNewTiles++;
@@ -975,26 +989,19 @@ function movePhase(hero) {
       currentQ = scanQ;
       currentR = scanR;
       destTileType = tileType;
-      stepsUsed++;
 
-      // New Dread Dungeon stops movement immediately
+      // Dread Dungeon stops movement immediately, even if more steps remain
       if (tileType === 'dread') {
         log('  ⚠ Dread Dungeon! Movement stops.', 'misfortune');
         break;
       }
     }
 
-    // If we jumped over everything and placed nothing, land on last scanned explored tile
-    if (stepsUsed === 0 && scanned > 0 && currentQ === hero.pos.q && currentR === hero.pos.r) {
-      // Walk back to find the last valid explored tile along this line
-      let lastQ = currentQ, lastR = currentR;
-      let sQ = currentQ, sR = currentR;
-      for (let s = 0; s < scanned; s++) {
-        sQ += dir.q; sR += dir.r;
-        if (G.hexMap.has(sQ, sR)) { lastQ = sQ; lastR = sR; }
-      }
-      if (lastQ !== currentQ || lastR !== currentR) {
-        currentQ = lastQ; currentR = lastR;
+    // If all steps were through explored tiles, land on the last one
+    if (stepsUsed > 0 && currentQ === hero.pos.q && currentR === hero.pos.r) {
+      currentQ = scanQ;
+      currentR = scanR;
+      if (G.hexMap.has(scanQ, scanR)) {
         const t = G.hexMap.get(currentQ, currentR);
         destTileType = t ? t.type : 'common';
       }
