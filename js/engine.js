@@ -3904,7 +3904,7 @@ function runToHydra(hero) {
       return;
     }
 
-    // Fight existing enemy on destination tile
+    // Resolve destination: existing enemy first, then room type
     const enemyOnTile = G.enemiesOnBoard.find(e => e.pos && e.pos.q === currentQ && e.pos.r === currentR);
     if (enemyOnTile) {
       log(`  ⚔ ${hero.name} encounters ${enemyOnTile.name} on the way to the Hydra!`, 'combat');
@@ -3913,6 +3913,14 @@ function runToHydra(hero) {
       const enemyCard = enemyOnTile.card ? {...enemyOnTile.card} : {name: enemyOnTile.name, str: enemyOnTile.str || 0};
       const tier = enemyOnTile.tier || ((enemyCard.str || 0) >= 4 ? 'misfortune' : 'mishap');
       combat(hero, enemyCard, tier);
+      if (G.gameOver) return;
+    }
+
+    // Room resolution: draw cards based on room type (same as normal movement)
+    const destTile = G.hexMap.get(currentQ, currentR);
+    if (destTile && destTile.type && destTile.type !== 'entrance' && destTile.type !== 'exit') {
+      resolveRoom(hero, destTile.type);
+      if (G.gameOver) return;
     }
 
     const remaining = hexDistance(currentQ, currentR, G.exitHex.q, G.exitHex.r);
