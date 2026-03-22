@@ -1206,8 +1206,6 @@ function generateTextualAnalysis(results, wins, losses, n, winRate, heroIds, her
       t += `Heroes getting knocked out feeds the Hydra. Reducing KOs (through better equipment or skills) would slow the boss down. `;
     } else if (topGrowthSource[0] === 'hydra_area_empty') {
       t += `The Hydra grows when no heroes are present to attack it. Getting heroes to the Hydra faster would help. `;
-    } else if (topGrowthSource[0] === 'failed_attack') {
-      t += `Failed attacks cause the most growth. Boosting hero STR or reducing head STR would directly reduce this. `;
     }
   }
 

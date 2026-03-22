@@ -19,7 +19,7 @@ const TWEAK_DEFAULTS = {
     return m;
   })(),
   mishapEnemyStrMod: 0, misfortuneEnemyStrMod: 0,
-  skillsEnabled: true, followersEnabled: true, overflowGameOver: true, prepareFirst: false
+  skillsEnabled: true, followersEnabled: true, overflowGameOver: true
 };
 
 function twVal(el) {
@@ -87,7 +87,7 @@ function resetTweaks() {
   document.getElementById('tw_skills').checked = true;
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
-  document.getElementById('tw_prepareFirst').checked = false;
+
   document.getElementById('tw_gilEnabled').checked = false;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
   document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
@@ -152,7 +152,7 @@ function readTweaks() {
     skillsEnabled: document.getElementById('tw_skills').checked,
     followersEnabled: document.getElementById('tw_followers').checked,
     overflowGameOver: document.getElementById('tw_overflow').checked,
-    prepareFirst: document.getElementById('tw_prepareFirst').checked,
+
     gilEnabled: document.getElementById('tw_gilEnabled').checked,
     gilPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
     gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 3,
@@ -188,7 +188,7 @@ function getTweaksDiff(tweaks) {
   if (!tweaks.skillsEnabled) diffs.push('Skills: DISABLED (Skill Burn only)');
   if (!tweaks.followersEnabled) diffs.push('Followers: DISABLED');
   if (!tweaks.overflowGameOver) diffs.push('Hydra Overflow: NOT game over (heads just stop growing)');
-  if (tweaks.prepareFirst) diffs.push('Prepare First: Heroes wait until fully equipped (2 equip + followers) before entering Hydra');
+
   if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||3) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||6) + ' Gil)');
   return diffs;
 }
@@ -3234,7 +3234,7 @@ function spawnHydra() {
   if (G.tracker.pacing.hydraSpawn === 0) G.tracker.pacing.hydraSpawn = G.turn;
   log(`\n  🐉 THE HYDRA AWAKENS! 🐉`, 'defeat');
   const pool = shuffle([...HYDRA_HEADS]);
-  G.hydraHeads = pool.slice(0, 3).map(function(h) {
+  G.hydraHeads = pool.slice(0, 2).map(function(h) {
     var baseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[h.name] !== undefined) ? G._tweaks.hydraHeads[h.name] : h.str;
     return {...h, str: baseStr, destroyed: false, effectiveStr: baseStr};
   });
@@ -3332,7 +3332,7 @@ function hydraAttack(hero) {
   if (checkAssassin(hero, heroRoll)) {
     applyKO(hero);
     if (G.gameOver) return;
-    growHydraHead('assassin_ko');
+    growHydraHead('hero_ko');
     return;
   }
 
@@ -3355,7 +3355,7 @@ function hydraAttack(hero) {
       log(`    Doomhammer curse! Rolled ${doomRoll} — KO!`, 'ko');
       applyKO(hero);
       if (G.gameOver) return;
-      growHydraHead('doomhammer_ko');
+      growHydraHead('hero_ko');
       return;
     } else if (doomRoll <= 4) { doomhammerBonus = 1; }
     else { doomhammerBonus = 3; }
@@ -3902,24 +3902,8 @@ function nextHero() {
       G.heroes.forEach(h => {
         if (!G.heroesInHydraArea.has(h.id) && !h.runningToHydra) {
           if (G.relicsCollected >= 4) {
-            const prepare = G._tweaks && G._tweaks.prepareFirst;
-            if (prepare) {
-              // Wait until hero is equipped: 2 equipment AND (has follower OR is not Gigi)
-              const hasEnoughEquip = h.equipment.length >= 2;
-              const hasFollower = h.followers.length >= 1;
-              const isReady = hasEnoughEquip && (hasFollower || h.id !== 'gigi');
-              // But don't wait forever — go after 10 extra turns of waiting
-              const waitingTooLong = G.turn > 40;
-              if (isReady || waitingTooLong) {
-                h.runningToHydra = true;
-                log(`  ${h.name} is prepared (STR ${totalStr(h)}, ${h.equipment.length} equip, ${h.followers.length} followers) — running to the Hydra!`, 'hydra');
-              } else {
-                log(`  ${h.name} stays in dungeon to prepare (${h.equipment.length}/2 equip, ${h.followers.length} followers)`, 'system');
-              }
-            } else {
-              h.runningToHydra = true;
-              log(`  ${h.name} begins running to the Hydra!`, 'hydra');
-            }
+            h.runningToHydra = true;
+            log(`  ${h.name} begins running to the Hydra!`, 'hydra');
           }
         }
       });
