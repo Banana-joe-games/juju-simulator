@@ -35,9 +35,157 @@ function renderHeroes() {
   });
 }
 
+function renderHexMap() {
+  if (!G || !G.hexMap) return '';
+  const size = 16;
+  const sqrt3 = Math.sqrt(3);
+  const explored = G.hexMap.allExplored();
+  if (explored.length === 0) return '';
+
+  // Flat-top hex: x = size * 3/2 * q, y = size * (sqrt3/2 * q + sqrt3 * r)
+  function hexToPixel(q, r) {
+    return { x: size * 1.5 * q, y: size * (sqrt3 * 0.5 * q + sqrt3 * r) };
+  }
+
+  // Flat-top hex corner points
+  function hexPoints(cx, cy) {
+    const pts = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = Math.PI / 180 * (60 * i);
+      pts.push(`${(cx + size * Math.cos(angle)).toFixed(1)},${(cy + size * Math.sin(angle)).toFixed(1)}`);
+    }
+    return pts.join(' ');
+  }
+
+  const tileColors = {
+    entrance: '#d4a843',
+    wonder: '#1a4a2a',
+    common: '#1e1e2e',
+    dread: '#4a1520'
+  };
+  const tileBorders = {
+    entrance: '#d4a843',
+    wonder: '#2d8a4e',
+    common: '#2a2a3a',
+    dread: '#b02030'
+  };
+  const heroColors = { juju:'#cc4444', gigi:'#44aa44', lulu:'#6644cc', eggo:'#cc8833' };
+  const heroInitials = { juju:'J', gigi:'G', lulu:'L', eggo:'E' };
+
+  // Compute pixel bounds
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  const frontier = new Set();
+  explored.forEach(tile => {
+    const p = hexToPixel(tile.q, tile.r);
+    minX = Math.min(minX, p.x - size); maxX = Math.max(maxX, p.x + size);
+    minY = Math.min(minY, p.y - size); maxY = Math.max(maxY, p.y + size);
+    // Collect frontier hexes
+    hexNeighborCoords(tile.q, tile.r).forEach(n => {
+      if (!G.hexMap.has(n.q, n.r) && G.hexMap.isInBounds(n.q, n.r)) {
+        frontier.add(hexKey(n.q, n.r) + '|' + n.q + '|' + n.r);
+      }
+    });
+  });
+
+  // Add frontier to bounds
+  frontier.forEach(f => {
+    const [, q, r] = f.split('|');
+    const p = hexToPixel(parseInt(q), parseInt(r));
+    minX = Math.min(minX, p.x - size); maxX = Math.max(maxX, p.x + size);
+    minY = Math.min(minY, p.y - size); maxY = Math.max(maxY, p.y + size);
+  });
+
+  const pad = 4;
+  const vw = maxX - minX + pad * 2;
+  const vh = maxY - minY + pad * 2;
+  const ox = -minX + pad;
+  const oy = -minY + pad;
+
+  let svg = `<svg viewBox="0 0 ${vw.toFixed(0)} ${vh.toFixed(0)}" style="width:100%;height:auto;display:block;margin-bottom:8px" xmlns="http://www.w3.org/2000/svg">`;
+  svg += `<rect width="100%" height="100%" fill="#08080e" rx="4"/>`;
+
+  // Draw frontier hexes (unexplored neighbors)
+  frontier.forEach(f => {
+    const [, qs, rs] = f.split('|');
+    const q = parseInt(qs), r = parseInt(rs);
+    const p = hexToPixel(q, r);
+    svg += `<polygon points="${hexPoints(p.x + ox, p.y + oy)}" fill="none" stroke="#1a1a2a" stroke-width="0.5" stroke-dasharray="2,2"/>`;
+  });
+
+  // Draw explored tiles
+  explored.forEach(tile => {
+    const p = hexToPixel(tile.q, tile.r);
+    const cx = p.x + ox, cy = p.y + oy;
+    const fill = tileColors[tile.type] || tileColors.common;
+    const stroke = tileBorders[tile.type] || tileBorders.common;
+    svg += `<polygon points="${hexPoints(cx, cy)}" fill="${fill}" stroke="${stroke}" stroke-width="1"/>`;
+
+    // Tile type initial
+    if (tile.type !== 'entrance') {
+      const label = tile.type === 'wonder' ? 'W' : tile.type === 'dread' ? 'D' : '';
+      if (label) {
+        svg += `<text x="${cx}" y="${cy + 3}" text-anchor="middle" fill="${stroke}" font-size="7" font-family="monospace" opacity="0.5">${label}</text>`;
+      }
+    } else {
+      svg += `<text x="${cx}" y="${cy + 3}" text-anchor="middle" fill="${tileColors.entrance}" font-size="7" font-family="monospace" font-weight="bold">E</text>`;
+    }
+
+    // Enemies on tile
+    if (tile.enemies && tile.enemies.length > 0) {
+      svg += `<circle cx="${cx + size * 0.5}" cy="${cy - size * 0.4}" r="2.5" fill="#b02030" opacity="0.8"/>`;
+    }
+  });
+
+  // Draw exit hex highlight
+  if (G.exitHex) {
+    const ep = hexToPixel(G.exitHex.q, G.exitHex.r);
+    svg += `<polygon points="${hexPoints(ep.x + ox, ep.y + oy)}" fill="none" stroke="#7b2d8e" stroke-width="2" stroke-dasharray="3,2"/>`;
+    svg += `<text x="${ep.x + ox}" y="${ep.y + oy + 3}" text-anchor="middle" fill="#7b2d8e" font-size="8" font-family="monospace" font-weight="bold">⚔</text>`;
+  }
+
+  // Draw hero positions
+  const heroPositions = {};
+  G.heroes.forEach(h => {
+    if (h.pos !== 'hydra') {
+      const key = hexKey(h.pos.q, h.pos.r);
+      if (!heroPositions[key]) heroPositions[key] = [];
+      heroPositions[key].push(h);
+    }
+  });
+
+  Object.entries(heroPositions).forEach(([key, heroes]) => {
+    const [q, r] = key.split(',').map(Number);
+    const p = hexToPixel(q, r);
+    const cx = p.x + ox, cy = p.y + oy;
+
+    heroes.forEach((h, i) => {
+      // Offset multiple heroes on same hex
+      const angle = heroes.length === 1 ? 0 : (Math.PI * 2 * i / heroes.length) - Math.PI / 2;
+      const spread = heroes.length === 1 ? 0 : size * 0.35;
+      const hx = cx + Math.cos(angle) * spread;
+      const hy = cy + Math.sin(angle) * spread;
+      const color = heroColors[h.id];
+      const isActive = G.heroes.indexOf(h) === G.currentHero && !G.gameOver;
+
+      // Active hero ring
+      if (isActive) {
+        svg += `<circle cx="${hx}" cy="${hy}" r="6" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.6">`;
+        svg += `<animate attributeName="r" values="5;7;5" dur="1.5s" repeatCount="indefinite"/></circle>`;
+      }
+
+      svg += `<circle cx="${hx}" cy="${hy}" r="4.5" fill="${color}" stroke="#000" stroke-width="0.5"/>`;
+      svg += `<text x="${hx}" y="${hy + 2.5}" text-anchor="middle" fill="#fff" font-size="5.5" font-family="monospace" font-weight="bold">${heroInitials[h.id]}</text>`;
+    });
+  });
+
+  svg += `</svg>`;
+  return svg;
+}
+
 function renderInfo() {
   const panel = document.getElementById('infoPanel');
-  let html = `<div class="section-title">Game State</div>`;
+  let html = renderHexMap();
+  html += `<div class="section-title">Game State</div>`;
   html += `
     <div class="info-row"><span class="label">Turn</span><span class="value">${G.turn}</span></div>
     <div class="info-row"><span class="label">Round</span><span class="value">${G.round}</span></div>
