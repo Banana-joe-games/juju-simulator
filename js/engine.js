@@ -416,7 +416,7 @@ function initState() {
     roomsVisited: { wonder: 0, common: 0, dread: 0 }
   };
   G = state;
-  G.hexMap = createHexMap(4); // confined map: 37 tiles, max ~4 hexes from center
+  G.hexMap = createHexMap(3); // confined map: 37 tiles (1+6+12+18), max 3 hexes from center
   G.hexMap.set(0, 0, { q:0, r:0, type:'entrance', roomId:'entrance', tileIndex:0, enemies:[], equipment:[] });
   G.exitHex = null;
   return state;
