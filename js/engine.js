@@ -3825,80 +3825,124 @@ function runToHydra(hero) {
   }
 
   if (G.exitHex && G.hexMap) {
-    let currentQ = hero.pos.q;
-    let currentR = hero.pos.r;
+    const startQ = hero.pos.q, startR = hero.pos.r;
+    const straightDist = hexDistance(startQ, startR, G.exitHex.q, G.exitHex.r);
+
+    // Calculate BFS distance through revealed tiles (safe path)
+    const revealedPath = G.hexMap.findPath(startQ, startR, G.exitHex.q, G.exitHex.r);
+    const revealedDist = revealedPath ? revealedPath.length - 1 : Infinity;
+
+    // Decision: revealed path or cut through unexplored?
+    // Prefer revealed path. Cut through only if:
+    //   roll >= straightDist (can reach Hydra this turn via shortcut)
+    //   AND roll < revealedDist (can't reach via safe path this turn)
+    const useShortcut = (moveVal >= straightDist && moveVal < revealedDist);
+
+    if (useShortcut) {
+      log(`  💭 ${hero.name} cuts through unexplored territory! (${straightDist} hex shortcut vs ${revealedDist === Infinity ? '∞' : revealedDist} revealed)`, 'system');
+    }
+
+    let currentQ = startQ, currentR = startR;
     let stepsRemaining = moveVal;
 
-    while (stepsRemaining > 0) {
-      // Find the neighbor hex closest to the Exit
-      let bestNeighbor = null;
-      let bestDist = Infinity;
-
-      HEX_DIRS.forEach(d => {
-        const nq = currentQ + d.q;
-        const nr = currentR + d.r;
-        if (!G.hexMap.isInBounds(nq, nr)) return;
-        const dist = hexDistance(nq, nr, G.exitHex.q, G.exitHex.r);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestNeighbor = { q: nq, r: nr };
-        }
-      });
-
-      if (!bestNeighbor) break; // stuck at edge
-
-      // Check if this is the Exit hex
-      if (bestNeighbor.q === G.exitHex.q && bestNeighbor.r === G.exitHex.r) {
-        hero.pos = { q: bestNeighbor.q, r: bestNeighbor.r };
-        arriveAtHydra();
-        return;
-      }
-
-      // If unexplored: place a new tile
-      if (!G.hexMap.has(bestNeighbor.q, bestNeighbor.r)) {
-        if (G.tileDeck.length > 0) {
-          const tileType = G.tileDeck.pop();
-          G.tilesPlaced++;
-          G.hexMap.set(bestNeighbor.q, bestNeighbor.r, {
-            q: bestNeighbor.q, r: bestNeighbor.r,
-            type: tileType,
-            roomId: 'room_' + G.tilesPlaced,
-            tileIndex: G.tilesPlaced,
-            enemies: [], equipment: []
-          });
-          // Dread Dungeon stops movement
-          if (tileType === 'dread') {
-            currentQ = bestNeighbor.q;
-            currentR = bestNeighbor.r;
-            hero.pos = { q: currentQ, r: currentR };
-            log(`  ⚠ Dread Dungeon! ${hero.name} stops here.`, 'misfortune');
-            stepsRemaining = 0;
-            break;
-          }
-        } else {
-          break; // no tiles left
-        }
-      } else {
-        // Explored tile - check for DD
-        const existing = G.hexMap.get(bestNeighbor.q, bestNeighbor.r);
-        if (existing.type === 'dread') {
-          currentQ = bestNeighbor.q;
-          currentR = bestNeighbor.r;
+    if (!useShortcut && revealedPath && revealedDist <= moveVal) {
+      // SAFE PATH: follow revealed tiles, enough to reach Hydra this turn
+      for (let i = 1; i < revealedPath.length && i <= moveVal; i++) {
+        const step = revealedPath[i];
+        // Check for DD on the path
+        const tile = G.hexMap.get(step.q, step.r);
+        if (tile && tile.type === 'dread' && !(step.q === G.exitHex.q && step.r === G.exitHex.r)) {
+          currentQ = step.q; currentR = step.r;
           hero.pos = { q: currentQ, r: currentR };
           log(`  ⚠ Dread Dungeon blocks the path! ${hero.name} stops.`, 'misfortune');
           stepsRemaining = 0;
           break;
         }
+        currentQ = step.q; currentR = step.r;
+        stepsRemaining--;
+        // Reached exit?
+        if (currentQ === G.exitHex.q && currentR === G.exitHex.r) {
+          hero.pos = { q: currentQ, r: currentR };
+          arriveAtHydra();
+          return;
+        }
       }
+      hero.pos = { q: currentQ, r: currentR };
 
-      currentQ = bestNeighbor.q;
-      currentR = bestNeighbor.r;
-      stepsRemaining--;
+    } else if (!useShortcut && revealedPath && revealedDist !== Infinity) {
+      // SAFE PATH: partial progress (can't reach this turn, take safe steps)
+      const stepsToTake = Math.min(moveVal, revealedPath.length - 1);
+      for (let i = 1; i <= stepsToTake; i++) {
+        const step = revealedPath[i];
+        const tile = G.hexMap.get(step.q, step.r);
+        if (tile && tile.type === 'dread' && !(step.q === G.exitHex.q && step.r === G.exitHex.r)) {
+          currentQ = step.q; currentR = step.r;
+          hero.pos = { q: currentQ, r: currentR };
+          log(`  ⚠ Dread Dungeon blocks the path! ${hero.name} stops.`, 'misfortune');
+          stepsRemaining = 0;
+          break;
+        }
+        currentQ = step.q; currentR = step.r;
+        stepsRemaining--;
+      }
+      hero.pos = { q: currentQ, r: currentR };
+
+    } else {
+      // SHORTCUT: cut through unexplored territory toward Exit
+      while (stepsRemaining > 0) {
+        // Pick neighbor closest to Exit
+        let bestNeighbor = null;
+        let bestDist = Infinity;
+        HEX_DIRS.forEach(d => {
+          const nq = currentQ + d.q, nr = currentR + d.r;
+          if (!G.hexMap.isInBounds(nq, nr)) return;
+          const dist = hexDistance(nq, nr, G.exitHex.q, G.exitHex.r);
+          if (dist < bestDist) { bestDist = dist; bestNeighbor = { q: nq, r: nr }; }
+        });
+        if (!bestNeighbor) break;
+
+        // Reached Exit hex?
+        if (bestNeighbor.q === G.exitHex.q && bestNeighbor.r === G.exitHex.r) {
+          hero.pos = { q: bestNeighbor.q, r: bestNeighbor.r };
+          arriveAtHydra();
+          return;
+        }
+
+        // Unexplored: place new tile
+        if (!G.hexMap.has(bestNeighbor.q, bestNeighbor.r)) {
+          if (G.tileDeck.length > 0) {
+            const tileType = G.tileDeck.pop();
+            G.tilesPlaced++;
+            G.hexMap.set(bestNeighbor.q, bestNeighbor.r, {
+              q: bestNeighbor.q, r: bestNeighbor.r, type: tileType,
+              roomId: 'room_' + G.tilesPlaced, tileIndex: G.tilesPlaced,
+              enemies: [], equipment: []
+            });
+            if (tileType === 'dread') {
+              currentQ = bestNeighbor.q; currentR = bestNeighbor.r;
+              hero.pos = { q: currentQ, r: currentR };
+              log(`  ⚠ Dread Dungeon! ${hero.name} stops here.`, 'misfortune');
+              stepsRemaining = 0;
+              break;
+            }
+          } else { break; }
+        } else {
+          const existing = G.hexMap.get(bestNeighbor.q, bestNeighbor.r);
+          if (existing.type === 'dread') {
+            currentQ = bestNeighbor.q; currentR = bestNeighbor.r;
+            hero.pos = { q: currentQ, r: currentR };
+            log(`  ⚠ Dread Dungeon blocks the path! ${hero.name} stops.`, 'misfortune');
+            stepsRemaining = 0;
+            break;
+          }
+        }
+        currentQ = bestNeighbor.q; currentR = bestNeighbor.r;
+        stepsRemaining--;
+      }
+      hero.pos = { q: currentQ, r: currentR };
     }
 
-    hero.pos = { q: currentQ, r: currentR };
-
-    // Check if reached exit after all steps
+    // Check if reached exit
     if (currentQ === G.exitHex.q && currentR === G.exitHex.r) {
       arriveAtHydra();
       return;
@@ -3916,7 +3960,7 @@ function runToHydra(hero) {
       if (G.gameOver) return;
     }
 
-    // Room resolution: draw cards based on room type (same as normal movement)
+    // Room resolution
     const destTile = G.hexMap.get(currentQ, currentR);
     if (destTile && destTile.type && destTile.type !== 'entrance' && destTile.type !== 'exit') {
       resolveRoom(hero, destTile.type);
