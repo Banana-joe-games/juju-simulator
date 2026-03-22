@@ -29,7 +29,7 @@ const HEROES = [
     skills:[
       {name:'Cheap Shot',kind:'Utility',effect:'Roll an additional die. Keep the result you prefer.'},
       {name:'Copycat',kind:'Utility',effect:'Use any other Ready Skill in play. That Skill stays Ready. Exhaust Copycat.'},
-      {name:'Heist',kind:'Combat',effect:'Fight with -1 STR. If you win, draw 1 Legendary Equipment.'},
+      {name:'Daredevil',kind:'Combat',effect:'Roll 2 Fate Dice. Both Flame = auto-win. Otherwise keep worst, resolve normally.'},
       {name:'Shadowstep',kind:'Utility',effect:'End turn immediately. Begin a new turn from scratch.'}
     ]}
 ];

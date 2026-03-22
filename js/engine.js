@@ -180,8 +180,7 @@ function getTweaksDiff(tweaks) {
       diffs.push(h.name + ' STR: ' + h.str + ' \u2192 ' + tweakedStr);
     }
   });
-  if (tweaks.wonderPct !== 30) diffs.push('Wonder room %: 30 → ' + tweaks.wonderPct);
-  if (tweaks.dreadPct !== 25) diffs.push('Dread room %: 25 → ' + tweaks.dreadPct);
+  // Tile distribution is now fixed 12/12/12 — wonderPct/dreadPct tweaks removed
   if (tweaks.mishapEnemyStrMod !== 0) diffs.push('Mishap enemy STR: ' + (tweaks.mishapEnemyStrMod > 0 ? '+' : '') + tweaks.mishapEnemyStrMod);
   if (tweaks.misfortuneEnemyStrMod !== 0) diffs.push('Misfortune enemy STR: ' + (tweaks.misfortuneEnemyStrMod > 0 ? '+' : '') + tweaks.misfortuneEnemyStrMod);
   if (!tweaks.skillsEnabled) diffs.push('Skills: DISABLED (Skill Burn only)');
@@ -354,13 +353,10 @@ function trackHydraHead(name, field) {
 
 function initState() {
   const tw = (typeof currentTweaks !== 'undefined' && currentTweaks) || {};
-  const wonderPct = (tw.wonderPct || 30) / 100;
-  const dreadPct = (tw.dreadPct || 25) / 100;
   const tileDeck = [];
-  for (let i = 0; i < 36; i++) {
-    const r = Math.random();
-    tileDeck.push(r < wonderPct ? 'wonder' : r < wonderPct + (1 - wonderPct - dreadPct) ? 'common' : 'dread');
-  }
+  for (let i = 0; i < 12; i++) tileDeck.push('wonder');
+  for (let i = 0; i < 12; i++) tileDeck.push('common');
+  for (let i = 0; i < 12; i++) tileDeck.push('dread');
   shuffle(tileDeck);
   const state = {
     phase: 'idle',
@@ -413,7 +409,8 @@ function initState() {
     waitingForChoice: null,
     stats: { turns:0, combats:0, ko:0, monstersKilled:0, skillBurns:0, relicsSpent:0 },
     tracker: freshTracker(),
-    roomsVisited: { wonder: 0, common: 0, dread: 0 }
+    roomsVisited: { wonder: 0, common: 0, dread: 0 },
+    crownUsedThisRound: false
   };
   G = state;
   G.hexMap = createHexMap(3); // confined map: 37 tiles (1+6+12+18), max 3 hexes from center
@@ -503,7 +500,7 @@ function totalStr(hero, opts = {}) {
     s += Math.min(readySkillCount(hero), 2);
   }
   hero.heldRelics.forEach(r => {
-    s += (r.owner === hero.id) ? 2 : 1;
+    s += 1;
   });
   return s;
 }
@@ -516,8 +513,15 @@ function heroColor(hero) {
   return hero.color || 'var(--text)';
 }
 
+function heroHasRelicFromOwner(hero, ownerTag) {
+  return hero.heldRelics.some(r => r.owner === ownerTag);
+}
+
 function maxEquipSlots(hero) {
-  return hero.followers.find(f => f.effect === 'inventory_+1') ? 3 : 2;
+  // Shadow Cloak owner (Eggo): 3 slots instead of 2
+  let base = (hero.id === 'eggo' && heroHasRelicFromOwner(hero, 'eggo')) ? 3 : 2;
+  if (hero.followers.find(f => f.effect === 'inventory_+1')) base = Math.max(base, 3);
+  return base;
 }
 
 // ========== EQUIP / EXHAUST HELPERS ==========
@@ -628,6 +632,11 @@ function gilSpendAtEntrance(hero) {
 }
 
 function removeFollowers(hero) {
+  // Forest Amulet base passive: followers cannot be discarded by any effect
+  if (heroHasRelicFromOwner(hero, 'gigi')) {
+    log(`    🌿 Forest Amulet: ${hero.name}'s followers are protected!`, 'legendary');
+    return;
+  }
   // Track lost followers
   hero.followers.forEach(f => {
     if (f.effect !== 'reroll_flame') trackFollower(f.name, 'lost');
@@ -635,6 +644,23 @@ function removeFollowers(hero) {
   // Keep Faithful Dog (can't be removed)
   const dog = hero.followers.find(f => f.effect === 'reroll_flame');
   hero.followers = dog ? [dog] : [];
+}
+
+// Forest Amulet owner (Gigi): when gaining a follower, draw another Wonder card; if it's a follower keep it too
+function forestAmuletBonusDraw(hero) {
+  if (hero.id !== 'gigi' || !heroHasRelicFromOwner(hero, 'gigi')) return;
+  if (G.wonderDeck.length === 0) return;
+  const idx = G.wonderDeck.pop();
+  const card = WONDER_CARDS[idx];
+  if (card && card.type === 'follower') {
+    hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
+    trackFollower(card.name, 'drawn');
+    log(`    🌿 Forest Amulet: bonus draw — ${card.name} joins too!`, 'legendary');
+  } else {
+    G.wonderDeck.push(idx);
+    shuffle(G.wonderDeck);
+    log(`    🌿 Forest Amulet: bonus draw — not a follower, returned to deck.`, 'system');
+  }
 }
 
 // ========== AI HELPERS ==========
@@ -662,6 +688,12 @@ function runTurn() {
   hero.ko = false;
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
+
+  // Ancestral Grimoire base passive: if ALL skills exhausted at turn start, recharge 1
+  if (heroHasRelicFromOwner(hero, 'lulu') && readySkillCount(hero) === 0 && hero.skillStates.length > 0) {
+    rechargeOneSkill(hero, 'grimoire_failsafe');
+    log(`  📖 Ancestral Grimoire: ${hero.name} starts with 0 ready skills — recharges 1!`, 'legendary');
+  }
 
   // Gil: spend at entrance if at entrance
   gilSpendAtEntrance(hero);
@@ -737,6 +769,7 @@ function runTurn() {
       hero.followers.push({name: foundFollower.name, str: foundFollower.str || 0, effect: foundFollower.effect});
       trackFollower(foundFollower.name, 'drawn');
       log(`  🐦 Wild Call: ${hero.name} found ${foundFollower.name}!`, 'wonder');
+      forestAmuletBonusDraw(hero);
     } else {
       log(`  🐦 Wild Call: no followers left in Wonder deck`, 'system');
     }
@@ -758,17 +791,27 @@ function runTurn() {
   } else {
     movePhase(hero);
 
-    // === TAUNT (Juju): fight a random enemy in dungeon ===
+    // === TAUNT (Juju): fight a board enemy (or skip if none) ===
     if (hero.id === 'juju' && !hero.ko && !G.gameOver && !G.hydraActive && shouldUseSkill(hero, 'Taunt', { atHydra: false })) {
-      if (G.mishapDeck.length > 0) {
-        const enemies = MISHAP_CARDS.filter(c => c.type === 'enemy');
-        if (enemies.length > 0) {
-          const enemy = enemies[Math.floor(Math.random() * enemies.length)];
-          useSkill(hero, 'Taunt');
-          trackSkill(hero.id, 'Taunt', 'activated');
-          log(`  🗡 Taunt: ${hero.name} challenges ${enemy.name}!`, 'flame');
-          combat(hero, {...enemy}, 'mishap');
-        }
+      if (G.enemiesOnBoard && G.enemiesOnBoard.length > 0) {
+        // Target weakest board enemy (closest if tied)
+        const boardEnemies = [...G.enemiesOnBoard].sort((a, b) => {
+          const strA = (a.card && a.card.str) || 0;
+          const strB = (b.card && b.card.str) || 0;
+          if (strA !== strB) return strA - strB;
+          const distA = a.pos ? hexDistance(hero.pos.q, hero.pos.r, a.pos.q, a.pos.r) : 999;
+          const distB = b.pos ? hexDistance(hero.pos.q, hero.pos.r, b.pos.q, b.pos.r) : 999;
+          return distA - distB;
+        });
+        const target = boardEnemies[0];
+        const targetIdx = G.enemiesOnBoard.indexOf(target);
+        G.enemiesOnBoard.splice(targetIdx, 1);
+        useSkill(hero, 'Taunt');
+        trackSkill(hero.id, 'Taunt', 'activated');
+        log(`  🗡 Taunt: ${hero.name} challenges ${target.name} from the board!`, 'flame');
+        combat(hero, {...target.card}, 'mishap');
+      } else {
+        log(`  🗡 Taunt: no enemies on the board to challenge.`, 'system');
       }
     }
 
@@ -1264,6 +1307,7 @@ function resolveWonderCard(hero, card) {
       hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
       trackFollower(card.name, 'drawn');
       log(`    ${card.name} joins ${hero.name} as a follower!`, 'wonder');
+      forestAmuletBonusDraw(hero);
       break;
   }
 }
@@ -1278,6 +1322,7 @@ function resolveMishapCard(hero, card) {
       hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
       trackFollower(card.name, 'drawn');
       log(`    ${card.name} joins ${hero.name}!`, 'mishap');
+      forestAmuletBonusDraw(hero);
       break;
     case 'stalker':
       hero.stalkers.push({name: card.name, effect: card.effect});
@@ -1703,13 +1748,31 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
-  // === SKILL: Heist (Eggo) — -1 STR but win = draw legendary ===
-  let heistActive = false;
-  if (hero.id === 'eggo' && shouldUseSkill(hero, 'Heist', skillCtx)) {
-    useSkill(hero, 'Heist');
-    heistActive = true;
-    trackSkill(hero.id, 'Heist', 'activated');
-    log(`    🗡 Heist! Fighting at -1 STR for a chance at Legendary Equipment`, 'flame');
+  // === SKILL: Daredevil (Eggo) — roll 2 dice, both Flame = auto-win, else keep worst ===
+  let daredevilActive = false;
+  let daredevilAutoWin = false;
+  let daredevilWorstRoll = null;
+  if (hero.id === 'eggo' && shouldUseSkill(hero, 'Daredevil', skillCtx)) {
+    useSkill(hero, 'Daredevil');
+    daredevilActive = true;
+    trackSkill(hero.id, 'Daredevil', 'activated');
+    const dd1 = heroRollDie(hero);
+    const dd2 = heroRollDie(hero);
+    const bothFlame = dd1.isFlame && dd2.isFlame;
+    if (bothFlame) {
+      daredevilAutoWin = true;
+      log(`    🎲 Daredevil! Rolled ${dd1.val} 🔥 and ${dd2.val} 🔥 — BOTH FLAME! Auto-win!`, 'flame');
+    } else {
+      // Keep the worst roll
+      daredevilWorstRoll = dd1.val <= dd2.val ? dd1 : dd2;
+      // If at least one die is Flame, Eggo's Dodge still triggers
+      if ((dd1.isFlame || dd2.isFlame) && !hasStalker(hero, 'no_flame_effect')) {
+        hero.dodgeActive = true;
+        log(`    🎲 Daredevil: ${dd1.val}${dd1.isFlame ? ' 🔥' : ''} and ${dd2.val}${dd2.isFlame ? ' 🔥' : ''} — keeping worst (${daredevilWorstRoll.val}). Dodge triggered!`, 'flame');
+      } else {
+        log(`    🎲 Daredevil: ${dd1.val}${dd1.isFlame ? ' 🔥' : ''} and ${dd2.val}${dd2.isFlame ? ' 🔥' : ''} — keeping worst (${daredevilWorstRoll.val})`, 'flame');
+      }
+    }
   }
 
   // === SKILL: Battlecry (Juju) — roll 2 keep worst, win = all heroes recharge 2 ===
@@ -1770,7 +1833,7 @@ function combat(hero, enemyCard, tier) {
     if (fightRound > 0) log(`    Slayer: Round ${fightRound + 1}!`, 'combat');
 
     const result = singleFight(hero, enemyCard, tier, enemyStr,
-      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored, secondNatureBonus });
+      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, daredevilActive, daredevilAutoWin, daredevilWorstRoll, rallyingBlowActive, spellMirrored, secondNatureBonus });
 
     if (result === 'win') {
       totalWins++;
@@ -1802,6 +1865,7 @@ function combat(hero, enemyCard, tier) {
     hero.followers.push({name:'Golem', str:3, effect:'none'});
     trackFollower('Golem', 'drawn');
     log(`    The Golem becomes a follower! (+3 STR)`, 'wonder');
+    forestAmuletBonusDraw(hero);
   }
 
   // Stone Golem: on defeat, adjacent tiles become Dread Dungeons
@@ -1828,11 +1892,7 @@ function combat(hero, enemyCard, tier) {
     drawLegendaryItem(hero);
   }
 
-  // Heist (Eggo): draw legendary on win
-  if (heistActive) {
-    drawLegendaryItem(hero);
-    log(`    🗡 Heist pays off! Drew Legendary Equipment!`, 'flame');
-  }
+  // Daredevil has no on-win draw effect (auto-win is handled in singleFight)
 
   // Battlecry (Juju): all heroes recharge 2 skills on win
   if (rallyingBlowActive) {
@@ -1890,7 +1950,7 @@ function combat(hero, enemyCard, tier) {
 }
 
 function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
-  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, heistActive, rallyingBlowActive, spellMirrored, secondNatureBonus } = bonuses;
+  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, daredevilActive, daredevilAutoWin, daredevilWorstRoll, rallyingBlowActive, spellMirrored, secondNatureBonus } = bonuses;
 
   // === ENEMY ROLL ===
   let enemyTotal;
@@ -2028,7 +2088,17 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     return 'win';
   }
 
-  // Skills (Siphon, Pack Leader, Heist, Cheap Shot, Battlecry, Second Nature) are activated pre-fight.
+  // Daredevil auto-win: both dice were Flame
+  if (daredevilAutoWin) {
+    return 'win';
+  }
+
+  // If Daredevil active but not auto-win, override heroRoll with worst die
+  if (daredevilActive && daredevilWorstRoll) {
+    heroRoll = daredevilWorstRoll;
+  }
+
+  // Skills (Siphon, Pack Leader, Daredevil, Cheap Shot, Battlecry, Second Nature) are activated pre-fight.
   // Skill Burn (reroll) remains as the last-resort skill use.
 
   // Siphon Blade
@@ -2058,16 +2128,19 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   if (useBaseOnly) log(`    Squelette: ${hero.name} fights with base STR only!`, 'combat');
 
   const heroStrValue = useBaseOnly ? hero.str : totalStr(hero);
-  const heistPenalty = heistActive ? -1 : 0;
   let heroTotal = heroRoll.val + heroStrValue + combatBonus + doomhammerBonus + firebaneBonus
     + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
-    + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty + (secondNatureBonus || 0);
+    + (packLeaderBonus || 0) + (fireballBonus || 0) + (secondNatureBonus || 0);
 
-  log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus + (packLeaderBonus || 0) ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty + heistPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
+  log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus + (packLeaderBonus || 0) ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
 
-  // === FAITHFUL DOG: reroll hero die once if losing ===
+  // === FAITHFUL DOG: optionally reroll when hero rolls Flame (sacrifices Flame trigger for a potentially higher number) ===
+  // Inverse of Skill Burn. One reroll per die from any source (Dog OR Skill Burn, not both).
+  // AI decision: almost NEVER reroll — talents are too valuable.
+  // Only reroll if: hero talent already used this turn AND roll value is 1-2 AND would lose combat.
   const faithfulDog = hero.followers.find(f => f.effect === 'reroll_flame');
-  if (faithfulDog && heroTotal < enemyTotal + beatMargin) {
+  let dogUsed = false;
+  if (faithfulDog && isFlame && hero.talentUsedThisTurn && heroRoll.val <= 2 && heroTotal < enemyTotal + beatMargin) {
     const dogReroll = heroRollDie(hero);
     let dogRerollVal = dogReroll.val;
     let dogRerollFlame = dogReroll.isFlame;
@@ -2076,17 +2149,25 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     if (enemyCard.effect === 'only_flame_hits' && !dogRerollFlame) { dogRerollVal = 0; }
     if (enemyCard.effect === 'only_even_hits' && dogRerollVal % 2 !== 0) { dogRerollVal = 0; }
     if (enemyCard.effect === 'only_3plus_hits' && dogRerollVal > 0 && dogRerollVal < 3) { dogRerollVal = 0; }
-    const dogNewBonus = (hero.id === 'juju' && dogRerollFlame && !hero.talentUsedThisTurn) ? 2 : (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0);
-    const dogNewTotal = dogRerollVal + heroStrValue + (combatBonus - (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0)) + dogNewBonus
+    // Recalculate without the talent bonus since we're giving up Flame
+    const dogNewBonus = (hero.id === 'juju' && dogRerollFlame && !hero.talentUsedThisTurn) ? 2 : 0;
+    const lostTalentBonus = (hero.id === 'juju') ? 2 : 0; // Juju loses +2 from Unwavering Power
+    const dogNewTotal = dogRerollVal + heroStrValue + (combatBonus - lostTalentBonus) + dogNewBonus
       + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
-      + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty + (secondNatureBonus || 0);
+      + (packLeaderBonus || 0) + (fireballBonus || 0) + (secondNatureBonus || 0);
     if (dogNewTotal > heroTotal) {
       heroRoll = { val: dogRerollVal, isFlame: dogRerollFlame };
       G._lastHeroRollVal = dogRerollVal;
       isFlame = dogRerollFlame || hero.giftedFlame;
       heroTotal = dogNewTotal;
-      if (hero.id === 'eggo' && dogRerollFlame && !hasStalker(hero, 'no_flame_effect')) hero.dodgeActive = true;
-      log(`    🐕 Faithful Dog reroll! ${dogRerollVal}${dogRerollFlame ? ' 🔥' : ''} = ${heroTotal}`, 'wonder');
+      dogUsed = true;
+      // If new roll is NOT Flame, lose Dodge (Eggo) and talent effects
+      if (!dogRerollFlame) {
+        if (hero.id === 'eggo') hero.dodgeActive = false;
+      } else {
+        if (hero.id === 'eggo' && !hasStalker(hero, 'no_flame_effect')) hero.dodgeActive = true;
+      }
+      log(`    🐕 Faithful Dog: sacrificed Flame for reroll! ${dogRerollVal}${dogRerollFlame ? ' 🔥' : ''} = ${heroTotal}`, 'wonder');
     }
   }
 
@@ -2094,7 +2175,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   // Strategic: in prehydra phase, only Skill Burn if the fight is worth it
   const burnPhase = getGamePhase();
   const burnWorthIt = burnPhase !== 'prehydra' || enemyStr >= 4 || koLoadoutValue(hero) >= 4;
-  if (heroTotal < enemyTotal + beatMargin && readySkillCount(hero) > 0 && burnWorthIt) {
+  if (heroTotal < enemyTotal + beatMargin && readySkillCount(hero) > 0 && burnWorthIt && !dogUsed) {
     // Option A: Reroll hero die
     const rerollHero = heroRollDie(hero);
     let rerollHeroVal = rerollHero.val;
@@ -2106,7 +2187,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     const newBonusA = (hero.id === 'juju' && rerollHeroFlame && !hero.talentUsedThisTurn) ? 2 : (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0);
     const totalA = rerollHeroVal + heroStrValue + (combatBonus - (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0)) + newBonusA
       + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
-      + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty;
+      + (packLeaderBonus || 0) + (fireballBonus || 0);
 
     // Option B: Reroll enemy die (keep hero roll, enemy gets new roll)
     const rerollEnemy = rollDie(hero);
@@ -2235,6 +2316,30 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 
 function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
   if (enemyStr === undefined) enemyStr = enemyCard.str || 0;
+
+  // === Crown of Courage (bodyguard): another hero with the Crown fights in hero's place ===
+  if (!G.crownUsedThisRound && !G.heroesInHydraArea.has(hero.id)) {
+    const crownHolder = G.heroes.find(h =>
+      h.id !== hero.id && !h.ko && heroHasRelicFromOwner(h, 'juju')
+    );
+    if (crownHolder) {
+      const crownStr = totalStr(crownHolder) + (crownHolder.id === 'juju' ? 2 : 0);
+      const heroStr = totalStr(hero);
+      // Intervene if Crown holder is stronger than the losing hero
+      if (crownStr > heroStr) {
+        G.crownUsedThisRound = true;
+        const strBonus = crownHolder.id === 'juju' ? ' (+2 Crown owner bonus)' : '';
+        log(`    👑 Crown of Courage: ${crownHolder.name} fights in place of ${hero.name}!${strBonus}`, 'legendary');
+        // Crown holder fights the enemy directly
+        const savedPos = crownHolder.pos;
+        crownHolder.pos = {...hero.pos};
+        combat(crownHolder, {...enemyCard}, tier);
+        if (!crownHolder.ko) crownHolder.pos = savedPos;
+        return;
+      }
+    }
+  }
+
   // Strategic AI: evaluate whether to spend resources preventing this KO
   const preventKO = shouldPreventKO(hero);
 
@@ -2326,7 +2431,11 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
   // Ogre: no respawn, stay on tile
   if (enemyCard.effect === 'no_respawn_on_loss') {
     G.stats.ko++;
-    hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
+    if (!heroHasRelicFromOwner(hero, 'eggo')) {
+      hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
+    } else {
+      log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+    }
     removeFollowers(hero);
     log(`    Ogre pins ${hero.name}! No respawn — stuck until rescued.`, 'ko');
     return;
@@ -2439,10 +2548,10 @@ function shouldUseSkill(hero, skillName, context) {
       // In dungeon: use on any non-trivial enemy
       return enemyStr >= 3;
 
-    case 'Heist':
-      if (atHydra) return false;
-      if (phase === 'prehydra') return false;
-      return enemyStr <= 3;
+    case 'Daredevil':
+      // Use when enemy is tough (hero unlikely to win normally) or at Hydra
+      if (atHydra) return true;
+      return enemyStr > totalStr(hero) + 2;
 
     case 'Reality Warp':
       if (phase === 'prehydra' || phase === 'hydra') return false;
@@ -2521,18 +2630,25 @@ function applyKO(hero) {
     initHeroTracker(G.tracker, hero.id).ko++;
     if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
     hero.ko = true;
-    const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
-    const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
-    const droppedEquip = droppedItems.map(e => e.name).join(', ') || 'nothing';
-    // Drop equipment on the Hydra floor — allies or returning hero can pick it up
-    droppedItems.forEach(e => G.hydraFloorEquipment.push(e));
-    hero.equipment = parasiteSword ? [parasiteSword] : [];
+    // Shadow Cloak base passive: keep equipment on KO
+    const hasShadowCloak = heroHasRelicFromOwner(hero, 'eggo');
+    if (hasShadowCloak) {
+      log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+    } else {
+      const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
+      const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
+      const droppedEquip = droppedItems.map(e => e.name).join(', ') || 'nothing';
+      // Drop equipment on the Hydra floor — allies or returning hero can pick it up
+      droppedItems.forEach(e => G.hydraFloorEquipment.push(e));
+      hero.equipment = parasiteSword ? [parasiteSword] : [];
+      log(`    Dropped: ${droppedEquip}${droppedItems.length > 0 ? ' (left on Hydra floor)' : ''}`, 'ko');
+    }
     removeFollowers(hero);
     hero._justRespawned = true;
     hero.pos = {q:0, r:0};
     hero.runningToHydra = true;
     G.heroesInHydraArea.delete(hero.id);
-    log(`    ${hero.name} KO'd at Hydra! Dropped: ${droppedEquip}${droppedItems.length > 0 ? ' (left on Hydra floor)' : ''}. Respawned. Must run back.`, 'ko');
+    log(`    ${hero.name} KO'd at Hydra! Respawned. Must run back.`, 'ko');
     return;
   }
 
@@ -2552,25 +2668,32 @@ function applyKO(hero) {
 
   G.stats.ko++;
   initHeroTracker(G.tracker, hero.id).ko++;
-  const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
-  const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
-  const droppedEquip = droppedItems.map(e => e.name).join(', ') || 'nothing';
-  if (parasiteSword) trackEquip(parasiteSword.name, 'survivedKO');
-  // Drop equipment on dungeon floor, guarded by the enemy that caused KO
-  // hero._lastEnemy is set by handleCombatLoss before calling applyKO
-  if (droppedItems.length > 0) {
-    const guardian = hero._lastKOEnemy || null;
-    G.dungeonFloorEquipment.push({ items: droppedItems, guardian: guardian ? {...guardian} : null });
+  // Shadow Cloak base passive: keep equipment on KO
+  const hasShadowCloakDungeon = heroHasRelicFromOwner(hero, 'eggo');
+  let droppedEquip = 'nothing';
+  if (hasShadowCloakDungeon) {
+    log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+  } else {
+    const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
+    const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
+    droppedEquip = droppedItems.map(e => e.name).join(', ') || 'nothing';
+    if (parasiteSword) trackEquip(parasiteSword.name, 'survivedKO');
+    // Drop equipment on dungeon floor, guarded by the enemy that caused KO
+    // hero._lastEnemy is set by handleCombatLoss before calling applyKO
+    if (droppedItems.length > 0) {
+      const guardian = hero._lastKOEnemy || null;
+      G.dungeonFloorEquipment.push({ items: droppedItems, guardian: guardian ? {...guardian} : null });
+    }
+    hero.equipment = parasiteSword ? [parasiteSword] : [];
   }
   hero._lastKOEnemy = null;
-  hero.equipment = parasiteSword ? [parasiteSword] : [];
   removeFollowers(hero);
   hero.stalkers = [];
   hero._justRespawned = true;
   hero.pos = {q:0, r:0};
   if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
   hero.ko = true;
-  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}${droppedItems.length > 0 ? (hero._lastKOEnemy ? ' (guarded by enemy)' : ' (on dungeon floor)') : ''}. Respawned at Entrance.`, 'ko');
+  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}. Respawned at Entrance.`, 'ko');
 }
 
 // ========== TALENTS ==========
@@ -2597,15 +2720,42 @@ function triggerTalent(hero, context) {
       }
       break;
     case 'gigi': {
-      const allies = G.heroes.filter(h => h.id !== hero.id);
-      const target = allies.length > 0 ? allies[Math.floor(Math.random() * allies.length)] : hero;
+      // AI priority: Eggo (Dodge/Daredevil synergy) > Juju (+2 combat) > Lulu (Arcane Recharge) > self
+      // At Hydra: gift to whoever attacks next
+      let target = hero; // default to self
+      if (G.hydraActive) {
+        // Gift to the next hero who will attack the Hydra
+        const heroOrder = G.heroes;
+        const currentIdx = heroOrder.indexOf(hero);
+        for (let i = 1; i <= heroOrder.length; i++) {
+          const candidate = heroOrder[(currentIdx + i) % heroOrder.length];
+          if (G.heroesInHydraArea.has(candidate.id) && !candidate.ko) {
+            target = candidate;
+            break;
+          }
+        }
+      } else {
+        const eggo = G.heroes.find(h => h.id === 'eggo' && !h.ko);
+        const juju = G.heroes.find(h => h.id === 'juju' && !h.ko);
+        const lulu = G.heroes.find(h => h.id === 'lulu' && !h.ko);
+        if (eggo) target = eggo;
+        else if (juju) target = juju;
+        else if (lulu) target = lulu;
+        // else target stays as self (gigi)
+      }
       target.giftedFlame = true;
       log(`    🔥 Nature's Gift! ${hero.name} gifts Flame to ${target.name}'s next turn`, 'flame');
       break;
     }
     case 'lulu':
       rechargeOneSkill(hero, 'talent_lulu');
-      log(`    🔥 Arcane Recharge! ${hero.name} recharges a skill`, 'flame');
+      // Ancestral Grimoire owner (Lulu): recharge 2 instead of 1
+      if (heroHasRelicFromOwner(hero, 'lulu')) {
+        rechargeOneSkill(hero, 'talent_lulu_grimoire');
+        log(`    🔥 Arcane Recharge! ${hero.name} recharges 2 skills (Grimoire bonus)`, 'flame');
+      } else {
+        log(`    🔥 Arcane Recharge! ${hero.name} recharges a skill`, 'flame');
+      }
       break;
     case 'eggo':
       hero.dodgeActive = true;
@@ -2648,7 +2798,20 @@ function awakenEffect(hero) {
     log(`  🚪 The EXIT has been placed!`, 'hydra');
   } else if (G.relicPool.length > 0) {
     G.relicRoomsPlaced++;
-    log(`  💎 Relic Room #${G.relicRoomsPlaced} placed!`, 'hydra');
+    // Place a Relic Room hex tile adjacent to hero's destination
+    const rhq = hero.pos.q, rhr = hero.pos.r;
+    const relicUnexplored = G.hexMap.unexploredNeighbors(rhq, rhr);
+    if (relicUnexplored.length > 0) {
+      relicUnexplored.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
+      const relicSpot = relicUnexplored[0];
+      G.hexMap.set(relicSpot.q, relicSpot.r, {
+        q: relicSpot.q, r: relicSpot.r, type: 'relic_room', roomId: 'relic_room_' + G.relicRoomsPlaced,
+        enemies: [], equipment: []
+      });
+      log(`  💎 Relic Room #${G.relicRoomsPlaced} placed at (${relicSpot.q},${relicSpot.r})!`, 'hydra');
+    } else {
+      log(`  💎 Relic Room #${G.relicRoomsPlaced} placed! (no open hex — relic given directly)`, 'hydra');
+    }
     const relic = G.relicPool.pop();
     G.relicsCollected++;
     const matchedHero = G.heroes.find(h => h.id === relic.owner);
@@ -2661,8 +2824,7 @@ function awakenEffect(hero) {
     }
     recipient.heldRelics.push(relic);
     if (G.tracker.pacing.firstRelic === 0) G.tracker.pacing.firstRelic = G.turn;
-    const bonus = relic.owner === recipient.id ? '+2' : '+1';
-    log(`    ${recipient.name} claims ${relic.name}! (${bonus} STR, ${G.relicsCollected}/4 total)`, 'hydra');
+    log(`    ${recipient.name} claims ${relic.name}! (+1 STR, ${G.relicsCollected}/4 total)`, 'hydra');
     if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
       G.exitRevealed = true;
       spawnHydra();
@@ -3096,9 +3258,7 @@ function hydraAttack(hero) {
     }
 
     if (hydraKOPrevented) {
-      // Skill saved the hero — head still grows but hero stays
-      growHydraHead('failed_attack');
-      if (G.gameOver) return;
+      // Skill saved the hero — hero stays, NO head growth on failed attack
     } else {
       log(`    ${hero.name} is KO'd at the Hydra!`, 'ko');
       trackHydraHead(head.name, 'causedKO');
@@ -3298,6 +3458,7 @@ function nextHero() {
   G.currentHero = (G.currentHero + 1) % 4;
   if (G.currentHero === 0) {
     G.round++;
+    G.crownUsedThisRound = false;
     monsterMovementPhase();
     if (G.hydraActive) {
       const anyoneAtHydra = G.heroes.some(h => G.heroesInHydraArea.has(h.id));
