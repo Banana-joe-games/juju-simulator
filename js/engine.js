@@ -2802,8 +2802,32 @@ function hydraAttack(hero) {
         log(`    The Wail's death cry! All heroes exhaust 1 Skill`, 'misfortune');
       }
       if (head.growOnDefeat) {
-        log(`    The Spite: grows 1 extra head!`, 'misfortune');
-        growHydraHead('spite_on_defeat');
+        // Spite: grow head but NEVER cause overflow, and never revive itself
+        const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
+        if (aliveCount < G.hydraMaxHeads) {
+          const usedNames = new Set(G.hydraHeads.map(h => h.name));
+          const poolAvailable = HYDRA_HEADS.filter(h => !usedNames.has(h.name));
+          if (poolAvailable.length > 0) {
+            // Add from unused pool
+            growHydraHead('spite_on_defeat');
+            log(`    The Spite: grows 1 extra head from pool!`, 'misfortune');
+          } else {
+            // Revive a destroyed head (but NOT Spite itself)
+            const revivable = G.hydraHeads.filter(h => h.destroyed && h.name !== head.name);
+            if (revivable.length > 0) {
+              const picked = revivable[Math.floor(Math.random() * revivable.length)];
+              picked.destroyed = false;
+              trackHydraHead(picked.name, 'spawned');
+              recalcHydraStr();
+              G.tracker.hydraGrowthLog.push({ head: picked.name, turn: G.turn, source: 'spite_on_defeat' });
+              log(`    The Spite: ${picked.name} regenerates!`, 'misfortune');
+            } else {
+              log(`    The Spite: no heads to grow or revive — no effect.`, 'system');
+            }
+          }
+        } else {
+          log(`    The Spite: at max heads — no growth (Spite cannot cause overflow).`, 'system');
+        }
       }
     }
     recalcHydraStr();
