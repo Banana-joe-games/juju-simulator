@@ -88,6 +88,7 @@ function resetTweaks() {
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
   document.getElementById('tw_hydraKOGrowth').checked = true;
+  document.getElementById('tw_hydraStartingHeads').value = 2; document.getElementById('tw_hydraStartingHeads_v').textContent = '2';
 
   document.getElementById('tw_gilEnabled').checked = false;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
@@ -159,7 +160,8 @@ function readTweaks() {
     gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 2,
     gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 4,
     debugMode: document.getElementById('tw_debugMode').checked,
-    hydraKOGrowth: document.getElementById('tw_hydraKOGrowth') ? document.getElementById('tw_hydraKOGrowth').checked : true
+    hydraKOGrowth: document.getElementById('tw_hydraKOGrowth') ? document.getElementById('tw_hydraKOGrowth').checked : true,
+    hydraStartingHeads: parseInt(document.getElementById('tw_hydraStartingHeads').value) || 2
   };
 }
 
@@ -193,6 +195,7 @@ function getTweaksDiff(tweaks) {
 
   if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||2) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||4) + ' Gil)');
   if (tweaks.hydraKOGrowth === false) diffs.push('Hydra KO Growth: OFF (KO at Hydra does not grow heads)');
+  if (tweaks.hydraStartingHeads && tweaks.hydraStartingHeads !== 2) diffs.push('Hydra Starting Heads: ' + tweaks.hydraStartingHeads);
   return diffs;
 }
 
@@ -3375,7 +3378,8 @@ function spawnHydra() {
   if (G.tracker.pacing.hydraSpawn === 0) G.tracker.pacing.hydraSpawn = G.turn;
   log(`\n  🐉 THE HYDRA AWAKENS! 🐉`, 'defeat');
   const pool = shuffle([...HYDRA_HEADS]);
-  G.hydraHeads = pool.slice(0, 2).map(function(h) {
+  const startingHeads = (G._tweaks && G._tweaks.hydraStartingHeads) || 2;
+  G.hydraHeads = pool.slice(0, Math.min(startingHeads, 6)).map(function(h) {
     var baseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[h.name] !== undefined) ? G._tweaks.hydraHeads[h.name] : h.str;
     return {...h, str: baseStr, destroyed: false, effectiveStr: baseStr};
   });
