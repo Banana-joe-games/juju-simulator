@@ -2864,15 +2864,22 @@ function hydraAttack(hero) {
         log(`    The Wail's death cry! All heroes exhaust 1 Skill`, 'misfortune');
       }
       if (head.growOnDefeat) {
-        // Spite: grow head but NEVER cause overflow, and never revive itself
+        // Spite: grow head but NEVER cause overflow, and never revive itself.
+        // Uses dedicated logic — does NOT call growHydraHead() to avoid overflow trigger.
         const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
         if (aliveCount < G.hydraMaxHeads) {
           const usedNames = new Set(G.hydraHeads.map(h => h.name));
           const poolAvailable = HYDRA_HEADS.filter(h => !usedNames.has(h.name));
           if (poolAvailable.length > 0) {
             // Add from unused pool
-            growHydraHead('spite_on_defeat');
-            log(`    The Spite: grows 1 extra head from pool!`, 'misfortune');
+            const picked = poolAvailable[Math.floor(Math.random() * poolAvailable.length)];
+            const headBaseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[picked.name] !== undefined) ? G._tweaks.hydraHeads[picked.name] : picked.str;
+            const newHead = {...picked, str: headBaseStr, destroyed: false};
+            G.hydraHeads.push(newHead);
+            trackHydraHead(newHead.name, 'spawned');
+            recalcHydraStr();
+            G.tracker.hydraGrowthLog.push({ head: newHead.name, turn: G.turn, source: 'spite_on_defeat' });
+            log(`    The Spite: ${newHead.name} grows from pool! (STR ${newHead.effectiveStr})`, 'misfortune');
           } else {
             // Revive a destroyed head (but NOT Spite itself)
             const revivable = G.hydraHeads.filter(h => h.destroyed && h.name !== head.name);
