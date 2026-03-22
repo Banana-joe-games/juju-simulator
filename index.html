@@ -45,6 +45,60 @@ body {
   gap: 1px;
   background: var(--border);
 }
+.app.hidden { display: none; }
+/* Home Screen */
+.home-screen {
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px 48px;
+}
+.home-screen.hidden { display: none; }
+.home-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.home-header h1 {
+  font-family: 'Cinzel', serif;
+  font-size: 22px;
+  color: var(--accent);
+  letter-spacing: 3px;
+  margin-bottom: 4px;
+}
+.home-header p {
+  color: var(--dim);
+  font-size: 11px;
+}
+.home-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding: 10px 0;
+  width: 100%;
+  max-width: 560px;
+  justify-content: center;
+}
+.home-actions .btn {
+  padding: 10px 28px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.home-tweaks {
+  width: 100%;
+  max-width: 560px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+}
 .header {
   grid-column: 1 / -1;
   background: var(--panel);
@@ -333,45 +387,18 @@ input[type=range] {
 </style>
 </head>
 <body>
-<div class="app">
-  <div class="header">
+<!-- HOME SCREEN -->
+<div class="home-screen" id="homeScreen">
+  <div class="home-header">
     <h1>⚔ JUJU'S CASTLE — SIMULATOR</h1>
-    <div class="controls">
-      <label>Mode:</label>
-      <select id="modeSelect">
-        <option value="manual">Manual</option>
-        <option value="auto" selected>Autoplay</option>
-      </select>
-      <label>Speed:</label>
-      <input type="range" id="speedSlider" min="1" max="100" value="85">
-      <button class="btn primary" id="startBtn" onclick="startGame()">New Game</button>
-      <button class="btn" id="stepBtn" onclick="stepGame()" disabled>Next Step</button>
-      <button class="btn" id="autoBtn" onclick="toggleAuto()" disabled>▶ Auto</button>
-      <button class="btn danger" id="resetBtn" onclick="resetGame()">Reset</button>
-      <span style="color:var(--border);margin:0 4px">|</span>
-      <button class="btn" id="batchBtn" onclick="runBatch()">Batch</button>
-      <button class="btn" id="reportBtn" onclick="showLastReport()" disabled>Report</button>
-    </div>
+    <p>Configure parameters, then run a single game or a 1000-game batch.</p>
   </div>
-  <div class="left-panel" id="heroPanel"></div>
-  <div class="log-panel" id="logPanel"></div>
-  <div class="right-panel" id="infoPanel"></div>
-  <div class="footer">
-    <span style="color:var(--dim);font-size:11px" id="statusBar">Ready. Press New Game.</span>
-    <button class="btn" id="downloadLogBtn" onclick="downloadGameLogMD()" style="margin-left:auto;display:none">⬇ Log (.md)</button>
-    <div class="actions" id="choiceArea"></div>
+  <div class="home-actions">
+    <button class="btn primary" onclick="homeStartSingle()">Single Run</button>
+    <button class="btn primary" onclick="homeRunBatch()">Run 1000 Batch</button>
+    <button class="btn" onclick="resetTweaks()">Reset Defaults</button>
   </div>
-</div>
-<div id="reportOverlay" class="report-overlay" style="display:none">
-  <div class="report-modal">
-    <button class="report-close" onclick="closeReport()">&times;</button>
-    <div style="margin-bottom:10px"><button class="btn primary" onclick="downloadReportMD()">⬇ Download Report (.md)</button></div>
-    <div id="reportContent"></div>
-  </div>
-</div>
-<div id="tweaksOverlay" class="tweaks-overlay" style="display:none">
-  <div class="tweaks-modal">
-    <h2>Batch Tweaks</h2>
+  <div class="home-tweaks">
     <h4>Heroes</h4>
     <div class="tweak-row"><label>Juju</label><input type="range" id="tw_juju" min="1" max="6" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_juju_v">3</span></div>
     <div class="tweak-row"><label>Gigi</label><input type="range" id="tw_gigi" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_gigi_v">2</span></div>
@@ -394,20 +421,53 @@ input[type=range] {
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_prepareFirst"><label for="tw_prepareFirst">Prepare before Hydra (wait until fully equipped)</label></div>
-    <h4>💰 Gil System (experimental)</h4>
+    <h4>Gil System (experimental)</h4>
     <div class="tweak-toggle"><input type="checkbox" id="tw_gilEnabled"><label for="tw_gilEnabled">Enable Gil (monsters drop gold, spend at entrance)</label></div>
     <div id="tw_gilSettings" style="display:none">
       <div class="tweak-row"><label>Gil per enemy STR point</label><input type="range" id="tw_gilPerStr" min="1" max="3" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_gilPerStr_v">1</span></div>
       <div class="tweak-row"><label>Cost: Recharge 1 Skill</label><input type="range" id="tw_gilRechargeSkill" min="1" max="8" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_gilRechargeSkill_v">3</span></div>
       <div class="tweak-row"><label>Cost: Buy Legendary Equip</label><input type="range" id="tw_gilBuyEquip" min="3" max="12" value="6" oninput="twVal(this)"><span class="tweak-val" id="tw_gilBuyEquip_v">6</span></div>
     </div>
-    <h4>Batch Size</h4>
-    <div class="tweak-row" id="tw_batchRow"><label>Games</label><input type="number" id="tw_batchSize" value="50" min="10" max="500"></div>
-    <div class="tweaks-actions">
-      <button class="btn" onclick="resetTweaks()">Reset to Default</button>
-      <button class="btn" onclick="closeTweaks()">Cancel</button>
-      <button class="btn primary" id="tw_runBtn" onclick="runBatchWithTweaks()">Run Batch</button>
+  </div>
+</div>
+
+<!-- GAME VIEW -->
+<div class="app hidden" id="gameView">
+  <div class="header">
+    <h1>⚔ JUJU'S CASTLE — SIMULATOR</h1>
+    <div class="controls">
+      <button class="btn" onclick="goHome()">Back</button>
+      <span style="color:var(--border);margin:0 4px">|</span>
+      <label>Mode:</label>
+      <select id="modeSelect">
+        <option value="manual">Manual</option>
+        <option value="auto" selected>Autoplay</option>
+      </select>
+      <label>Speed:</label>
+      <input type="range" id="speedSlider" min="1" max="100" value="85">
+      <button class="btn primary" id="startBtn" onclick="homeStartSingle()">New Game</button>
+      <button class="btn" id="stepBtn" onclick="stepGame()" disabled>Next Step</button>
+      <button class="btn" id="autoBtn" onclick="toggleAuto()" disabled>▶ Auto</button>
+      <button class="btn danger" id="resetBtn" onclick="resetGame()">Reset</button>
+      <span style="color:var(--border);margin:0 4px">|</span>
+      <button class="btn" id="batchBtn" onclick="homeRunBatch()">Batch 1000</button>
+      <button class="btn" id="reportBtn" onclick="showLastReport()" disabled>Report</button>
     </div>
+  </div>
+  <div class="left-panel" id="heroPanel"></div>
+  <div class="log-panel" id="logPanel"></div>
+  <div class="right-panel" id="infoPanel"></div>
+  <div class="footer">
+    <span style="color:var(--dim);font-size:11px" id="statusBar">Ready.</span>
+    <button class="btn" id="downloadLogBtn" onclick="downloadGameLogMD()" style="margin-left:auto;display:none">⬇ Log (.md)</button>
+    <div class="actions" id="choiceArea"></div>
+  </div>
+</div>
+<div id="reportOverlay" class="report-overlay" style="display:none">
+  <div class="report-modal">
+    <button class="report-close" onclick="closeReport()">&times;</button>
+    <div style="margin-bottom:10px"><button class="btn primary" onclick="downloadReportMD()">⬇ Download Report (.md)</button></div>
+    <div id="reportContent"></div>
   </div>
 </div>
 <script>
@@ -589,8 +649,7 @@ const TWEAK_DEFAULTS = {
     return m;
   })(),
   mishapEnemyStrMod: 0, misfortuneEnemyStrMod: 0,
-  skillsEnabled: true, followersEnabled: true, overflowGameOver: true, prepareFirst: false,
-  batchSize: 50
+  skillsEnabled: true, followersEnabled: true, overflowGameOver: true, prepareFirst: false
 };
 
 function twVal(el) {
@@ -631,18 +690,19 @@ function buildTweaksLists() {
   document.getElementById('tw_hydraList').innerHTML = hdHtml;
 }
 
-var tweaksMode = 'batch'; // 'batch' or 'single'
-function showTweaksPanel(mode) {
-  tweaksMode = mode || 'batch';
-  buildTweaksLists();
-  document.getElementById('tw_batchRow').style.display = tweaksMode === 'batch' ? '' : 'none';
-  document.getElementById('tw_runBtn').textContent = tweaksMode === 'batch' ? 'Run Batch' : '▶ Start Game';
-  document.getElementById('tw_runBtn').onclick = tweaksMode === 'batch' ? runBatchWithTweaks : startGameWithTweaks;
-  document.getElementById('tweaksOverlay').style.display = 'flex';
+// View switching
+function showGameView() {
+  document.getElementById('homeScreen').classList.add('hidden');
+  document.getElementById('gameView').classList.remove('hidden');
+}
+function goHome() {
+  stopAuto();
+  document.getElementById('gameView').classList.add('hidden');
+  document.getElementById('homeScreen').classList.remove('hidden');
 }
 
 function closeTweaks() {
-  document.getElementById('tweaksOverlay').style.display = 'none';
+  // legacy — no-op now
 }
 
 function resetTweaks() {
@@ -663,7 +723,6 @@ function resetTweaks() {
   document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
   document.getElementById('tw_gilBuyEquip').value = 6; document.getElementById('tw_gilBuyEquip_v').textContent = '6';
   document.getElementById('tw_gilSettings').style.display = 'none';
-  document.getElementById('tw_batchSize').value = 50;
   // Reset per-equipment
   LEGENDARY_EQUIPMENT.forEach(function(e, i) {
     var cb = document.getElementById('tw_eq_' + i + '_on');
@@ -726,8 +785,7 @@ function readTweaks() {
     gilEnabled: document.getElementById('tw_gilEnabled').checked,
     gilPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
     gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 3,
-    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 6,
-    batchSize: parseInt(document.getElementById('tw_batchSize').value) || 50
+    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 6
   };
 }
 
@@ -764,16 +822,24 @@ function getTweaksDiff(tweaks) {
   return diffs;
 }
 
-function runBatchWithTweaks() {
-  closeTweaks();
+function homeRunBatch() {
   currentTweaks = readTweaks();
-  runBatchInternal(currentTweaks.batchSize);
+  showGameView();
+  runBatchInternal(1000);
+}
+
+function homeStartSingle() {
+  currentTweaks = readTweaks();
+  showGameView();
+  startGameInternal();
+}
+
+function runBatchWithTweaks() {
+  homeRunBatch();
 }
 
 function startGameWithTweaks() {
-  closeTweaks();
-  currentTweaks = readTweaks();
-  startGameInternal();
+  homeStartSingle();
 }
 
 function freshTracker() {
@@ -4828,7 +4894,7 @@ function classifyDefeat(state) {
 }
 
 function runBatch() {
-  showTweaksPanel('batch');
+  homeRunBatch();
 }
 
 function runBatchInternal(count) {
@@ -5500,7 +5566,7 @@ function generateGameAnalysis() {
 
 // ========== CONTROLS ==========
 function startGame() {
-  showTweaksPanel('single');
+  homeStartSingle();
 }
 
 function startGameInternal() {
@@ -5586,11 +5652,13 @@ function resetGame() {
   document.getElementById('autoBtn').disabled = true;
 }
 
-document.getElementById('statusBar').textContent = 'Ready. Press New Game.';
+document.getElementById('statusBar').textContent = 'Ready.';
 // Gil toggle visibility
 document.getElementById('tw_gilEnabled').addEventListener('change', function() {
   document.getElementById('tw_gilSettings').style.display = this.checked ? 'block' : 'none';
 });
+// Build equipment and hydra lists on home screen
+buildTweaksLists();
 </script>
 </body>
 </html>
