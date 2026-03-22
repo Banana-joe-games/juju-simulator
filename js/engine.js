@@ -1186,8 +1186,29 @@ function drawDread(hero) {
   // Draw Misfortune
   if (hasSA) {
     log(`    Seasoned Adventurer: draws 2 misfortunes, keeps the lesser danger!`, 'wonder');
+    // Draw 2 misfortune cards and resolve only the lesser one
+    if (G.misfortuneDeck.length === 0) { G.misfortuneDeck = shuffle([...Array(MISFORTUNE_CARDS.length).keys()]); }
+    const idx1 = G.misfortuneDeck.pop();
+    const card1 = MISFORTUNE_CARDS[idx1];
+    if (G.misfortuneDeck.length === 0) { G.misfortuneDeck = shuffle([...Array(MISFORTUNE_CARDS.length).keys()]); }
+    const idx2 = G.misfortuneDeck.pop();
+    const card2 = MISFORTUNE_CARDS[idx2];
+    // Rank danger: enemy > stalker > trap; for enemies, higher STR = more dangerous
+    function misfortuneDanger(c) {
+      if (c.type === 'enemy') return 100 + (c.str || 0);
+      if (c.type === 'stalker') return 50;
+      return 10; // trap
+    }
+    const d1 = misfortuneDanger(card1), d2 = misfortuneDanger(card2);
+    const chosen = d1 <= d2 ? card1 : card2;
+    const discarded = d1 <= d2 ? card2 : card1;
+    log(`    Drew: ${card1.name} (${card1.type}) and ${card2.name} (${card2.type})`, 'system');
+    log(`    Keeps lesser: ${chosen.name}, discards ${discarded.name}`, 'wonder');
+    log(`  ☠ Misfortune: ${chosen.name} (${chosen.type})`, 'misfortune');
+    resolveMisfortuneCard(hero, chosen);
+  } else {
+    drawMisfortune(hero);
   }
-  drawMisfortune(hero);
 
   // If survived, claim equipment
   if (!hero.ko && guardedEquip) {
@@ -1508,6 +1529,41 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
+  // Mad Berserker: can redirect to another hero or fight yourself (AI: always fight)
+  if (enemyCard.effect === 'fight_or_redirect') {
+    if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
+    G.tracker.decisionEnemies[enemyCard.name].choiceB++; // fought self
+    log(`    Mad Berserker charges! ${hero.name} fights it head-on!`, 'combat');
+  }
+
+  // The Sphinx: guess a number 1-6; if enemy rolls it, auto-win
+  if (enemyCard.effect === 'guess_or_fight') {
+    const guess = Math.random() < 0.5 ? 3 : 4; // AI guesses middle values
+    const sphinxRoll = Math.floor(Math.random() * 6) + 1;
+    if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
+    if (sphinxRoll === guess) {
+      log(`    The Sphinx asks a riddle! ${hero.name} guesses ${guess} — Sphinx rolls ${sphinxRoll} — correct!`, 'wonder');
+      G.tracker.decisionEnemies[enemyCard.name].choiceA++; // guessed right
+      trackEncounter(enemyCard.name, 'won');
+      G.stats.monstersKilled++;
+      initHeroTracker(G.tracker, hero.id).wins++;
+      initHeroTracker(G.tracker, hero.id).enemiesKilled++;
+      return;
+    }
+    G.tracker.decisionEnemies[enemyCard.name].choiceB++; // guessed wrong, must fight
+    log(`    The Sphinx asks a riddle! ${hero.name} guesses ${guess} — Sphinx rolls ${sphinxRoll} — wrong! Must fight!`, 'combat');
+  }
+
+  // Mindflayer: look at top card of tile deck before combat
+  if (enemyCard.effect === 'top_of_deck') {
+    if (G.tileDeck.length > 0) {
+      const topTile = G.tileDeck[G.tileDeck.length - 1];
+      log(`    Mindflayer reveals: next tile is ${topTile}`, 'system');
+    }
+    if (!G.tracker.enemyEffectImpact[enemyCard.name]) G.tracker.enemyEffectImpact[enemyCard.name] = { triggered:0, impactful:0 };
+    G.tracker.enemyEffectImpact[enemyCard.name].triggered++;
+  }
+
   // Bandit: discard 1 equipment to avoid fight
   if (enemyCard.effect === 'discard_equip_or_fight') {
     const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
@@ -1746,6 +1802,25 @@ function combat(hero, enemyCard, tier) {
     hero.followers.push({name:'Golem', str:3, effect:'none'});
     trackFollower('Golem', 'drawn');
     log(`    The Golem becomes a follower! (+3 STR)`, 'wonder');
+  }
+
+  // Stone Golem: on defeat, adjacent tiles become Dread Dungeons
+  if (enemyCard.effect === 'adjacent_dread' && hero.pos !== 'hydra' && G.hexMap) {
+    const adj = G.hexMap.exploredNeighbors(hero.pos.q, hero.pos.r);
+    let converted = 0;
+    adj.forEach(n => {
+      const tile = G.hexMap.get(n.q, n.r);
+      if (tile && tile.type !== 'dread' && tile.type !== 'entrance') {
+        tile.type = 'dread';
+        converted++;
+      }
+    });
+    if (converted > 0) {
+      log(`    Stone Golem's death curse! ${converted} adjacent tile${converted > 1 ? 's become' : ' becomes'} Dread Dungeon${converted > 1 ? 's' : ''}!`, 'misfortune');
+    }
+    if (!G.tracker.enemyEffectImpact[enemyCard.name]) G.tracker.enemyEffectImpact[enemyCard.name] = { triggered:0, impactful:0 };
+    G.tracker.enemyEffectImpact[enemyCard.name].triggered++;
+    if (converted > 0) G.tracker.enemyEffectImpact[enemyCard.name].impactful++;
   }
 
   // Mimic: draw legendary on defeat
@@ -1990,6 +2065,31 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${heroStrValue}${combatBonus + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + parrotBonus + (packLeaderBonus || 0) ? ' + bonuses' : ''}${mummyPenalty + manaLeechPenalty + blobPenalty + heistPenalty ? ' + penalties' : ''} = ${heroTotal}`, 'combat');
 
+  // === FAITHFUL DOG: reroll hero die once if losing ===
+  const faithfulDog = hero.followers.find(f => f.effect === 'reroll_flame');
+  if (faithfulDog && heroTotal < enemyTotal + beatMargin) {
+    const dogReroll = heroRollDie(hero);
+    let dogRerollVal = dogReroll.val;
+    let dogRerollFlame = dogReroll.isFlame;
+    // Apply same roll modifiers
+    if (enemyCard.effect === 'flame_counts_0' && dogRerollFlame) { dogRerollVal = 0; dogRerollFlame = false; }
+    if (enemyCard.effect === 'only_flame_hits' && !dogRerollFlame) { dogRerollVal = 0; }
+    if (enemyCard.effect === 'only_even_hits' && dogRerollVal % 2 !== 0) { dogRerollVal = 0; }
+    if (enemyCard.effect === 'only_3plus_hits' && dogRerollVal > 0 && dogRerollVal < 3) { dogRerollVal = 0; }
+    const dogNewBonus = (hero.id === 'juju' && dogRerollFlame && !hero.talentUsedThisTurn) ? 2 : (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0);
+    const dogNewTotal = dogRerollVal + heroStrValue + (combatBonus - (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0)) + dogNewBonus
+      + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
+      + (packLeaderBonus || 0) + (fireballBonus || 0) + heistPenalty + (secondNatureBonus || 0);
+    if (dogNewTotal > heroTotal) {
+      heroRoll = { val: dogRerollVal, isFlame: dogRerollFlame };
+      G._lastHeroRollVal = dogRerollVal;
+      isFlame = dogRerollFlame || hero.giftedFlame;
+      heroTotal = dogNewTotal;
+      if (hero.id === 'eggo' && dogRerollFlame && !hasStalker(hero, 'no_flame_effect')) hero.dodgeActive = true;
+      log(`    🐕 Faithful Dog reroll! ${dogRerollVal}${dogRerollFlame ? ' 🔥' : ''} = ${heroTotal}`, 'wonder');
+    }
+  }
+
   // === SKILL BURN (can reroll YOUR die OR ENEMY die) ===
   // Strategic: in prehydra phase, only Skill Burn if the fight is worth it
   const burnPhase = getGamePhase();
@@ -2230,6 +2330,11 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     removeFollowers(hero);
     log(`    Ogre pins ${hero.name}! No respawn — stuck until rescued.`, 'ko');
     return;
+  }
+
+  // Post-Awakening: enemy persists on the board after defeating a hero
+  if (G.tilesPlaced >= 10 && hero.pos !== 'hydra' && enemyCard.type === 'enemy') {
+    G.enemiesOnBoard.push({ card: {...enemyCard}, pos: { q: hero.pos.q, r: hero.pos.r }, name: enemyCard.name });
   }
 
   hero._lastKOEnemy = enemyCard;  // Store which enemy caused KO, for dungeon floor guardian
@@ -3143,6 +3248,49 @@ function runToHydra(hero) {
 
 function monsterMovementPhase() {
   if (G.tilesPlaced < 10) return;
+  if (!G.enemiesOnBoard || G.enemiesOnBoard.length === 0) return;
+  if (!G.hexMap) return;
+
+  // Move each enemy on the board toward the closest hero through revealed tiles
+  const heroPositions = G.heroes.filter(h => h.pos !== 'hydra' && !h.ko).map(h => ({ hero: h, q: h.pos.q, r: h.pos.r }));
+  if (heroPositions.length === 0) return;
+
+  for (let ei = G.enemiesOnBoard.length - 1; ei >= 0; ei--) {
+    const enemy = G.enemiesOnBoard[ei];
+    if (!enemy.pos) continue;
+
+    const isDemon = enemy.card && enemy.card.effect === 'moves_2_per_round';
+    const steps = isDemon ? 2 : 1;
+
+    for (let step = 0; step < steps; step++) {
+      // Find closest hero via BFS
+      let bestPath = null;
+      let bestHero = null;
+      for (const hp of heroPositions) {
+        const path = G.hexMap.findPath(enemy.pos.q, enemy.pos.r, hp.q, hp.r);
+        if (path && (!bestPath || path.length < bestPath.length)) {
+          bestPath = path;
+          bestHero = hp.hero;
+        }
+      }
+
+      if (bestPath && bestPath.length > 1) {
+        enemy.pos = { q: bestPath[1].q, r: bestPath[1].r };
+
+        // Check if enemy reached a hero's tile
+        const heroOnTile = G.heroes.find(h => h.pos !== 'hydra' && !h.ko && h.pos.q === enemy.pos.q && h.pos.r === enemy.pos.r);
+        if (heroOnTile) {
+          const eName = enemy.card ? enemy.card.name : 'Enemy';
+          log(`  ⚠ ${eName} reaches ${heroOnTile.name}! Forced combat!`, 'misfortune');
+          combat(heroOnTile, enemy.card, 'misfortune');
+          G.enemiesOnBoard.splice(ei, 1);
+          break; // enemy consumed by combat
+        }
+      } else {
+        break; // no path or already adjacent
+      }
+    }
+  }
 }
 
 // ========== TURN MANAGEMENT ==========

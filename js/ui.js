@@ -1360,18 +1360,19 @@ function runSilentGame() {
     if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
       if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero, 'wizard_hat');
     }
-    // Herbalist (Gigi): recharge any hero's skill including self (batch sim)
-    if (hero.id === 'gigi' && shouldUseSkill(hero, 'Herbalist', { atHydra: G.heroesInHydraArea.has(hero.id) })) {
+    // Herbalist (Gigi): cross-turn — fires at start of EVERY hero's turn, not just Gigi's
+    const gigiForHerb = G.heroes.find(h => h.id === 'gigi');
+    if (gigiForHerb && isSkillReady(gigiForHerb, 'Herbalist') && shouldUseSkill(gigiForHerb, 'Herbalist', { atHydra: G.heroesInHydraArea.has('gigi') })) {
       const candidates = G.heroes.filter(h => h.skillStates.some(s => s === 'exhausted'));
       const neediest = candidates.sort((a,b) => {
-        const aScore = b.skillStates.filter(s => s === 'exhausted').length + (b.id === hero.id ? 0.5 : 0);
-        const bScore = a.skillStates.filter(s => s === 'exhausted').length + (a.id === hero.id ? 0.5 : 0);
+        const aScore = b.skillStates.filter(s => s === 'exhausted').length + (b.id === hero.id ? 1 : 0);
+        const bScore = a.skillStates.filter(s => s === 'exhausted').length + (a.id === hero.id ? 1 : 0);
         return aScore - bScore;
       })[0];
       if (neediest) {
-        useSkill(hero, 'Herbalist');
+        useSkill(gigiForHerb, 'Herbalist');
         rechargeOneSkill(neediest, 'herbalist');
-        trackSkill(hero.id, 'Herbalist', 'activated');
+        trackSkill('gigi', 'Herbalist', 'activated');
       }
     }
     // Wild Call (Gigi): draw Wonder until Follower (batch sim)
