@@ -3825,35 +3825,98 @@ function runToHydra(hero) {
   }
 
   if (G.exitHex && G.hexMap) {
-    // Spatial pathfinding to exit
-    const path = G.hexMap.findPath(hero.pos.q, hero.pos.r, G.exitHex.q, G.exitHex.r);
-    if (path && path.length > 1) {
-      let currentQ = hero.pos.q;
-      let currentR = hero.pos.r;
-      const stepsAvailable = Math.min(moveVal, path.length - 1);
+    let currentQ = hero.pos.q;
+    let currentR = hero.pos.r;
+    let stepsRemaining = moveVal;
 
-      for (let i = 0; i < stepsAvailable; i++) {
-        currentQ = path[i + 1].q;
-        currentR = path[i + 1].r;
-      }
-      hero.pos = { q: currentQ, r: currentR };
+    while (stepsRemaining > 0) {
+      // Find the neighbor hex closest to the Exit
+      let bestNeighbor = null;
+      let bestDist = Infinity;
 
-      // Check if reached exit
-      if (currentQ === G.exitHex.q && currentR === G.exitHex.r) {
+      HEX_DIRS.forEach(d => {
+        const nq = currentQ + d.q;
+        const nr = currentR + d.r;
+        if (!G.hexMap.isInBounds(nq, nr)) return;
+        const dist = hexDistance(nq, nr, G.exitHex.q, G.exitHex.r);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestNeighbor = { q: nq, r: nr };
+        }
+      });
+
+      if (!bestNeighbor) break; // stuck at edge
+
+      // Check if this is the Exit hex
+      if (bestNeighbor.q === G.exitHex.q && bestNeighbor.r === G.exitHex.r) {
+        hero.pos = { q: bestNeighbor.q, r: bestNeighbor.r };
         arriveAtHydra();
         return;
       }
 
-      const remaining = hexDistance(currentQ, currentR, G.exitHex.q, G.exitHex.r);
-      log(`  ${hero.name} runs toward the Hydra... ${remaining} hexes remaining`, 'system');
-    } else {
-      // No path found - fallback: probability based (old behavior)
-      log(`  ${hero.name} searches for the path to the Hydra...`, 'system');
-      const chance = 0.4 + moveVal * 0.1;
-      if (Math.random() < chance) {
-        arriveAtHydra();
+      // If unexplored: place a new tile
+      if (!G.hexMap.has(bestNeighbor.q, bestNeighbor.r)) {
+        if (G.tileDeck.length > 0) {
+          const tileType = G.tileDeck.pop();
+          G.tilesPlaced++;
+          G.hexMap.set(bestNeighbor.q, bestNeighbor.r, {
+            q: bestNeighbor.q, r: bestNeighbor.r,
+            type: tileType,
+            roomId: 'room_' + G.tilesPlaced,
+            tileIndex: G.tilesPlaced,
+            enemies: [], equipment: []
+          });
+          // Dread Dungeon stops movement
+          if (tileType === 'dread') {
+            currentQ = bestNeighbor.q;
+            currentR = bestNeighbor.r;
+            hero.pos = { q: currentQ, r: currentR };
+            log(`  ⚠ Dread Dungeon! ${hero.name} stops here.`, 'misfortune');
+            stepsRemaining = 0;
+            break;
+          }
+        } else {
+          break; // no tiles left
+        }
+      } else {
+        // Explored tile - check for DD
+        const existing = G.hexMap.get(bestNeighbor.q, bestNeighbor.r);
+        if (existing.type === 'dread') {
+          currentQ = bestNeighbor.q;
+          currentR = bestNeighbor.r;
+          hero.pos = { q: currentQ, r: currentR };
+          log(`  ⚠ Dread Dungeon blocks the path! ${hero.name} stops.`, 'misfortune');
+          stepsRemaining = 0;
+          break;
+        }
       }
+
+      currentQ = bestNeighbor.q;
+      currentR = bestNeighbor.r;
+      stepsRemaining--;
     }
+
+    hero.pos = { q: currentQ, r: currentR };
+
+    // Check if reached exit after all steps
+    if (currentQ === G.exitHex.q && currentR === G.exitHex.r) {
+      arriveAtHydra();
+      return;
+    }
+
+    // Fight existing enemy on destination tile
+    const enemyOnTile = G.enemiesOnBoard.find(e => e.pos && e.pos.q === currentQ && e.pos.r === currentR);
+    if (enemyOnTile) {
+      log(`  ⚔ ${hero.name} encounters ${enemyOnTile.name} on the way to the Hydra!`, 'combat');
+      const idx = G.enemiesOnBoard.indexOf(enemyOnTile);
+      G.enemiesOnBoard.splice(idx, 1);
+      const enemyCard = enemyOnTile.card ? {...enemyOnTile.card} : {name: enemyOnTile.name, str: enemyOnTile.str || 0};
+      const tier = enemyOnTile.tier || ((enemyCard.str || 0) >= 4 ? 'misfortune' : 'mishap');
+      combat(hero, enemyCard, tier);
+    }
+
+    const remaining = hexDistance(currentQ, currentR, G.exitHex.q, G.exitHex.r);
+    log(`  ${hero.name} runs toward the Hydra... ${remaining} hex${remaining !== 1 ? 'es' : ''} remaining`, 'system');
   } else {
     // Fallback: old probability-based method
     const chance = 0.4 + moveVal * 0.1;
