@@ -147,6 +147,7 @@ function generateReport(results) {
     <div class="report-tab" onclick="switchReportTab(this,'tab-skills-equip')">Skills & Equip</div>
     <div class="report-tab" onclick="switchReportTab(this,'tab-enemies')">Enemies & Creatures</div>
     <div class="report-tab" onclick="switchReportTab(this,'tab-hydra-econ')">Hydra & Economy</div>
+    <div class="report-tab" onclick="switchReportTab(this,'tab-analysis')">📝 Analysis</div>
   </div>`;
 
   // ===================== SECTION 1: OVERVIEW =====================
@@ -851,7 +852,329 @@ function generateReport(results) {
   }
   html += `</div>`;
 
+  // ===================== SECTION 14: TEXTUAL ANALYSIS =====================
+  html += `<div class="report-section"><h3>Textual Analysis</h3>`;
+  html += generateTextualAnalysis(results, wins, losses, n, winRate, heroIds, heroNames, avg, pct, fix1, allFlags, allCombatLogs, allHydraLogs, allSkills, allEquip, allEncounters);
+  html += `</div>`;
+
   return html;
+}
+
+function generateTextualAnalysis(results, wins, losses, n, winRate, heroIds, heroNames, avg, pct, fix1, allFlags, allCombatLogs, allHydraLogs, allSkills, allEquip, allEncounters) {
+  let t = '';
+  const wr = parseFloat(winRate);
+  const avgTurns = fix1(avg(results, r => r.turn));
+  const avgKO = fix1(avg(results, r => r.stats.ko));
+  const avgBurns = fix1(avg(results, r => r.stats.skillBurns));
+
+  // ---- OVERALL VERDICT ----
+  t += `<div class="report-card" style="border-left:3px solid var(--accent);line-height:1.7;font-size:12px">`;
+  t += `<b style="font-size:14px">Overall Assessment</b><br><br>`;
+
+  if (wr >= 80) {
+    t += `With a <b>${winRate}% win rate</b>, the game is currently too forgiving. Players will win most games without needing to optimize their strategy. `;
+    t += `This is fine for a family-friendly introductory mode, but experienced players will feel little tension. `;
+  } else if (wr >= 65) {
+    t += `The <b>${winRate}% win rate</b> sits in a healthy zone. Players who make good decisions will usually win, but bad luck or poor planning can still sink a run. `;
+    t += `This balance rewards skill while keeping the outcome uncertain. `;
+  } else if (wr >= 45) {
+    t += `At <b>${winRate}% win rate</b>, the game is challenging. Players need to play well and get some luck to pull through. `;
+    t += `This is the sweet spot for experienced groups who want meaningful decisions and real consequences. `;
+  } else if (wr >= 25) {
+    t += `The <b>${winRate}% win rate</b> is punishing. Wins feel earned, but many players will find the difficulty frustrating. `;
+    t += `Consider whether the losses feel fair or if players are being punished by factors outside their control. `;
+  } else {
+    t += `At <b>${winRate}% win rate</b>, the game is brutally hard. Most runs end in defeat regardless of player skill. `;
+    t += `This level of difficulty typically drives players away unless the run-to-run variety is exceptionally high. `;
+  }
+
+  t += `Games last an average of <b>${avgTurns} turns</b> with <b>${avgKO} KOs per game</b>. `;
+
+  // Defeat cause analysis
+  const defeatCauses = {};
+  losses.forEach(r => { const c = r.defeatCause ? r.defeatCause.cause : 'unknown'; defeatCauses[c] = (defeatCauses[c]||0) + 1; });
+  if (losses.length > 0) {
+    const mainCause = Object.entries(defeatCauses).sort((a,b) => b[1]-a[1])[0];
+    if (mainCause) {
+      const causePct = (mainCause[1] / losses.length * 100).toFixed(0);
+      if (mainCause[0] === 'hydra_overflow') {
+        t += `<b>${causePct}% of losses</b> come from Hydra overflow, meaning heroes can't kill heads fast enough. `;
+        t += `If this number is above 70%, the Hydra fight is the primary bottleneck and dungeon preparation matters less than boss damage output. `;
+      } else if (mainCause[0] === 'no_relics') {
+        t += `<b>${causePct}% of losses</b> happen when a hero gets KO'd at the Hydra with no relics left. `;
+        t += `This means heroes are arriving underpowered or the Hydra heads are hitting too hard relative to hero STR at that point. `;
+      }
+    }
+  }
+  t += `</div>`;
+
+  // ---- HERO ANALYSIS ----
+  t += `<div class="report-card" style="line-height:1.7;font-size:12px">`;
+  t += `<b style="font-size:14px">Hero Breakdown</b><br><br>`;
+
+  heroIds.forEach(id => {
+    const name = heroNames[id];
+    const heroCombats = allCombatLogs.filter(c => c.heroId === id);
+    const heroWins = heroCombats.filter(c => c.won).length;
+    const heroWR = heroCombats.length > 0 ? (heroWins / heroCombats.length * 100).toFixed(0) : 0;
+    const heroKO = results.reduce((s,r) => s + (r.tracker.heroes[id] ? r.tracker.heroes[id].ko : 0), 0);
+    const koPerGame = fix1(heroKO / n);
+    const headsDestroyed = results.reduce((s,r) => s + (r.tracker.heroes[id] ? (r.tracker.heroes[id].hydraHeadsDestroyed||0) : 0), 0);
+    const headsPerGame = fix1(headsDestroyed / n);
+
+    // Equipment at combat
+    const noEquipFights = heroCombats.filter(c => (c.equipCount||0) === 0).length;
+    const noEquipPct = heroCombats.length > 0 ? (noEquipFights / heroCombats.length * 100).toFixed(0) : 0;
+
+    t += `<b style="color:var(--${id})">${name}</b>: `;
+    t += `${heroWR}% combat win rate, ${koPerGame} KOs/game, ${headsPerGame} Hydra heads destroyed/game. `;
+
+    if (parseInt(heroWR) >= 80) {
+      t += `${name} dominates combat and rarely loses fights. `;
+    } else if (parseInt(heroWR) >= 60) {
+      t += `${name} holds their own in most fights. `;
+    } else if (parseInt(heroWR) >= 40) {
+      t += `${name} struggles in combat and needs support from equipment or skills to win consistently. `;
+    } else {
+      t += `${name} loses most fights and is a liability without heavy support. `;
+    }
+
+    if (parseInt(noEquipPct) > 40) {
+      t += `Fights without any equipment <b>${noEquipPct}%</b> of the time, which is high. `;
+    }
+
+    if (parseFloat(headsPerGame) < 0.3 && parseFloat(headsPerGame) >= 0) {
+      t += `Contributes very little to the Hydra fight. `;
+    } else if (parseFloat(headsPerGame) >= 1) {
+      t += `Carries a significant share of the Hydra fight. `;
+    }
+    t += `<br>`;
+  });
+  t += `</div>`;
+
+  // ---- WINNERS VS LOSERS ----
+  t += `<div class="report-card" style="line-height:1.7;font-size:12px">`;
+  t += `<b style="font-size:14px">What Separates Winners from Losers</b><br><br>`;
+
+  if (wins.length > 0 && losses.length > 0) {
+    const winStrAvg = avg(wins, r => heroIds.reduce((s,id) => s + (r.tracker.heroEndState[id] ? r.tracker.heroEndState[id].totalStr||0 : 0), 0) / 4);
+    const lossStrAvg = avg(losses, r => heroIds.reduce((s,id) => s + (r.tracker.heroEndState[id] ? r.tracker.heroEndState[id].totalStr||0 : 0), 0) / 4);
+    const winEquipAvg = avg(wins, r => heroIds.reduce((s,id) => s + (r.tracker.heroEndState[id] ? r.tracker.heroEndState[id].equipCount||0 : 0), 0) / 4);
+    const lossEquipAvg = avg(losses, r => heroIds.reduce((s,id) => s + (r.tracker.heroEndState[id] ? r.tracker.heroEndState[id].equipCount||0 : 0), 0) / 4);
+    const winSkillAvg = avg(wins, r => heroIds.reduce((s,id) => s + (r.tracker.heroEndState[id] ? r.tracker.heroEndState[id].readySkills||0 : 0), 0) / 4);
+    const lossSkillAvg = avg(losses, r => heroIds.reduce((s,id) => s + (r.tracker.heroEndState[id] ? r.tracker.heroEndState[id].readySkills||0 : 0), 0) / 4);
+
+    const strDiff = winStrAvg - lossStrAvg;
+    const equipDiff = winEquipAvg - lossEquipAvg;
+    const skillDiff = winSkillAvg - lossSkillAvg;
+
+    t += `At game end, winning heroes average <b>${fix1(winStrAvg)} total STR</b> vs <b>${fix1(lossStrAvg)}</b> for losers `;
+    t += `(a gap of ${fix1(strDiff)}). `;
+
+    if (strDiff > 2) {
+      t += `This gap is significant — STR is the biggest predictor of victory. Equipment and follower accumulation matter a lot. `;
+    } else if (strDiff > 0.5) {
+      t += `The STR difference is moderate, meaning other factors (skill timing, luck) also play a role. `;
+    } else {
+      t += `STR barely differs between winners and losers, suggesting the outcome depends more on tactical decisions or dice luck than raw power. `;
+    }
+
+    t += `<br>Winners carry <b>${fix1(winEquipAvg)}</b> equipment vs <b>${fix1(lossEquipAvg)}</b> for losers. `;
+    if (equipDiff > 0.5) {
+      t += `Equipment matters. Heroes who gear up before the Hydra fight have a clear advantage. `;
+    }
+
+    t += `Winners have <b>${fix1(winSkillAvg)}</b> ready skills vs <b>${fix1(lossSkillAvg)}</b>. `;
+    if (skillDiff > 0.5) {
+      t += `Skill conservation is important. Burning skills in the dungeon leaves heroes weaker at the Hydra. `;
+    }
+  } else {
+    t += `Not enough data to compare winners and losers (need both wins and losses). `;
+  }
+  t += `</div>`;
+
+  // ---- HYDRA FIGHT ----
+  t += `<div class="report-card" style="line-height:1.7;font-size:12px">`;
+  t += `<b style="font-size:14px">Hydra Fight</b><br><br>`;
+
+  const totalGrowths = results.reduce((s,r) => s + (r.tracker.hydraGrowthLog||[]).length, 0);
+  const avgGrowth = fix1(totalGrowths / n);
+  const hydraKOs = results.reduce((s,r) => { let ko=0; Object.values(r.tracker.hydraHeads).forEach(h => ko += h.causedKO||0); return s+ko; }, 0);
+
+  t += `The Hydra grows an average of <b>${avgGrowth} extra heads per game</b> and causes <b>${fix1(hydraKOs/n)} KOs per game</b>. `;
+
+  if (parseFloat(avgGrowth) > 3) {
+    t += `Head growth is very high, putting heavy pressure on the party. Each failed attack snowballs the fight. `;
+  } else if (parseFloat(avgGrowth) > 1.5) {
+    t += `Head growth is moderate. There's room for a few mistakes, but too many failed attacks will overwhelm the party. `;
+  } else {
+    t += `Head growth is low. Heroes are killing heads efficiently and rarely letting the situation spiral. `;
+  }
+
+  // Growth sources
+  const growthSources = {};
+  results.forEach(r => { (r.tracker.hydraGrowthLog||[]).forEach(g => { growthSources[g.source] = (growthSources[g.source]||0) + 1; }); });
+  const topGrowthSource = Object.entries(growthSources).sort((a,b) => b[1]-a[1])[0];
+  if (topGrowthSource && totalGrowths > 0) {
+    t += `The primary source of growth is <b>${topGrowthSource[0].replace(/_/g,' ')}</b> (${pct(topGrowthSource[1], totalGrowths)}% of all growth). `;
+    if (topGrowthSource[0] === 'hero_ko') {
+      t += `Heroes getting knocked out feeds the Hydra. Reducing KOs (through better equipment or skills) would slow the boss down. `;
+    } else if (topGrowthSource[0] === 'hydra_area_empty') {
+      t += `The Hydra grows when no heroes are present to attack it. Getting heroes to the Hydra faster would help. `;
+    } else if (topGrowthSource[0] === 'failed_attack') {
+      t += `Failed attacks cause the most growth. Boosting hero STR or reducing head STR would directly reduce this. `;
+    }
+  }
+
+  // Kill order insight
+  const killOrderFirst = {};
+  wins.forEach(r => { const ko = r.tracker.hydraHeadKillOrder || []; if (ko.length > 0) killOrderFirst[ko[0].head] = (killOrderFirst[ko[0].head]||0) + 1; });
+  const topFirst = Object.entries(killOrderFirst).sort((a,b) => b[1]-a[1])[0];
+  if (topFirst && wins.length > 0) {
+    const firstPct = (topFirst[1] / wins.length * 100).toFixed(0);
+    t += `In winning games, <b>${topFirst[0]}</b> is killed first ${firstPct}% of the time. `;
+    if (parseInt(firstPct) > 60) {
+      t += `This strong pattern suggests the AI has found an optimal kill order. In the physical game, players would probably discover this too. `;
+    }
+  }
+  t += `</div>`;
+
+  // ---- SKILL ECONOMY ----
+  t += `<div class="report-card" style="line-height:1.7;font-size:12px">`;
+  t += `<b style="font-size:14px">Skill Economy</b><br><br>`;
+
+  t += `Heroes burn an average of <b>${avgBurns} skills per game</b> as emergency rerolls. `;
+
+  // Find most burned skill
+  const burnRanking = Object.entries(allSkills)
+    .map(([key, s]) => ({ key, total: s.activated + s.burned, burned: s.burned, activated: s.activated }))
+    .filter(s => s.total > 0)
+    .sort((a,b) => (b.burned / b.total) - (a.burned / a.total));
+
+  const mostBurned = burnRanking[0];
+  if (mostBurned && mostBurned.total > 50) {
+    const [hId, ...parts] = mostBurned.key.split('_');
+    const burnPct = (mostBurned.burned / mostBurned.total * 100).toFixed(0);
+    if (parseInt(burnPct) > 60) {
+      t += `<b>${heroNames[hId]}'s ${parts.join(' ')}</b> is burned ${burnPct}% of the time instead of being used for its actual effect. `;
+      t += `This means either the skill effect isn't worth using, or combat pressure forces constant emergency rerolls. `;
+    }
+  }
+
+  // Most impactful skill
+  const impactRanking = Object.entries(allSkills)
+    .map(([key, s]) => ({ key, activated: s.activated, turnedFight: s.turnedFight, savedKO: s.savedFromKO }))
+    .filter(s => s.activated > 10)
+    .sort((a,b) => (b.turnedFight + b.savedKO) - (a.turnedFight + a.savedKO));
+
+  const mostImpact = impactRanking[0];
+  if (mostImpact) {
+    const [hId, ...parts] = mostImpact.key.split('_');
+    t += `The most impactful skill is <b>${heroNames[hId]}'s ${parts.join(' ')}</b>, which turned ${mostImpact.turnedFight} fights and saved ${mostImpact.savedKO} KOs. `;
+  }
+
+  // Recharge sources
+  const rechargeSources = {};
+  results.forEach(r => { Object.entries(r.tracker.skillRechargeSources||{}).forEach(([src, cnt]) => { rechargeSources[src] = (rechargeSources[src]||0) + cnt; }); });
+  const totalRecharges = Object.values(rechargeSources).reduce((a,b) => a+b, 0);
+  if (totalRecharges > 0) {
+    const topSource = Object.entries(rechargeSources).sort((a,b) => b[1]-a[1])[0];
+    t += `Skills are recharged <b>${totalRecharges} times total</b> across all games, primarily through <b>${topSource[0].replace(/_/g,' ')}</b> (${pct(topSource[1], totalRecharges)}%). `;
+  }
+  t += `</div>`;
+
+  // ---- GIL ECONOMY ----
+  const gilGames = results.filter(r => r.heroes.some(h => (h.gilEarned||0) > 0));
+  if (gilGames.length > 0) {
+    t += `<div class="report-card" style="line-height:1.7;font-size:12px">`;
+    t += `<b style="font-size:14px">Gil Economy</b><br><br>`;
+
+    const totalEarned = gilGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.gilEarned||0), 0), 0);
+    const totalSpent = gilGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.gilSpentSkill||0) + (h.gilSpentEquip||0), 0), 0);
+    const totalUnspent = gilGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.gil||0), 0), 0);
+    const unspentPct = totalEarned > 0 ? (totalUnspent / totalEarned * 100).toFixed(0) : 0;
+
+    t += `Heroes earn <b>${fix1(totalEarned / gilGames.length)} Gil per game</b> across the whole party and leave <b>${unspentPct}% unspent</b>. `;
+
+    if (parseInt(unspentPct) > 70) {
+      t += `Most Gil goes to waste. Heroes either can't reach the Entrance to spend it, or the prices are too high relative to earnings. `;
+      t += `Consider: lowering recharge/equipment costs, allowing Gil spending at the Hydra, or giving heroes more reasons to visit the Entrance. `;
+    } else if (parseInt(unspentPct) > 40) {
+      t += `About half the Gil is being used. There's room to make Gil more impactful, but it's contributing to the economy. `;
+    } else {
+      t += `Gil is being spent efficiently. Heroes are finding opportunities to convert Gil into skills and equipment. `;
+    }
+
+    const totalVoluntary = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.voluntary : 0), 0);
+    const totalKOVisits = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.koRespawn : 0), 0);
+    if (totalVoluntary + totalKOVisits > 0) {
+      t += `Heroes visit the Entrance <b>${totalVoluntary} times voluntarily</b> and <b>${totalKOVisits} times from KO respawn</b>. `;
+      if (totalVoluntary === 0) {
+        t += `No one ever goes back on purpose, meaning Gil is only spent by accident when heroes respawn. `;
+      }
+    }
+    t += `</div>`;
+  }
+
+  // ---- PACING ----
+  t += `<div class="report-card" style="line-height:1.7;font-size:12px">`;
+  t += `<b style="font-size:14px">Game Pacing</b><br><br>`;
+
+  const hydraSpawnTurn = fix1(avg(results, r => r.tracker.pacing.hydraSpawn || r.turn));
+  const hydraArrival = fix1(avg(results, r => r.tracker.pacing.hydraArrival || r.turn));
+  const avgWinTurn = wins.length ? fix1(avg(wins, r => r.turn)) : null;
+  const avgLossTurn = losses.length ? fix1(avg(losses, r => r.turn)) : null;
+
+  t += `The Hydra typically spawns on <b>turn ${hydraSpawnTurn}</b> and the first hero arrives at <b>turn ${hydraArrival}</b>. `;
+
+  const explorationPct = parseFloat(hydraSpawnTurn) / parseFloat(avgTurns) * 100;
+  const bossPct = (parseFloat(avgTurns) - parseFloat(hydraArrival)) / parseFloat(avgTurns) * 100;
+
+  t += `The exploration phase takes about <b>${explorationPct.toFixed(0)}%</b> of the game, and the boss fight takes about <b>${bossPct.toFixed(0)}%</b>. `;
+
+  if (bossPct < 20) {
+    t += `The boss phase is very short. The Hydra either dies quickly or kills the party fast. Consider making the fight last longer for more drama. `;
+  } else if (bossPct > 45) {
+    t += `The boss fight takes up almost half the game. If it feels like a grind, consider reducing Hydra head STR or starting with fewer heads. `;
+  } else {
+    t += `This pacing feels balanced — enough time to explore and prepare, with a substantial boss fight at the end. `;
+  }
+
+  if (avgWinTurn && avgLossTurn) {
+    const turnDiff = parseFloat(avgLossTurn) - parseFloat(avgWinTurn);
+    if (turnDiff > 3) {
+      t += `Losses take <b>${fix1(turnDiff)} turns longer</b> than wins, meaning losing games drag on. Players are slowly dying rather than getting a quick defeat. `;
+    } else if (turnDiff < -2) {
+      t += `Losses happen <b>${fix1(Math.abs(turnDiff))} turns earlier</b> than wins. Early misfortune snowballs into defeat. `;
+    } else {
+      t += `Wins and losses end around the same turn, which means games stay competitive until the end. `;
+    }
+  }
+  t += `</div>`;
+
+  // ---- ACTION ITEMS ----
+  if (allFlags.length > 0) {
+    t += `<div class="report-card" style="border-left:3px solid var(--ko);line-height:1.7;font-size:12px">`;
+    t += `<b style="font-size:14px">Top Issues to Address</b><br><br>`;
+
+    const highFlags = allFlags.filter(f => f.severity === 'high');
+    const medFlags = allFlags.filter(f => f.severity === 'medium');
+    const uniqueFlags = [];
+    const seen = new Set();
+    [...highFlags, ...medFlags].forEach(f => { if (!seen.has(f.msg)) { seen.add(f.msg); uniqueFlags.push(f); }});
+
+    uniqueFlags.slice(0, 8).forEach((f, i) => {
+      const color = f.severity === 'high' ? 'var(--ko)' : 'var(--mishap)';
+      t += `<span style="color:${color};font-weight:600">${i+1}.</span> ${f.msg}<br>`;
+    });
+
+    if (uniqueFlags.length === 0) {
+      t += `No significant issues found. The game looks well balanced at these settings.`;
+    }
+    t += `</div>`;
+  }
+
+  return t;
 }
 
 // ========== BATCH RUN ==========
@@ -1070,9 +1393,10 @@ function organizeReportTabs() {
     'tab-heroes': ['Hero Performance','Hero × Enemy','Hero × Hydra'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis'],
     'tab-enemies': ['Enemy Design','Trap Analysis','Follower'],
-    'tab-hydra-econ': ['Gil Economy','Hydra Fight']
+    'tab-hydra-econ': ['Gil Economy','Hydra Fight'],
+    'tab-analysis': ['Textual Analysis']
   };
-  const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ'];
+  const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ','tab-analysis'];
 
   // Create tab content containers
   const tabDivs = {};
