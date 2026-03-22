@@ -1731,6 +1731,12 @@ function generateSingleGameReport() {
     html += `<div class="report-card" style="border-left:3px solid var(--ko);font-size:14px"><b style="color:var(--ko)">💀 DEFEAT</b> at turn ${G.turn}<br><span style="color:var(--dim)">Cause: ${causeText}</span></div>`;
   }
 
+  // Final hex map
+  const finalMap = renderHexMap();
+  if (finalMap) {
+    html += `<div class="report-section"><h3>Final Map</h3><div class="report-card" style="padding:8px">${finalMap}</div></div>`;
+  }
+
   // Game stats
   html += `<div class="report-section"><h3>Game Stats</h3><div class="report-card">`;
   html += `<div class="report-stat"><span class="rl">Turns</span><span class="rv">${G.turn}</span></div>`;
