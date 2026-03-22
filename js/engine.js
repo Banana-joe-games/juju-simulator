@@ -416,7 +416,7 @@ function initState() {
     roomsVisited: { wonder: 0, common: 0, dread: 0 }
   };
   G = state;
-  G.hexMap = createHexMap(7);
+  G.hexMap = createHexMap(4); // confined map: 37 tiles, max ~4 hexes from center
   G.hexMap.set(0, 0, { q:0, r:0, type:'entrance', roomId:'entrance', tileIndex:0, enemies:[], equipment:[] });
   G.exitHex = null;
   return state;
@@ -849,16 +849,11 @@ function decideMovementIntent(hero, movePoints) {
     }
 
     if (reason) {
-      // Is the trip feasible? Avg roll 3.5, is it worth the detour?
+      // Is the trip feasible? Confined map = max ~3-4 hexes from center
+      // Entrance is always reachable in 1 turn (avg roll 3.5)
+      // Only return if 1 turn away — no multi-turn detours
       const turnsToReturn = Math.ceil(dist / 3.5);
-
-      // Higher value purchases justify longer trips
-      let maxTurns = 1; // default: only if very close
-      if (reason === 'buy_weapon' || reason === 'buy_equip_naked') maxTurns = 3;
-      else if (reason === 'recharge_all_exhausted') maxTurns = 3;
-      else if (reason === 'equip_and_recharge') maxTurns = 2;
-      else if (reason === 'recharge_multiple') maxTurns = 2;
-      else if (reason === 'recharge_desperate') maxTurns = 2;
+      const maxTurns = 1;
 
       if (turnsToReturn <= maxTurns) {
         const path = G.hexMap.findPathAvoidDD(hero.pos.q, hero.pos.r, 0, 0);
