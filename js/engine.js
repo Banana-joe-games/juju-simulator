@@ -362,7 +362,7 @@ function initState() {
     tileDeck.push(r < wonderPct ? 'wonder' : r < wonderPct + (1 - wonderPct - dreadPct) ? 'common' : 'dread');
   }
   shuffle(tileDeck);
-  return {
+  const state = {
     phase: 'idle',
     turn: 0,
     round: 1,
@@ -377,8 +377,8 @@ function initState() {
     hydraHeads: [],
     hydraMaxHeads: 6,
     hydraDestroyedCount: 0,
-    hydraFloorEquipment: [],  // Equipment dropped at the Hydra, available for pickup
-    dungeonFloorEquipment: [],  // Equipment dropped in the dungeon, available for pickup
+    hydraFloorEquipment: [],
+    dungeonFloorEquipment: [],
     heroesInHydraArea: new Set(),
     wonderDeck: shuffle([...Array(WONDER_CARDS.length).keys()]),
     mishapDeck: shuffle([...Array(MISHAP_CARDS.length).keys()]),
