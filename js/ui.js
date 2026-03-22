@@ -1502,6 +1502,162 @@ function classifyDefeat(state) {
   return { cause:'other', detail:last.context, turn:last.turn };
 }
 
+function generateGameSummary(gameIndex) {
+  if (!G.debugMode) return null;
+  return {
+    game: gameIndex,
+    victory: G.victory,
+    turns: G.turn,
+    rounds: G.round,
+    tilesPlaced: G.tilesPlaced,
+    relicTurns: G.trace.filter(e => e.type === 'awakening' && e.details.type === 'relic_room').map(e => e.turn),
+    hydraSpawnTurn: G.tracker.pacing.hydraSpawn,
+    hydraHeads: G.tracker.hydraStartingHeads,
+    killOrder: G.tracker.hydraHeadKillOrder,
+    headsGrown: G.tracker.hydraGrowthLog.length,
+    heroSummaries: G.heroes.map(h => ({
+      id: h.id,
+      combats: (initHeroTracker(G.tracker, h.id) || {}).combats || 0,
+      wins: (initHeroTracker(G.tracker, h.id) || {}).wins || 0,
+      ko: (initHeroTracker(G.tracker, h.id) || {}).ko || 0,
+      gilEarned: h.gilEarned || 0,
+      gilSpent: (h.gilSpentSkill||0) + (h.gilSpentEquip||0),
+      totalStr: totalStr(h),
+      readySkills: readySkillCount(h),
+      equipment: h.equipment.map(e => e.name)
+    })),
+    keyMoments: G.trace.filter(e =>
+      (e.type === 'burn' && e.details.outcomeChanged) ||
+      e.type === 'passive' ||
+      (e.type === 'attack' && e.details.daredevilAutoWin) ||
+      e.type === 'applied'
+    ).slice(0, 20),
+    defeatCause: !G.victory ? classifyDefeat(G) : null
+  };
+}
+
+// ========== TRACE RENDERING ==========
+
+function formatTrace(traceData) {
+  let output = '';
+  let currentTurn = -1;
+  let currentRound = -1;
+
+  traceData.forEach(function(event) {
+    if (event.round !== currentRound) {
+      currentRound = event.round;
+      output += '\n=== ROUND ' + currentRound + ' ===\n';
+    }
+    if (event.turn !== currentTurn) {
+      currentTurn = event.turn;
+      var heroNames = {juju:'Juju (Hero)', gigi:'Gigi (Elf)', lulu:'Lulu (Mage)', eggo:'Eggo (Rogue)'};
+      output += '\n--- TURN ' + currentTurn + ': ' + (heroNames[event.hero] || event.hero || 'System') + ' ---\n';
+    }
+    output += formatTraceEvent(event);
+  });
+
+  return output;
+}
+
+function formatTraceEvent(e) {
+  var d = e.details;
+  switch(e.type) {
+    case 'hero_state':
+      var s = '  POSITION: ' + (typeof d.position === 'string' ? d.position : '(' + d.position.q + ', ' + d.position.r + ')') + '\n';
+      s += '  SKILLS: ' + d.skills.map(function(sk) { return '[' + sk.name + ':' + sk.state.toUpperCase() + ']'; }).join(' ') + '\n';
+      s += '  EQUIPMENT: ' + (d.equipment.length ? d.equipment.map(function(eq) { return '[' + eq.name + ' ' + (eq.str >= 0 ? '+' : '') + eq.str + ']'; }).join(' ') : '(none)') + '\n';
+      s += '  RELICS: ' + (d.relics.length ? d.relics.map(function(r) { return '[' + r.name + (r.owner === e.hero ? ' (owner)' : '') + ']'; }).join(' ') : '(none)') + '\n';
+      s += '  FOLLOWERS: ' + (d.followers.length ? d.followers.map(function(f) { return '[' + f.name + ' +' + f.str + ']'; }).join(' ') : '(none)') + '\n';
+      s += '  GIL: ' + d.gil + ' | STR TOTAL: ' + d.totalStr + ' | READY SKILLS: ' + d.readySkills + '\n';
+      return s;
+    case 'grimoire_failsafe':
+      return '  GRIMOIRE FAILSAFE: ' + d.hero + ' had 0 ready skills - recharged ' + d.recharged + '\n';
+    case 'wizard_hat':
+      return '  WIZARD HAT: roll ' + d.roll + ' - ' + (d.recharged ? 'recharged a skill' : 'no effect (< 4)') + '\n';
+    case 'herbalist':
+      return '  HERBALIST (' + d.source + ' cross-turn): recharged ' + d.target + "'s skill\n";
+    case 'roll':
+      return '  MOVEMENT ROLL: ' + d.value + (d.isFlame ? ' [FLAME]' : '') + ' (raw: ' + d.raw + (d.modifiers.length ? ', mods: ' + d.modifiers.join(', ') : '') + ')\n';
+    case 'intent':
+      return '  INTENT: ' + d.type + (d.reason ? ' (' + d.reason + ')' : '') + '\n';
+    case 'awakening':
+      return '  AWAKENING: placed ' + d.type + ' at (' + (d.position ? d.position.q + ', ' + d.position.r : '?') + ')\n';
+    case 'step':
+      return '    Step: (' + d.from.q + ',' + d.from.r + ') -> (' + d.to.q + ',' + d.to.r + ') [' + (d.isNew ? 'NEW ' : '') + d.tileType + ']' + (d.stopped ? ' <- STOPPED' : '') + '\n';
+    case 'resolve':
+      return '  ROOM: ' + d.tileType + ' at (' + (d.position && typeof d.position === 'object' ? d.position.q + ', ' + d.position.r : d.position) + ')\n';
+    case 'start':
+      return '  COMBAT vs ' + d.enemy + ' (STR ' + d.enemyStr + ', ' + d.tier + ')' + (d.enemyEffect ? ' [' + d.enemyEffect + ']' : '') + ':\n    Hero STR: ' + d.heroTotalStr + '\n';
+    case 'rolls':
+      return '    Hero roll: ' + d.heroRoll + (d.heroIsFlame ? ' [FLAME]' : '') + ' -> total ' + d.heroTotal + '\n    Enemy roll: ' + d.enemyRoll + (d.enemyIsFlame ? ' [FLAME]' : '') + ' -> total ' + d.enemyTotal + '\n';
+    case 'activate':
+      return '    SKILL: ' + d.hero + ' activates ' + d.skill + ' (' + d.context + ')' + (d.reason ? ': ' + d.reason : '') + '\n';
+    case 'burn':
+      return '    SKILL BURN: ' + d.hero + ' burns ' + d.skill + ', reroll ' + d.rerollType + ' die: ' + d.oldRoll + ' -> ' + d.newRoll + (d.outcomeChanged ? ' [CHANGED OUTCOME]' : '') + '\n';
+    case 'talent':
+      return '    TALENT: ' + d.hero + ' -> ' + d.talent + (d.blocked ? ' [BLOCKED]' : '') + ': ' + d.effect + '\n';
+    case 'result':
+      return '    RESULT: ' + (d.won ? 'WIN' : 'LOSS') + ' (margin ' + d.margin + ')' + (d.gilEarned ? '. Gil +' + d.gilEarned : '') + '\n';
+    case 'applied':
+      return '  KO: ' + d.hero + ' knocked out by ' + d.cause + (d.relicUsed ? ', relic saved' : '') + (d.shieldWall ? ', Shield Wall used' : '') + (d.dodge ? ', Dodge triggered' : '') + '\n    Equipment dropped: ' + ((d.equipmentDropped || []).join(', ') || 'none') + '. Followers lost: ' + ((d.followersLost || []).join(', ') || 'none') + '\n';
+    case 'passive':
+      return '  RELIC PASSIVE: ' + d.type + ' (' + d.hero + '): ' + JSON.stringify(d.details || {}) + '\n';
+    case 'attack':
+      return '  HYDRA ATTACK: ' + d.hero + ' vs ' + d.head + ' (STR ' + d.headStr + ')\n    Hero total: ' + d.heroTotal + ' -> ' + (d.won ? 'WIN' + (d.headDestroyed ? ' -- HEAD DESTROYED' : '') : 'LOSS') + (d.daredevilAutoWin ? ' [DAREDEVIL AUTO-WIN]' : '') + '\n';
+    case 'grow':
+      return '  HEAD GROWTH: ' + d.newHead + ' (source: ' + d.source + '). Alive: ' + d.aliveCount + '/' + d.maxHeads + '\n';
+    case 'monster_move':
+      return '  MONSTER: ' + d.enemy + ' moves (' + d.from.q + ',' + d.from.r + ') -> (' + d.to.q + ',' + d.to.r + ') toward ' + d.targetHero + (d.reachedHero ? ' <- ARRIVED ON HERO TILE' : '') + '\n';
+    case 'end':
+      return '\n=== GAME ' + (d.victory ? 'VICTORY' : 'DEFEAT') + ' at turn ' + d.turn + ' ===\n' + (d.cause ? '  Cause: ' + (typeof d.cause === 'object' ? d.cause.detail : d.cause) : '') + '\n';
+    default:
+      return '  ' + e.phase + '/' + e.type + ': ' + JSON.stringify(d) + '\n';
+  }
+}
+
+function formatBatchSummary(summary) {
+  if (!summary) return '';
+  var s = 'GAME #' + summary.game + ': ' + (summary.victory ? 'VICTORY' : 'DEFEAT') + ' in ' + summary.turns + ' turns\n';
+  s += '  Hydra: ' + (summary.hydraHeads || []).join(', ') + ' (spawned turn ' + summary.hydraSpawnTurn + ')\n';
+  if (summary.killOrder && summary.killOrder.length) {
+    s += '  Kill order: ' + summary.killOrder.map(function(k) { return k.head + ' (' + k.killedBy + ', T' + k.turn + ')'; }).join(' -> ') + '\n';
+  }
+  s += '  Heads grown: ' + summary.headsGrown + '\n';
+  summary.heroSummaries.forEach(function(h) {
+    s += '  ' + h.id + ': ' + h.combats + ' fights (' + h.wins + 'W), ' + h.ko + ' KOs, ' + h.gilEarned + ' Gil earned, ' + h.gilSpent + ' spent\n';
+  });
+  if (summary.keyMoments && summary.keyMoments.length) {
+    s += '  KEY MOMENTS:\n';
+    summary.keyMoments.forEach(function(m) {
+      s += '    T' + m.turn + ': ' + formatTraceEvent(m).trim() + '\n';
+    });
+  }
+  if (summary.defeatCause) s += '  Defeat: ' + summary.defeatCause.detail + '\n';
+  return s;
+}
+
+function downloadTrace() {
+  if (!G || !G.trace || G.trace.length === 0) return;
+  var text = formatTrace(G.trace);
+  var blob = new Blob([text], {type: 'text/plain'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'juju_trace_' + new Date().toISOString().slice(0,10) + '.txt';
+  a.click();
+}
+
+var batchSummaries = [];
+function downloadBatchDebug() {
+  if (batchSummaries.length === 0) return;
+  var text = 'JUJU SIMULATOR -- BATCH DEBUG LOG (' + batchSummaries.length + ' games)\n' + '='.repeat(60) + '\n\n';
+  batchSummaries.forEach(function(s) { text += formatBatchSummary(s) + '\n'; });
+  var blob = new Blob([text], {type: 'text/plain'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'juju_batch_debug_' + new Date().toISOString().slice(0,10) + '.txt';
+  a.click();
+}
+
 function runBatch() {
   homeRunBatch();
 }
@@ -1511,12 +1667,18 @@ function runBatchInternal(count) {
   document.getElementById('statusBar').textContent = 'Running batch: 0/' + count + '...';
 
   batchResults = [];
+  batchSummaries = [];
+  var isDebug = currentTweaks && currentTweaks.debugMode;
 
   let i = 0;
   function batchStep() {
     const batchSize = Math.min(5, count - i);
     for (let j = 0; j < batchSize; j++) {
       batchResults.push(runSilentGame());
+      if (isDebug) {
+        var summary = generateGameSummary(i);
+        if (summary) batchSummaries.push(summary);
+      }
       i++;
     }
     document.getElementById('statusBar').textContent = 'Running batch: ' + i + '/' + count + '...';
@@ -1527,6 +1689,10 @@ function runBatchInternal(count) {
       document.getElementById('batchBtn').disabled = false;
       document.getElementById('reportBtn').disabled = false;
       document.getElementById('statusBar').textContent = 'Batch complete: ' + count + ' games. Click Report to view analysis.';
+      if (batchSummaries.length > 0) {
+        var batchDbgBtn = document.getElementById('batchDebugBtn');
+        if (batchDbgBtn) batchDbgBtn.style.display = '';
+      }
       showLastReport();
     }
   }
@@ -1719,6 +1885,10 @@ function onGameEnd() {
   });
   lastReport = generateSingleGameReport();
   document.getElementById('reportBtn').disabled = false;
+  if (G.debugMode) {
+    var traceBtn = document.getElementById('traceBtn');
+    if (traceBtn) traceBtn.style.display = '';
+  }
   showLastReport();
 }
 

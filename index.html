@@ -421,6 +421,8 @@ input[type=range] {
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_prepareFirst"><label for="tw_prepareFirst">Prepare before Hydra (wait until fully equipped)</label></div>
+    <h4>Debug</h4>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_debugMode"><label for="tw_debugMode">Debug Trace (structured game log for verification)</label></div>
     <h4>Gil System (experimental)</h4>
     <div class="tweak-toggle"><input type="checkbox" id="tw_gilEnabled"><label for="tw_gilEnabled">Enable Gil (monsters drop gold, spend at entrance)</label></div>
     <div id="tw_gilSettings" style="display:none">
@@ -452,6 +454,8 @@ input[type=range] {
       <span style="color:var(--border);margin:0 4px">|</span>
       <button class="btn" id="batchBtn" onclick="homeRunBatch()">Batch 1000</button>
       <button class="btn" id="reportBtn" onclick="showLastReport()" disabled>Report</button>
+      <button class="btn" id="traceBtn" onclick="downloadTrace()" style="display:none">Trace</button>
+      <button class="btn" id="batchDebugBtn" onclick="downloadBatchDebug()" style="display:none">Batch Debug</button>
     </div>
   </div>
   <div class="left-panel" id="heroPanel"></div>

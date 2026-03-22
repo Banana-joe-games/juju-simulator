@@ -93,6 +93,7 @@ function resetTweaks() {
   document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
   document.getElementById('tw_gilBuyEquip').value = 6; document.getElementById('tw_gilBuyEquip_v').textContent = '6';
   document.getElementById('tw_gilSettings').style.display = 'none';
+  document.getElementById('tw_debugMode').checked = false;
   // Reset per-equipment
   LEGENDARY_EQUIPMENT.forEach(function(e, i) {
     var cb = document.getElementById('tw_eq_' + i + '_on');
@@ -155,7 +156,8 @@ function readTweaks() {
     gilEnabled: document.getElementById('tw_gilEnabled').checked,
     gilPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
     gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 3,
-    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 6
+    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 6,
+    debugMode: document.getElementById('tw_debugMode').checked
   };
 }
 
@@ -411,7 +413,9 @@ function initState() {
     tracker: freshTracker(),
     roomsVisited: { wonder: 0, common: 0, dread: 0 },
     crownUsedThisRound: false,
-    relicRooms: []
+    relicRooms: [],
+    debugMode: (tw.debugMode === true),
+    trace: []
   };
   G = state;
   G.hexMap = createHexMap(3); // confined map: 37 tiles (1+6+12+18), max 3 hexes from center
@@ -463,6 +467,18 @@ function checkAssassin(hero, roll) {
 
 function log(msg, cls = '') {
   G.log.push({ msg, cls });
+}
+
+function trace(phase, type, details) {
+  if (!G || !G.debugMode) return;
+  G.trace.push({
+    turn: G.turn,
+    round: G.round,
+    hero: G.heroes[G.currentHero] ? G.heroes[G.currentHero].id : null,
+    phase: phase,
+    type: type,
+    details: details
+  });
 }
 
 function readySkillCount(hero) {
@@ -690,9 +706,22 @@ function runTurn() {
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
 
+  trace('turn_start', 'hero_state', {
+    position: hero.pos,
+    skills: hero.skills.map((s,i) => ({name: s.name, state: hero.skillStates[i]})),
+    equipment: hero.equipment.map(e => ({name: e.name, str: e.str, type: e.type})),
+    relics: hero.heldRelics.map(r => ({name: r.name, owner: r.owner})),
+    followers: hero.followers.map(f => ({name: f.name, str: f.str || 0})),
+    stalkers: hero.stalkers.map(s => s.name),
+    gil: hero.gil || 0,
+    totalStr: totalStr(hero),
+    readySkills: readySkillCount(hero)
+  });
+
   // Ancestral Grimoire base passive: if ALL skills exhausted at turn start, recharge 1
   if (heroHasRelicFromOwner(hero, 'lulu') && readySkillCount(hero) === 0 && hero.skillStates.length > 0) {
     rechargeOneSkill(hero, 'grimoire_failsafe');
+    trace('turn_start', 'grimoire_failsafe', {hero: hero.id, recharged: 'skill'});
     log(`  📖 Ancestral Grimoire: ${hero.name} starts with 0 ready skills — recharges 1!`, 'legendary');
   }
 
@@ -705,8 +734,10 @@ function runTurn() {
     const r = Math.floor(Math.random() * 6) + 1;
     if (r >= 4) {
       rechargeOneSkill(hero, 'wizard_hat');
+      trace('turn_start', 'wizard_hat', {hero: hero.id, roll: r, recharged: true});
       log(`  🎩 Wizard Hat: rolled ${r} — recharged a skill!`, 'legendary');
     } else {
+      trace('turn_start', 'wizard_hat', {hero: hero.id, roll: r, recharged: null});
       log(`  🎩 Wizard Hat: rolled ${r} — no recharge`, 'system');
     }
   }
@@ -727,6 +758,7 @@ function runTurn() {
       useSkill(gigiForHerb, 'Herbalist');
       rechargeOneSkill(neediest, 'herbalist');
       trackSkill('gigi', 'Herbalist', 'activated');
+      trace('turn_start', 'herbalist', {source: 'gigi', target: neediest.id, recharged: 'skill'});
       log(`  🌿 Herbalist: Gigi recharges a skill for ${neediest.name}${neediest.id === 'gigi' ? ' (self)' : ''}!`, 'wonder');
     }
   }
@@ -986,6 +1018,14 @@ function movePhase(hero) {
 
   log(`${hero.name} rolls ${moveVal}${isFlame ? ' 🔥 FLAME' : ''} for movement`);
 
+  {
+    const mods = [];
+    if (hero.followers.find(f => f.effect === 'movement_+2')) mods.push('Spectral Horse +2');
+    if (hero.equipment.find(e => e.effect === 'move_2_dice')) mods.push('Ninja Tabi (2 dice)');
+    if (hasStalker(hero, 'move_1_only')) mods.push('Baba Yaga (limit 1)');
+    trace('movement', 'roll', {hero: hero.id, value: moveVal, isFlame: isFlame, raw: roll.val, modifiers: mods});
+  }
+
   // Talent trigger on movement flame
   if (isFlame && !hero.talentUsedThisTurn) {
     triggerTalent(hero, 'movement');
@@ -993,11 +1033,20 @@ function movePhase(hero) {
 
   // Awakening check (tile 10+)
   if (isFlame && G.tilesPlaced >= 10) {
+    const preExit = G.exitPlaced;
+    const preRelicRooms = G.relicRoomsPlaced;
     awakenEffect(hero);
+    if (!preExit && G.exitPlaced) {
+      trace('movement', 'awakening', {type: 'exit', position: G.exitHex ? {q: G.exitHex.q, r: G.exitHex.r} : null});
+    } else if (G.relicRoomsPlaced > preRelicRooms) {
+      const rr = G.relicRooms[G.relicRooms.length - 1];
+      trace('movement', 'awakening', {type: 'relic_room', position: rr ? {q: rr.q, r: rr.r} : null});
+    }
   }
 
   // Move (hex-aware)
   const intent = decideMovementIntent(hero, moveVal);
+  trace('movement', 'intent', {type: intent.type, reason: intent.reason || 'explore', direction: intent.dirIndex});
   let currentQ = hero.pos.q;
   let currentR = hero.pos.r;
   let destTileType = null;
@@ -1192,6 +1241,7 @@ function movePhase(hero) {
   }
 
   // Room resolution
+  trace('room', 'resolve', {tileType: destTileType, position: hero.pos});
   resolveRoom(hero, destTileType);
 
   // Vanga: draw legendary on Wonder destination
@@ -1586,6 +1636,7 @@ function combat(hero, enemyCard, tier) {
   ht.combats++;
   trackEncounter(enemyCard.name, 'drawn');
   let enemyStr = enemyCard.str || 0;
+  trace('combat', 'start', {hero: hero.id, enemy: enemyCard.name, enemyStr: enemyStr, enemyEffect: enemyCard.effect || null, tier: tier, heroTotalStr: totalStr(hero)});
 
   // === TWEAKS: enemy STR modifier ===
   if (G._tweaks) {
@@ -1907,6 +1958,7 @@ function combat(hero, enemyCard, tier) {
   const _lfr = G._lastFightResult || {};
   G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, heroTotal:_lfr.heroTotal, enemyTotal:_lfr.enemyTotal, won:true, margin:_lfr.margin, tier, turn:G.turn, readySkills:readySkillCount(hero), equipCount:hero.equipment.length, followerCount:hero.followers.length, heroTotalStr:totalStr(hero) });
   initHeroTracker(G.tracker, hero.id).enemiesKilled++;
+  trace('combat', 'result', {hero: hero.id, enemy: enemyCard.name, won: true, margin: _lfr.margin || 0, gilEarned: 0});
   log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
 
   // === ON-WIN EFFECTS ===
@@ -2290,6 +2342,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
       if (oldTotal < enemyTotal + beatMargin && heroTotal >= enemyTotal + beatMargin) {
         trackSkill(hero.id, 'Skill Burn', 'turnedFight');
       }
+      trace('skill', 'burn', {hero: hero.id, skill: 'Skill Burn', rerollType: 'hero', oldRoll: heroRoll.val, newRoll: rerollHeroVal, outcomeChanged: heroTotal >= enemyTotal + beatMargin});
       log(`    ⟲ Skill Burn! Rerolled own die to ${rerollHeroVal}${rerollHeroFlame ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
     } else if (burnChoice === 'enemy' && newEnemyTotal < enemyTotal) {
       exhaustOneSkill(hero, "Skill Burn (reroll)");
@@ -2300,11 +2353,17 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
       if (heroTotal < oldEnemyTotal + beatMargin && heroTotal >= enemyTotal + beatMargin) {
         trackSkill(hero.id, 'Skill Burn', 'turnedFight');
       }
+      trace('skill', 'burn', {hero: hero.id, skill: 'Skill Burn', rerollType: 'enemy', oldRoll: oldEnemyTotal, newRoll: enemyTotal, outcomeChanged: heroTotal >= enemyTotal + beatMargin});
       log(`    ⟲ Skill Burn! Rerolled ENEMY die: ${enemyCard.name} ${oldEnemyTotal} → ${enemyTotal}`, 'flame');
     }
   }
 
   // === RESOLUTION ===
+  trace('combat', 'rolls', {
+    heroRoll: heroRoll.val, heroIsFlame: isFlame,
+    enemyRoll: enemyRollResult ? enemyRollResult.val : 0, enemyIsFlame: enemyRollResult ? enemyRollResult.isFlame : false,
+    heroTotal: heroTotal, enemyTotal: enemyTotal
+  });
   if (heroTotal >= enemyTotal + beatMargin) {
     const margin = heroTotal - (enemyTotal + beatMargin);
     initHeroTracker(G.tracker, hero.id).damageDealt += margin;
@@ -2684,6 +2743,7 @@ function applyKO(hero) {
       log(`  💀 ${hero.name} falls at the Hydra — NO RELICS — GAME OVER!`, 'defeat');
       G.gameOver = true;
       G.tracker.deathMoments.push({ hero: hero.name, context: 'KO at Hydra with 0 relics', turn: G.turn });
+      trace('game', 'end', {victory: false, turn: G.turn, cause: {detail: hero.name + ' KO at Hydra with 0 relics'}});
       return;
     }
     G.stats.ko++;
@@ -2708,6 +2768,7 @@ function applyKO(hero) {
     hero.pos = {q:0, r:0};
     hero.runningToHydra = true;
     G.heroesInHydraArea.delete(hero.id);
+    trace('ko', 'applied', {hero: hero.id, cause: 'hydra', relicUsed: totalRelics > 0, shieldWall: false, dodge: false, equipmentDropped: hasShadowCloak ? [] : hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').map(e => e.name), followersLost: hero.followers.map(f => f.name)});
     log(`    ${hero.name} KO'd at Hydra! Respawned. Must run back.`, 'ko');
     return;
   }
@@ -2747,12 +2808,14 @@ function applyKO(hero) {
     hero.equipment = parasiteSword ? [parasiteSword] : [];
   }
   hero._lastKOEnemy = null;
+  const lostFollowerNames = hero.followers.map(f => f.name);
   removeFollowers(hero);
   hero.stalkers = [];
   hero._justRespawned = true;
   hero.pos = {q:0, r:0};
   if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
   hero.ko = true;
+  trace('ko', 'applied', {hero: hero.id, cause: 'combat', relicUsed: false, shieldWall: false, dodge: false, equipmentDropped: droppedEquip.split(', ').filter(s => s !== 'nothing'), followersLost: lostFollowerNames});
   log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}. Respawned at Entrance.`, 'ko');
 }
 
@@ -2762,11 +2825,13 @@ function triggerTalent(hero, context) {
   if (hasStalker(hero, 'no_flame_effect')) {
     log(`    Cursed Beggar blocks ${hero.name}'s talent!`, 'misfortune');
     trackTalent(hero.id, 'blocked');
+    trace('skill', 'talent', {hero: hero.id, talent: hero.talent || hero.id, effect: 'blocked by Cursed Beggar', blocked: true});
     return;
   }
   if (hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent')) {
     log(`    Parasite Sword blocks ${hero.name}'s talent!`, 'misfortune');
     trackTalent(hero.id, 'blocked');
+    trace('skill', 'talent', {hero: hero.id, talent: hero.talent || hero.id, effect: 'blocked by Parasite Sword', blocked: true});
     return;
   }
   hero.talentUsedThisTurn = true;
@@ -2776,6 +2841,7 @@ function triggerTalent(hero, context) {
   switch(hero.id) {
     case 'juju':
       if (context === 'combat') {
+        trace('skill', 'talent', {hero: hero.id, talent: 'Unwavering Power', effect: '+2 combat total', blocked: false});
         log(`    🔥 Unwavering Power! +2 to combat total`, 'flame');
       }
       break;
@@ -3224,6 +3290,8 @@ function hydraAttack(hero) {
   attackLog.margin = heroTotal - effectiveHeadStr;
   G.tracker.hydraCombatLog.push(attackLog);
 
+  trace('hydra', 'attack', {hero: hero.id, head: head.name, headStr: effectiveHeadStr, heroTotal: heroTotal, won: heroTotal >= effectiveHeadStr, headDestroyed: heroTotal >= effectiveHeadStr, daredevilAutoWin: false});
+
   if (heroTotal >= effectiveHeadStr) {
     head.destroyed = true;
     G.hydraDestroyedCount++;
@@ -3301,6 +3369,7 @@ function hydraAttack(hero) {
       log(`\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
       G.victory = true;
       G.gameOver = true;
+      trace('game', 'end', {victory: true, turn: G.turn, cause: 'all_heads_destroyed'});
     }
   } else {
     log(`  ✗ Attack fails! ${heroTotal} < ${effectiveHeadStr}`, 'ko');
@@ -3332,6 +3401,7 @@ function hydraAttack(hero) {
           log(`\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
           G.victory = true;
           G.gameOver = true;
+          trace('game', 'end', {victory: true, turn: G.turn, cause: 'all_heads_destroyed'});
         }
         return;
       }
@@ -3410,6 +3480,7 @@ function growHydraHead(source) {
       log(`  💀 OVERFLOW! Hydra exceeds max heads (${aliveCount}/${G.hydraMaxHeads}) — GAME OVER!`, 'defeat');
       G.gameOver = true;
       G.tracker.deathMoments.push({ hero: 'party', context: `Hydra overflow: ${aliveCount} heads alive, max was ${G.hydraMaxHeads}`, turn: G.turn });
+      trace('game', 'end', {victory: false, turn: G.turn, cause: 'hydra_overflow'});
     } else {
       log(`  ⚠ Hydra at max heads (${aliveCount}/${G.hydraMaxHeads}) — no new head grows (overflow disabled)`, 'system');
     }
@@ -3425,6 +3496,7 @@ function growHydraHead(source) {
     trackHydraHead(newHead.name, 'spawned');
     recalcHydraStr();
     G.tracker.hydraGrowthLog.push({ head: newHead.name, turn: G.turn, source: source || 'unknown' });
+    trace('hydra', 'grow', {source: source || 'unknown', newHead: newHead.name, aliveCount: G.hydraHeads.filter(h => !h.destroyed).length, maxHeads: G.hydraMaxHeads});
     log(`    New head grows: ${newHead.name} (STR ${newHead.effectiveStr})`, 'misfortune');
   } else {
     const dead = G.hydraHeads.find(h => h.destroyed);
@@ -3433,6 +3505,7 @@ function growHydraHead(source) {
       trackHydraHead(dead.name, 'spawned');  // count regeneration as a spawn
       recalcHydraStr();
       G.tracker.hydraGrowthLog.push({ head: dead.name, turn: G.turn, source: source || 'unknown' });
+      trace('hydra', 'grow', {source: source || 'unknown', newHead: dead.name, aliveCount: G.hydraHeads.filter(h => !h.destroyed).length, maxHeads: G.hydraMaxHeads});
       log(`    ${dead.name} regenerates!`, 'misfortune');
     }
   }
@@ -3562,6 +3635,7 @@ function monsterMovementPhase() {
         const heroOnTile = G.heroes.find(h => h.pos !== 'hydra' && !h.ko && h.pos.q === enemy.pos.q && h.pos.r === enemy.pos.r);
         if (heroOnTile) {
           const eName = enemy.card ? enemy.card.name : 'Enemy';
+          trace('end_round', 'monster_move', {enemy: eName, from: {q: bestPath[0].q, r: bestPath[0].r}, to: {q: enemy.pos.q, r: enemy.pos.r}, targetHero: heroOnTile.id, reachedHero: true});
           log(`  ⚠ ${eName} reaches ${heroOnTile.name}'s tile! Will engage next turn.`, 'misfortune');
           break; // stop moving, stay on tile
         }
