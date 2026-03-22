@@ -410,7 +410,8 @@ function initState() {
     stats: { turns:0, combats:0, ko:0, monstersKilled:0, skillBurns:0, relicsSpent:0 },
     tracker: freshTracker(),
     roomsVisited: { wonder: 0, common: 0, dread: 0 },
-    crownUsedThisRound: false
+    crownUsedThisRound: false,
+    relicRooms: []
   };
   G = state;
   G.hexMap = createHexMap(3); // confined map: 37 tiles (1+6+12+18), max 3 hexes from center
@@ -518,10 +519,10 @@ function heroHasRelicFromOwner(hero, ownerTag) {
 }
 
 function maxEquipSlots(hero) {
-  // Shadow Cloak owner (Eggo): 3 slots instead of 2
-  let base = (hero.id === 'eggo' && heroHasRelicFromOwner(hero, 'eggo')) ? 3 : 2;
-  if (hero.followers.find(f => f.effect === 'inventory_+1')) base = Math.max(base, 3);
-  return base;
+  let slots = 2;
+  if (hero.id === 'eggo' && heroHasRelicFromOwner(hero, 'eggo')) slots = 3;
+  if (hero.followers.find(f => f.effect === 'inventory_+1')) slots += 1;
+  return slots;
 }
 
 // ========== EQUIP / EXHAUST HELPERS ==========
@@ -782,6 +783,40 @@ function runTurn() {
     hero.houndFollowing = null;
     combat(hero, hound, 'misfortune');
     if (G.gameOver || hero.ko) { if (!G.gameOver) nextHero(); return; }
+  }
+
+  // === Existing Threat: enemy on hero's tile from monster movement ===
+  if (hero.pos !== 'hydra' && !hero.ko && G.enemiesOnBoard && G.enemiesOnBoard.length > 0) {
+    for (let ei = G.enemiesOnBoard.length - 1; ei >= 0; ei--) {
+      const boardEnemy = G.enemiesOnBoard[ei];
+      if (boardEnemy.pos && boardEnemy.pos.q === hero.pos.q && boardEnemy.pos.r === hero.pos.r) {
+        const eName = boardEnemy.card ? boardEnemy.card.name : 'Enemy';
+        const eTier = boardEnemy.tier || 'mishap';
+        log(`  ⚠ Existing Threat: ${eName} is on ${hero.name}'s tile! Forced combat!`, 'misfortune');
+        G.enemiesOnBoard.splice(ei, 1);
+        combat(hero, boardEnemy.card, eTier);
+        if (G.gameOver || hero.ko) { if (!G.gameOver) nextHero(); return; }
+      }
+    }
+  }
+
+  // === Relic Room collection: pick up uncollected relic on current tile ===
+  if (hero.pos !== 'hydra' && !hero.ko && G.relicRooms) {
+    for (let ri = G.relicRooms.length - 1; ri >= 0; ri--) {
+      const rr = G.relicRooms[ri];
+      if (rr.q === hero.pos.q && rr.r === hero.pos.r && rr.relic) {
+        const relic = rr.relic;
+        rr.relic = null;
+        G.relicsCollected++;
+        hero.heldRelics.push(relic);
+        if (G.tracker.pacing.firstRelic === 0) G.tracker.pacing.firstRelic = G.turn;
+        log(`    ${hero.name} collects ${relic.name} from the Relic Room! (${G.relicsCollected}/4 total)`, 'hydra');
+        if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
+          G.exitRevealed = true;
+          spawnHydra();
+        }
+      }
+    }
   }
 
   if (hero.runningToHydra) {
@@ -1131,6 +1166,27 @@ function movePhase(hero) {
           }
         });
         G.dungeonFloorEquipment.shift();
+      }
+    }
+  }
+
+  // Relic Room collection: pick up uncollected relic if hero lands on a relic room tile
+  if (!hero.ko && G.relicRooms) {
+    for (let ri = G.relicRooms.length - 1; ri >= 0; ri--) {
+      const rr = G.relicRooms[ri];
+      if (rr.q === hero.pos.q && rr.r === hero.pos.r && rr.relic) {
+        const relic = rr.relic;
+        rr.relic = null;
+        const mapTile = G.hexMap.get(rr.q, rr.r);
+        if (mapTile) mapTile.relic = null;
+        G.relicsCollected++;
+        hero.heldRelics.push(relic);
+        if (G.tracker.pacing.firstRelic === 0) G.tracker.pacing.firstRelic = G.turn;
+        log(`    ${hero.name} collects ${relic.name} from the Relic Room! (${G.relicsCollected}/4 total)`, 'hydra');
+        if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
+          G.exitRevealed = true;
+          spawnHydra();
+        }
       }
     }
   }
@@ -2136,11 +2192,15 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 
   // === FAITHFUL DOG: optionally reroll when hero rolls Flame (sacrifices Flame trigger for a potentially higher number) ===
   // Inverse of Skill Burn. One reroll per die from any source (Dog OR Skill Burn, not both).
-  // AI decision: almost NEVER reroll — talents are too valuable.
-  // Only reroll if: hero talent already used this turn AND roll value is 1-2 AND would lose combat.
+  // AI decision: almost NEVER reroll. Only as last resort when losing and flame benefit is marginal.
+  // NEVER reroll for Eggo (Dodge too valuable), or if Awakening would trigger, or if Juju in combat (+2 STR).
   const faithfulDog = hero.followers.find(f => f.effect === 'reroll_flame');
   let dogUsed = false;
-  if (faithfulDog && isFlame && hero.talentUsedThisTurn && heroRoll.val <= 2 && heroTotal < enemyTotal + beatMargin) {
+  const dogAwakeningWouldTrigger = G.tilesPlaced >= 10 && (G.relicPool.length > 0 || !G.exitPlaced);
+  const dogShouldNeverReroll = hero.id === 'eggo' || dogAwakeningWouldTrigger || (hero.id === 'juju' && !hero.talentUsedThisTurn);
+  const dogNoSkillBurn = readySkillCount(hero) === 0;
+  if (faithfulDog && isFlame && !dogShouldNeverReroll && heroRoll.val <= 2
+      && heroTotal < enemyTotal + beatMargin && dogNoSkillBurn) {
     const dogReroll = heroRollDie(hero);
     let dogRerollVal = dogReroll.val;
     let dogRerollFlame = dogReroll.isFlame;
@@ -2318,7 +2378,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
   if (enemyStr === undefined) enemyStr = enemyCard.str || 0;
 
   // === Crown of Courage (bodyguard): another hero with the Crown fights in hero's place ===
-  if (!G.crownUsedThisRound && !G.heroesInHydraArea.has(hero.id)) {
+  if (!G.crownUsedThisRound) {
     const crownHolder = G.heroes.find(h =>
       h.id !== hero.id && !h.ko && heroHasRelicFromOwner(h, 'juju')
     );
@@ -2443,7 +2503,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
 
   // Post-Awakening: enemy persists on the board after defeating a hero
   if (G.tilesPlaced >= 10 && hero.pos !== 'hydra' && enemyCard.type === 'enemy') {
-    G.enemiesOnBoard.push({ card: {...enemyCard}, pos: { q: hero.pos.q, r: hero.pos.r }, name: enemyCard.name });
+    G.enemiesOnBoard.push({ card: {...enemyCard}, pos: { q: hero.pos.q, r: hero.pos.r }, name: enemyCard.name, tier: tier });
   }
 
   hero._lastKOEnemy = enemyCard;  // Store which enemy caused KO, for dungeon floor guardian
@@ -2720,9 +2780,18 @@ function triggerTalent(hero, context) {
       }
       break;
     case 'gigi': {
-      // AI priority: Eggo (Dodge/Daredevil synergy) > Juju (+2 combat) > Lulu (Arcane Recharge) > self
+      // AI priority: self-gift is a real option, not just fallback
+      // Self-gift preferred when: Gigi has Grimoire (recharge 2 next turn),
+      // or Awakening could trigger (guarantees Flame for placement), or solo play
+      // Otherwise: Eggo (Dodge/Daredevil synergy) > Juju (+2 combat) > Lulu (Arcane Recharge) > self
       // At Hydra: gift to whoever attacks next
       let target = hero; // default to self
+      const gigiHasGrimoire = heroHasRelicFromOwner(hero, 'lulu');
+      const gigiAwakeningPossible = G.tilesPlaced >= 10 && (G.relicPool.length > 0 || !G.exitPlaced);
+      const aliveAllies = G.heroes.filter(h => h.id !== 'gigi' && !h.ko);
+      const isSolo = aliveAllies.length === 0;
+      const preferSelf = isSolo || gigiHasGrimoire || gigiAwakeningPossible;
+
       if (G.hydraActive) {
         // Gift to the next hero who will attack the Hydra
         const heroOrder = G.heroes;
@@ -2734,6 +2803,8 @@ function triggerTalent(hero, context) {
             break;
           }
         }
+      } else if (preferSelf) {
+        target = hero; // self-gift is the strategic choice
       } else {
         const eggo = G.heroes.find(h => h.id === 'eggo' && !h.ko);
         const juju = G.heroes.find(h => h.id === 'juju' && !h.ko);
@@ -2798,36 +2869,74 @@ function awakenEffect(hero) {
     log(`  🚪 The EXIT has been placed!`, 'hydra');
   } else if (G.relicPool.length > 0) {
     G.relicRoomsPlaced++;
+    const relic = G.relicPool.pop();
     // Place a Relic Room hex tile adjacent to hero's destination
     const rhq = hero.pos.q, rhr = hero.pos.r;
     const relicUnexplored = G.hexMap.unexploredNeighbors(rhq, rhr);
+    let relicPlacedOnMap = false;
+    let relicSpot = null;
     if (relicUnexplored.length > 0) {
       relicUnexplored.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
-      const relicSpot = relicUnexplored[0];
-      G.hexMap.set(relicSpot.q, relicSpot.r, {
+      relicSpot = relicUnexplored[0];
+      const relicTile = {
         q: relicSpot.q, r: relicSpot.r, type: 'relic_room', roomId: 'relic_room_' + G.relicRoomsPlaced,
-        enemies: [], equipment: []
-      });
+        enemies: [], equipment: [], relic: relic
+      };
+      G.hexMap.set(relicSpot.q, relicSpot.r, relicTile);
+      G.relicRooms.push({ q: relicSpot.q, r: relicSpot.r, relic: relic });
+      relicPlacedOnMap = true;
       log(`  💎 Relic Room #${G.relicRoomsPlaced} placed at (${relicSpot.q},${relicSpot.r})!`, 'hydra');
     } else {
       log(`  💎 Relic Room #${G.relicRoomsPlaced} placed! (no open hex — relic given directly)`, 'hydra');
     }
-    const relic = G.relicPool.pop();
-    G.relicsCollected++;
-    const matchedHero = G.heroes.find(h => h.id === relic.owner);
-    const leastRelics = [...G.heroes].sort((a, b) => a.heldRelics.length - b.heldRelics.length)[0];
-    let recipient;
-    if (matchedHero && matchedHero.heldRelics.length <= leastRelics.heldRelics.length) {
-      recipient = matchedHero;
+
+    if (relicPlacedOnMap && relicSpot) {
+      // AI enters adjacent relic room for free (always beneficial)
+      // Check if hero's current tile is adjacent to the newly placed relic room
+      const dist = hexDistance(hero.pos.q, hero.pos.r, relicSpot.q, relicSpot.r);
+      if (dist <= 1) {
+        // Determine best recipient for this relic
+        const matchedHero = G.heroes.find(h => h.id === relic.owner);
+        const leastRelics = [...G.heroes].sort((a, b) => a.heldRelics.length - b.heldRelics.length)[0];
+        let recipient;
+        if (matchedHero && matchedHero.heldRelics.length <= leastRelics.heldRelics.length) {
+          recipient = matchedHero;
+        } else {
+          recipient = leastRelics;
+        }
+        recipient.heldRelics.push(relic);
+        // Clear relic from tile and tracking
+        const rrEntry = G.relicRooms.find(r => r.q === relicSpot.q && r.r === relicSpot.r);
+        if (rrEntry) rrEntry.relic = null;
+        const mapTile = G.hexMap.get(relicSpot.q, relicSpot.r);
+        if (mapTile) mapTile.relic = null;
+        G.relicsCollected++;
+        if (G.tracker.pacing.firstRelic === 0) G.tracker.pacing.firstRelic = G.turn;
+        log(`    ${hero.name} enters Relic Room! ${recipient.name} claims ${relic.name}! (+1 STR, ${G.relicsCollected}/4 total)`, 'hydra');
+        if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
+          G.exitRevealed = true;
+          spawnHydra();
+        }
+      }
+      // If not adjacent, relic stays on the tile for later collection
     } else {
-      recipient = leastRelics;
-    }
-    recipient.heldRelics.push(relic);
-    if (G.tracker.pacing.firstRelic === 0) G.tracker.pacing.firstRelic = G.turn;
-    log(`    ${recipient.name} claims ${relic.name}! (+1 STR, ${G.relicsCollected}/4 total)`, 'hydra');
-    if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
-      G.exitRevealed = true;
-      spawnHydra();
+      // No open hex — give relic directly as fallback
+      const matchedHero = G.heroes.find(h => h.id === relic.owner);
+      const leastRelics = [...G.heroes].sort((a, b) => a.heldRelics.length - b.heldRelics.length)[0];
+      let recipient;
+      if (matchedHero && matchedHero.heldRelics.length <= leastRelics.heldRelics.length) {
+        recipient = matchedHero;
+      } else {
+        recipient = leastRelics;
+      }
+      recipient.heldRelics.push(relic);
+      G.relicsCollected++;
+      if (G.tracker.pacing.firstRelic === 0) G.tracker.pacing.firstRelic = G.turn;
+      log(`    ${recipient.name} claims ${relic.name}! (+1 STR, ${G.relicsCollected}/4 total)`, 'hydra');
+      if (G.relicRoomsPlaced >= 4 && !G.exitRevealed) {
+        G.exitRevealed = true;
+        spawnHydra();
+      }
     }
   }
 }
@@ -3435,16 +3544,26 @@ function monsterMovementPhase() {
       }
 
       if (bestPath && bestPath.length > 1) {
-        enemy.pos = { q: bestPath[1].q, r: bestPath[1].r };
+        const nextHex = { q: bestPath[1].q, r: bestPath[1].r };
 
-        // Check if enemy reached a hero's tile
+        // R2-3: No-stack — check if another enemy already occupies that hex
+        const occupied = G.enemiesOnBoard.some((other, oi) =>
+          oi !== ei && other.pos && other.pos.q === nextHex.q && other.pos.r === nextHex.r
+        );
+        if (occupied) {
+          break; // stop this enemy on its current position
+        }
+
+        enemy.pos = nextHex;
+
+        // R2-2: If enemy reaches a hero's tile, do NOT fight now.
+        // Leave the enemy on the tile — the hero will encounter it as an "Existing Threat"
+        // at the start of their next turn.
         const heroOnTile = G.heroes.find(h => h.pos !== 'hydra' && !h.ko && h.pos.q === enemy.pos.q && h.pos.r === enemy.pos.r);
         if (heroOnTile) {
           const eName = enemy.card ? enemy.card.name : 'Enemy';
-          log(`  ⚠ ${eName} reaches ${heroOnTile.name}! Forced combat!`, 'misfortune');
-          combat(heroOnTile, enemy.card, 'misfortune');
-          G.enemiesOnBoard.splice(ei, 1);
-          break; // enemy consumed by combat
+          log(`  ⚠ ${eName} reaches ${heroOnTile.name}'s tile! Will engage next turn.`, 'misfortune');
+          break; // stop moving, stay on tile
         }
       } else {
         break; // no path or already adjacent
