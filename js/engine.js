@@ -791,36 +791,82 @@ function runTurn() {
 function decideMovementIntent(hero, movePoints) {
   const dist = heroDistanceToEntrance(hero);
 
-  // Don't return if already running to Hydra
-  if (hero.runningToHydra) {
+  // Can't return if already running to Hydra or at Hydra
+  if (hero.runningToHydra || G.heroesInHydraArea.has(hero.id)) {
     const dirIndex = chooseExploreDirection(G.hexMap, hero.pos.q, hero.pos.r);
     return { type: 'explore', dirIndex };
   }
 
-  // Check if returning to entrance for Gil is worthwhile
-  // Allow return even after Hydra spawns — heroes in the dungeon can still go back
-  if (gilEnabled() && dist > 0 && !G.heroesInHydraArea.has(hero.id)) {
-    const exhaustedSkills = hero.skillStates.filter(s => s === 'exhausted').length;
-    const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
+  // Gil spending decision — think like a player
+  if (gilEnabled() && dist > 0) {
     const tw = G._tweaks || {};
     const rechargeCost = tw.gilRechargeSkillCost || 3;
     const equipCost = tw.gilBuyEquipCost || 6;
+    const gil = hero.gil;
 
-    const canBuyEquip = !hasWeapon && hero.gil >= equipCost;
-    const canRecharge = exhaustedSkills >= 1 && hero.gil >= rechargeCost;
-    const worthReturning = canBuyEquip || canRecharge;
+    // What do I need?
+    const totalSkills = hero.skillStates.length;
+    const exhaustedSkills = hero.skillStates.filter(s => s === 'exhausted').length;
+    const readySkills = totalSkills - exhaustedSkills;
+    const skillsFull = exhaustedSkills === 0;
 
-    // Feasible if can reach entrance in ~2 turns (avg roll 3.5)
-    const turnsToReturn = Math.ceil(dist / 3.5);
-    const feasible = turnsToReturn <= 3;
+    const equipCount = hero.equipment.length;
+    const maxSlots = maxEquipSlots(hero);
+    const equipFull = equipCount >= maxSlots;
+    const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
 
-    if (worthReturning && feasible) {
-      const path = G.hexMap.findPathAvoidDD(hero.pos.q, hero.pos.r, 0, 0);
-      if (path && path.length > 1) {
-        if (G.tracker) {
-          G.tracker.gilVisits.voluntary++;
+    // What can I buy?
+    const canAffordRecharge = gil >= rechargeCost;
+    const canAffordEquip = gil >= equipCost && G.legendaryDeck.length > 0;
+    const rechargesAffordable = Math.floor(gil / rechargeCost);
+
+    // Is it worth going back?
+    let reason = null;
+
+    // Priority 1: No weapon and can buy one — big power spike
+    if (!hasWeapon && canAffordEquip) {
+      reason = 'buy_weapon';
+    }
+    // Priority 2: No equipment at all — very vulnerable
+    else if (equipCount === 0 && canAffordEquip) {
+      reason = 'buy_equip_naked';
+    }
+    // Priority 3: All skills exhausted — can't burn for rerolls, very weak
+    else if (exhaustedSkills === totalSkills && canAffordRecharge) {
+      reason = 'recharge_all_exhausted';
+    }
+    // Priority 4: Most skills exhausted and have plenty of Gil
+    else if (exhaustedSkills >= 2 && rechargesAffordable >= 2) {
+      reason = 'recharge_multiple';
+    }
+    // Priority 5: Equipment slot open and can afford, plus some skill recharging
+    else if (!equipFull && canAffordEquip && exhaustedSkills >= 1 && gil >= equipCost + rechargeCost) {
+      reason = 'equip_and_recharge';
+    }
+    // Priority 6: Just enough for a recharge and really need it (only 1 ready skill left)
+    else if (readySkills <= 1 && exhaustedSkills >= 2 && canAffordRecharge) {
+      reason = 'recharge_desperate';
+    }
+
+    if (reason) {
+      // Is the trip feasible? Avg roll 3.5, is it worth the detour?
+      const turnsToReturn = Math.ceil(dist / 3.5);
+
+      // Higher value purchases justify longer trips
+      let maxTurns = 1; // default: only if very close
+      if (reason === 'buy_weapon' || reason === 'buy_equip_naked') maxTurns = 3;
+      else if (reason === 'recharge_all_exhausted') maxTurns = 3;
+      else if (reason === 'equip_and_recharge') maxTurns = 2;
+      else if (reason === 'recharge_multiple') maxTurns = 2;
+      else if (reason === 'recharge_desperate') maxTurns = 2;
+
+      if (turnsToReturn <= maxTurns) {
+        const path = G.hexMap.findPathAvoidDD(hero.pos.q, hero.pos.r, 0, 0);
+        if (path && path.length > 1) {
+          if (G.tracker) G.tracker.gilVisits.voluntary++;
+          log(`  💭 ${hero.name} decides to return to Entrance (${reason.replace(/_/g, ' ')})`, 'system');
+          return { type: 'return_entrance' };
         }
-        return { type: 'return_entrance' };
       }
     }
   }
