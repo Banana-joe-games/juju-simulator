@@ -791,8 +791,15 @@ function runTurn() {
 function decideMovementIntent(hero, movePoints) {
   const dist = heroDistanceToEntrance(hero);
 
+  // Don't return if already running to Hydra
+  if (hero.runningToHydra) {
+    const dirIndex = chooseExploreDirection(G.hexMap, hero.pos.q, hero.pos.r);
+    return { type: 'explore', dirIndex };
+  }
+
   // Check if returning to entrance for Gil is worthwhile
-  if (gilEnabled() && !G.hydraActive && dist > 0) {
+  // Allow return even after Hydra spawns — heroes in the dungeon can still go back
+  if (gilEnabled() && dist > 0 && !G.heroesInHydraArea.has(hero.id)) {
     const exhaustedSkills = hero.skillStates.filter(s => s === 'exhausted').length;
     const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
     const tw = G._tweaks || {};
@@ -800,17 +807,16 @@ function decideMovementIntent(hero, movePoints) {
     const equipCost = tw.gilBuyEquipCost || 6;
 
     const canBuyEquip = !hasWeapon && hero.gil >= equipCost;
-    const canRecharge = exhaustedSkills >= 2 && hero.gil >= rechargeCost * 2;
+    const canRecharge = exhaustedSkills >= 1 && hero.gil >= rechargeCost;
     const worthReturning = canBuyEquip || canRecharge;
 
     // Feasible if can reach entrance in ~2 turns (avg roll 3.5)
     const turnsToReturn = Math.ceil(dist / 3.5);
-    const feasible = turnsToReturn <= 2;
+    const feasible = turnsToReturn <= 3;
 
     if (worthReturning && feasible) {
       const path = G.hexMap.findPathAvoidDD(hero.pos.q, hero.pos.r, 0, 0);
       if (path && path.length > 1) {
-        // Track voluntary return
         if (G.tracker) {
           G.tracker.gilVisits.voluntary++;
         }
@@ -931,6 +937,11 @@ function movePhase(hero) {
 
   // Update hero position
   hero.pos = { q: currentQ, r: currentR };
+
+  // Spend Gil immediately if arrived at entrance
+  if (isAtEntrance(hero)) {
+    gilSpendAtEntrance(hero);
+  }
 
   if (!destTileType) destTileType = 'common';
 
