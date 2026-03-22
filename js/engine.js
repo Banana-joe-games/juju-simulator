@@ -925,42 +925,83 @@ function movePhase(hero) {
   let destTileType = null;
   let placedNewTiles = 0;
 
-  for (let step = 0; step < moveVal; step++) {
-    if (intent.type === 'explore') {
-      const nextStep = findExploreStep(G.hexMap, currentQ, currentR, intent.dirIndex);
-      if (!nextStep) break; // stuck
+  if (intent.type === 'explore') {
+    // STRAIGHT LINE movement: choose direction, move [roll] new tiles
+    // Explored tiles are JUMPED OVER (don't count as steps)
+    // Exception: Dread Dungeon ALWAYS stops you (explored or not)
+    const dir = HEX_DIRS[intent.dirIndex];
+    let stepsUsed = 0;
+    let scanQ = currentQ, scanR = currentR;
+    const maxScan = 20; // safety limit to prevent infinite loops
+    let scanned = 0;
 
-      if (!nextStep.explored) {
-        // Place new tile from deck
-        if (G.tileDeck.length === 0) break;
-        const tileType = G.tileDeck.pop();
-        G.tilesPlaced++;
-        placedNewTiles++;
-        const tile = {
-          q: nextStep.q, r: nextStep.r, type: tileType,
-          roomId: 'room_' + G.tilesPlaced, tileIndex: G.tilesPlaced,
-          enemies: [], equipment: []
-        };
-        G.hexMap.set(nextStep.q, nextStep.r, tile);
-        G.board.push({id: tile.roomId, type: tileType, enemies:[], equipment:[]});
-        currentQ = nextStep.q;
-        currentR = nextStep.r;
-        destTileType = tileType;
+    while (stepsUsed < moveVal && scanned < maxScan) {
+      scanQ += dir.q;
+      scanR += dir.r;
+      scanned++;
 
-        // Dread Dungeon stops movement
-        if (tileType === 'dread') {
-          log('  ⚠ Dread Dungeon! Movement stops.', 'misfortune');
+      if (!G.hexMap.isInBounds(scanQ, scanR)) {
+        // Hit edge of map — stop here
+        break;
+      }
+
+      if (G.hexMap.has(scanQ, scanR)) {
+        // Explored tile — check for Dread Dungeon
+        const existing = G.hexMap.get(scanQ, scanR);
+        if (existing.type === 'dread') {
+          // Dread Dungeon always stops movement
+          currentQ = scanQ;
+          currentR = scanR;
+          destTileType = 'dread';
+          log('  ⚠ Dread Dungeon blocks the path! Movement stops.', 'misfortune');
           break;
         }
-      } else {
-        // Walking through explored tile
-        currentQ = nextStep.q;
-        currentR = nextStep.r;
-        const existingTile = G.hexMap.get(currentQ, currentR);
-        destTileType = existingTile ? existingTile.type : 'common';
+        // Otherwise: JUMP OVER — don't count as step, don't stop
+        continue;
       }
-    } else if (intent.type === 'return_entrance') {
-      // Follow path back to entrance
+
+      // Unexplored hex — place new tile
+      if (G.tileDeck.length === 0) break;
+      const tileType = G.tileDeck.pop();
+      G.tilesPlaced++;
+      placedNewTiles++;
+      const tile = {
+        q: scanQ, r: scanR, type: tileType,
+        roomId: 'room_' + G.tilesPlaced, tileIndex: G.tilesPlaced,
+        enemies: [], equipment: []
+      };
+      G.hexMap.set(scanQ, scanR, tile);
+      G.board.push({id: tile.roomId, type: tileType, enemies:[], equipment:[]});
+      currentQ = scanQ;
+      currentR = scanR;
+      destTileType = tileType;
+      stepsUsed++;
+
+      // New Dread Dungeon stops movement immediately
+      if (tileType === 'dread') {
+        log('  ⚠ Dread Dungeon! Movement stops.', 'misfortune');
+        break;
+      }
+    }
+
+    // If we jumped over everything and placed nothing, land on last scanned explored tile
+    if (stepsUsed === 0 && scanned > 0 && currentQ === hero.pos.q && currentR === hero.pos.r) {
+      // Walk back to find the last valid explored tile along this line
+      let lastQ = currentQ, lastR = currentR;
+      let sQ = currentQ, sR = currentR;
+      for (let s = 0; s < scanned; s++) {
+        sQ += dir.q; sR += dir.r;
+        if (G.hexMap.has(sQ, sR)) { lastQ = sQ; lastR = sR; }
+      }
+      if (lastQ !== currentQ || lastR !== currentR) {
+        currentQ = lastQ; currentR = lastR;
+        const t = G.hexMap.get(currentQ, currentR);
+        destTileType = t ? t.type : 'common';
+      }
+    }
+  } else if (intent.type === 'return_entrance') {
+    // Return to entrance: walk through explored tiles step by step
+    for (let step = 0; step < moveVal; step++) {
       const path = G.hexMap.findPathAvoidDD(currentQ, currentR, 0, 0);
       if (!path || path.length <= 1) break;
       const nextStep = path[1];
@@ -968,7 +1009,7 @@ function movePhase(hero) {
       currentR = nextStep.r;
       destTileType = G.hexMap.get(currentQ, currentR)?.type || 'common';
 
-      // Check if arrived at entrance
+      // Arrived at entrance
       if (currentQ === 0 && currentR === 0) {
         log(`  ${hero.name} returns to the Entrance!`, 'wonder');
         break;
@@ -2465,18 +2506,28 @@ function triggerTalent(hero, context) {
 function awakenEffect(hero) {
   if (!G.exitPlaced) {
     G.exitPlaced = true;
-    // Place exit at a hex near the map edge
-    const explored = G.hexMap.allExplored();
-    const candidates = explored.filter(t => {
-      const d = hexDistance(0, 0, t.q, t.r);
-      return d >= 3 && t.type !== 'entrance';
-    });
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
-      G.exitHex = { q: candidates[0].q, r: candidates[0].r };
-    } else if (explored.length > 1) {
-      const farthest = explored.reduce((best, t) => hexDistance(0,0,t.q,t.r) > hexDistance(0,0,best.q,best.r) ? t : best);
-      G.exitHex = { q: farthest.q, r: farthest.r };
+    // Place exit ADJACENT to hero's current destination tile
+    const hq = hero.pos.q, hr = hero.pos.r;
+    const unexplored = G.hexMap.unexploredNeighbors(hq, hr);
+    if (unexplored.length > 0) {
+      // Prefer the adjacent hex farthest from entrance
+      unexplored.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
+      const chosen = unexplored[0];
+      G.exitHex = { q: chosen.q, r: chosen.r };
+      G.hexMap.set(chosen.q, chosen.r, {
+        q: chosen.q, r: chosen.r, type: 'exit', roomId: 'exit',
+        enemies: [], equipment: []
+      });
+    } else {
+      // No unexplored neighbors: use an explored non-entrance neighbor
+      const explored = G.hexMap.exploredNeighbors(hq, hr)
+        .filter(n => !(n.q === 0 && n.r === 0))
+        .map(n => G.hexMap.get(n.q, n.r))
+        .filter(Boolean);
+      if (explored.length > 0) {
+        explored.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
+        G.exitHex = { q: explored[0].q, r: explored[0].r };
+      }
     }
     log(`  🚪 The EXIT has been placed!`, 'hydra');
   } else if (G.relicPool.length > 0) {

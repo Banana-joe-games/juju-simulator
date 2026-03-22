@@ -61,13 +61,15 @@ function renderHexMap() {
     entrance: '#d4a843',
     wonder: '#1a4a2a',
     common: '#1e1e2e',
-    dread: '#4a1520'
+    dread: '#4a1520',
+    exit: '#2a1a3a'
   };
   const tileBorders = {
     entrance: '#d4a843',
     wonder: '#2d8a4e',
     common: '#2a2a3a',
-    dread: '#b02030'
+    dread: '#b02030',
+    exit: '#7b2d8e'
   };
   const heroColors = { juju:'#cc4444', gigi:'#44aa44', lulu:'#6644cc', eggo:'#cc8833' };
   const heroInitials = { juju:'J', gigi:'G', lulu:'L', eggo:'E' };
