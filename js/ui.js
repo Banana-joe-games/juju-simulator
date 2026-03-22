@@ -417,6 +417,75 @@ function generateReport(results) {
   html += `</table></div>`;
   html += `</div>`;
 
+  // === HERO STATE AT HYDRA AWAKENING ===
+  html += `<div class="report-section"><h3>Hero State at Hydra Awakening</h3>`;
+  html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+  html += `<tr style="border-bottom:1px solid var(--border)"><th></th>`;
+  heroIds.forEach(id => html += `<th style="color:var(--${id})">${heroNames[id]}</th>`);
+  html += `</tr>`;
+
+  const awakeMetrics = [
+    {label: 'Distance to Hydra', key: 'distanceToHydra'},
+    {label: 'Equipment', key: 'equipCount'},
+    {label: 'Ready Skills', key: 'readySkills'},
+    {label: 'Followers', key: 'followerCount'},
+    {label: 'Relics', key: 'relics'},
+    {label: 'Gil', key: 'gil'},
+    {label: 'Total STR', key: 'totalStr'}
+  ];
+
+  awakeMetrics.forEach(m => {
+    html += `<tr><td style="color:var(--dim)">${m.label}</td>`;
+    heroIds.forEach(id => {
+      const vals = results.map(r => {
+        const s = r.tracker.heroStateAtAwakening && r.tracker.heroStateAtAwakening[id];
+        return s ? (s[m.key] || 0) : 0;
+      }).filter(v => v !== undefined);
+      const avg = vals.length ? fix1(vals.reduce((a,b)=>a+b,0)/vals.length) : '-';
+      html += `<td style="text-align:center">${avg}</td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</table></div>`;
+
+  // === HYDRA ARRIVAL SNAPSHOT ===
+  html += `<div class="report-section"><h3>Hero Arrival Snapshot</h3>`;
+  const arrivalData = {};
+  results.forEach(r => {
+    (r.tracker.hydraArrivals || []).forEach(a => {
+      if (!arrivalData[a.heroId]) arrivalData[a.heroId] = [];
+      arrivalData[a.heroId].push(a);
+    });
+  });
+
+  html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+  html += `<tr style="border-bottom:1px solid var(--border)"><th></th>`;
+  heroIds.forEach(id => html += `<th style="color:var(--${id})">${heroNames[id]}</th>`);
+  html += `</tr>`;
+
+  const arrivalMetrics = [
+    {label: 'Avg Arrival Turn', fn: a => a.turn},
+    {label: 'Avg Total STR', fn: a => a.totalStr},
+    {label: 'Avg Equipment', fn: a => a.equipment ? a.equipment.length : 0},
+    {label: 'Avg Ready Skills', fn: a => a.readySkills},
+    {label: 'Avg Followers', fn: a => a.followers ? a.followers.length : 0},
+  ];
+
+  arrivalMetrics.forEach(m => {
+    html += `<tr><td style="color:var(--dim)">${m.label}</td>`;
+    heroIds.forEach(id => {
+      const arrivals = arrivalData[id] || [];
+      if (arrivals.length > 0) {
+        const avg = fix1(arrivals.reduce((s, a) => s + m.fn(a), 0) / arrivals.length);
+        html += `<td style="text-align:center">${avg}</td>`;
+      } else {
+        html += `<td style="text-align:center;color:var(--dim)">-</td>`;
+      }
+    });
+    html += `</tr>`;
+  });
+  html += `</table></div>`;
+
   // ===================== SECTION 3: HERO × ENEMY MATCHUP MATRIX =====================
   html += `<div class="report-section"><h3>Hero × Enemy Matchup Matrix</h3>`;
 
@@ -805,6 +874,13 @@ function generateReport(results) {
       html += statRow(m.label, `Turn ${mean} (±${sd})`);
     }
   });
+  // Exit placement milestone
+  const exitTurns = results.map(r => r.tracker.pacing.exitPlaced || 0).filter(v => v > 0);
+  if (exitTurns.length > 0) {
+    const exitMean = fix1(exitTurns.reduce((a,b)=>a+b,0) / exitTurns.length);
+    const exitSd = fix1(Math.sqrt(exitTurns.reduce((s,v) => s + Math.pow(v - parseFloat(exitMean), 2), 0) / exitTurns.length));
+    html += statRow('Exit Placed', `Turn ${exitMean} (±${exitSd})`);
+  }
   html += `</div>`;
 
   // 9b: Phase durations
@@ -1750,7 +1826,7 @@ function organizeReportTabs() {
   // Map section titles to tabs
   const tabMap = {
     'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
-    'tab-heroes': ['Hero Performance','Hero × Enemy','Hero × Hydra'],
+    'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower'],
     'tab-hydra-econ': ['Gil Economy','Hydra Fight'],

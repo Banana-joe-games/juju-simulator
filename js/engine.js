@@ -90,8 +90,8 @@ function resetTweaks() {
 
   document.getElementById('tw_gilEnabled').checked = false;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
-  document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
-  document.getElementById('tw_gilBuyEquip').value = 6; document.getElementById('tw_gilBuyEquip_v').textContent = '6';
+  document.getElementById('tw_gilRechargeSkill').value = 2; document.getElementById('tw_gilRechargeSkill_v').textContent = '2';
+  document.getElementById('tw_gilBuyEquip').value = 4; document.getElementById('tw_gilBuyEquip_v').textContent = '4';
   document.getElementById('tw_gilSettings').style.display = 'none';
   document.getElementById('tw_debugMode').checked = false;
   // Reset per-equipment
@@ -155,8 +155,8 @@ function readTweaks() {
 
     gilEnabled: document.getElementById('tw_gilEnabled').checked,
     gilPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
-    gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 3,
-    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 6,
+    gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 2,
+    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 4,
     debugMode: document.getElementById('tw_debugMode').checked
   };
 }
@@ -189,7 +189,7 @@ function getTweaksDiff(tweaks) {
   if (!tweaks.followersEnabled) diffs.push('Followers: DISABLED');
   if (!tweaks.overflowGameOver) diffs.push('Hydra Overflow: NOT game over (heads just stop growing)');
 
-  if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||3) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||6) + ' Gil)');
+  if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||2) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||4) + ' Gil)');
   return diffs;
 }
 
@@ -244,7 +244,8 @@ function freshTracker() {
     // Talent triggers
     talents: {},
     // Pacing milestones (turn numbers)
-    pacing: { firstEquip: 0, firstKO: 0, firstRelic: 0, hydraSpawn: 0, hydraArrival: 0 },
+    pacing: { firstEquip: 0, firstKO: 0, firstRelic: 0, hydraSpawn: 0, hydraArrival: 0, exitPlaced: 0 },
+    heroStateAtAwakening: {},
     // NEW fields for 13-section report
     heroEndState: {},
     battlecryDetails: [],
@@ -635,8 +636,8 @@ function gilSpendAtEntrance(hero) {
     else G.tracker.gilVisits.voluntary++;
   }
   const tw = G._tweaks || {};
-  const rechargeCost = tw.gilRechargeSkillCost || 3;
-  const equipCost = tw.gilBuyEquipCost || 6;
+  const rechargeCost = tw.gilRechargeSkillCost || 2;
+  const equipCost = tw.gilBuyEquipCost || 4;
   // AI priority: buy equipment if no weapon AND can afford, else recharge skills
   const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
   const exhaustedSkills = hero.skillStates.filter(s => s === 'exhausted').length;
@@ -930,8 +931,8 @@ function decideMovementIntent(hero, movePoints) {
   // Gil spending decision — think like a player
   if (gilEnabled() && dist > 0) {
     const tw = G._tweaks || {};
-    const rechargeCost = tw.gilRechargeSkillCost || 3;
-    const equipCost = tw.gilBuyEquipCost || 6;
+    const rechargeCost = tw.gilRechargeSkillCost || 2;
+    const equipCost = tw.gilBuyEquipCost || 4;
     const gil = hero.gil;
 
     // What do I need?
@@ -3126,35 +3127,58 @@ function triggerTalent(hero, context) {
 
 // ========== AWAKENING ==========
 function awakenEffect(hero) {
+  // New Exit placement: minimize average BFS distance from all heroes
   if (!G.exitPlaced) {
     G.exitPlaced = true;
-    // Place exit ADJACENT to hero's current destination tile
     const hq = hero.pos.q, hr = hero.pos.r;
-    const unexplored = G.hexMap.unexploredNeighbors(hq, hr);
-    if (unexplored.length > 0) {
-      // Prefer the adjacent hex farthest from entrance
-      unexplored.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
-      const chosen = unexplored[0];
-      G.exitHex = { q: chosen.q, r: chosen.r };
-      G.hexMap.set(chosen.q, chosen.r, {
-        q: chosen.q, r: chosen.r, type: 'exit', roomId: 'exit',
-        enemies: [], equipment: []
+    const candidates = G.hexMap.unexploredNeighbors(hq, hr);
+
+    // Fallback: explored non-entrance neighbors
+    if (candidates.length === 0) {
+      const explored = [];
+      HEX_DIRS.forEach(d => {
+        const nq = hq + d.q, nr = hr + d.r;
+        if (G.hexMap.isInBounds(nq, nr) && G.hexMap.has(nq, nr) && !(nq === 0 && nr === 0)) {
+          explored.push({q: nq, r: nr});
+        }
       });
-    } else {
-      // No unexplored neighbors: use an explored non-entrance neighbor
-      const explored = G.hexMap.exploredNeighbors(hq, hr)
-        .filter(n => !(n.q === 0 && n.r === 0))
-        .map(n => G.hexMap.get(n.q, n.r))
-        .filter(Boolean);
-      if (explored.length > 0) {
-        explored.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
-        const chosen = explored[0];
-        G.exitHex = { q: chosen.q, r: chosen.r };
-        // Mark existing tile as exit type
-        const existingTile = G.hexMap.get(chosen.q, chosen.r);
-        if (existingTile) existingTile.type = 'exit';
+      candidates.push(...explored);
+    }
+
+    if (candidates.length > 0) {
+      // Score each candidate: average BFS distance from all 4 heroes
+      let bestCandidate = candidates[0];
+      let bestAvgDist = Infinity;
+
+      candidates.forEach(c => {
+        let totalDist = 0;
+        G.heroes.forEach(h => {
+          // Use hex distance as approximation (BFS would be expensive)
+          totalDist += hexDistance(h.pos.q, h.pos.r, c.q, c.r);
+        });
+        const avgDist = totalDist / G.heroes.length;
+        if (avgDist < bestAvgDist) {
+          bestAvgDist = avgDist;
+          bestCandidate = c;
+        }
+      });
+
+      G.exitHex = { q: bestCandidate.q, r: bestCandidate.r };
+      // Place exit tile on the map
+      if (!G.hexMap.has(bestCandidate.q, bestCandidate.r)) {
+        G.hexMap.set(bestCandidate.q, bestCandidate.r, {
+          q: bestCandidate.q, r: bestCandidate.r,
+          type: 'exit', roomId: 'exit'
+        });
+      } else {
+        // Overwrite existing tile with exit
+        const existing = G.hexMap.get(bestCandidate.q, bestCandidate.r);
+        existing.type = 'exit';
+        existing.roomId = 'exit';
       }
     }
+
+    G.tracker.pacing.exitPlaced = G.turn;
     log(`  🚪 The EXIT has been placed!`, 'hydra');
   } else if (G.relicPool.length > 0) {
     G.relicRoomsPlaced++;
@@ -3244,6 +3268,23 @@ function spawnHydra() {
   G.hydraHeads.forEach(h => {
     trackHydraHead(h.name, 'spawned');
     log(`    Head: ${h.name} (STR ${h.effectiveStr}) — ${h.skill}`, 'hydra');
+  });
+  // Snapshot hero state at awakening
+  G.tracker.heroStateAtAwakening = {};
+  G.heroes.forEach(h => {
+    const distToExit = G.exitHex ? hexDistance(h.pos.q, h.pos.r, G.exitHex.q, G.exitHex.r) : -1;
+    G.tracker.heroStateAtAwakening[h.id] = {
+      position: { q: h.pos.q, r: h.pos.r },
+      distanceToHydra: distToExit,
+      equipCount: h.equipment.length,
+      equipNames: h.equipment.map(e => e.name),
+      readySkills: readySkillCount(h),
+      totalSkills: h.skills.length,
+      followerCount: h.followers.length,
+      relics: h.heldRelics.length,
+      gil: h.gil || 0,
+      totalStr: totalStr(h)
+    };
   });
   log(`    ${G.hydraHeads.length} heads active. Max: ${G.hydraMaxHeads}.`, 'hydra');
 }
