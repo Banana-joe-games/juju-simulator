@@ -874,6 +874,24 @@ function freshTracker() {
     talents: {},
     // Pacing milestones (turn numbers)
     pacing: { firstEquip: 0, firstKO: 0, firstRelic: 0, hydraSpawn: 0, hydraArrival: 0 },
+    // NEW fields for 13-section report
+    heroEndState: {},
+    battlecryDetails: [],
+    secondNatureDetails: [],
+    copycatDetails: [],
+    equipmentTimeline: {},
+    enemyEffectImpact: {},
+    decisionEnemies: {},
+    enemiesAtGameEnd: [],
+    gilVisits: { voluntary:0, koRespawn:0 },
+    skillRechargeSources: {},
+    hydraStartingHeads: [],
+    hydraHeadKillOrder: [],
+    hydraGrowthLog: [],
+    trapResourcesLost: {},
+    followerTimeline: {},
+    emptyTurns: 0,
+    hydraArrivals: [],
   };
 }
 
@@ -890,6 +908,8 @@ function initHeroTracker(t, heroId) {
       equipmentHeld: [], // snapshot at end
       maxStr: 0,
       neededButDidntHave: [], // skill gap analysis entries
+      hydraHeadsDestroyed: 0,
+      enemiesKilled: 0,
     };
   }
   return t.heroes[heroId];
@@ -898,6 +918,14 @@ function initHeroTracker(t, heroId) {
 function trackEquip(name, field) {
   if (!G.tracker.equipment[name]) G.tracker.equipment[name] = { drawn:0, equipped:0, usedEffect:0, wonWith:0, lostWith:0, discarded:0, survivedKO:0, strTotal:0 };
   G.tracker.equipment[name][field]++;
+  if (field === 'equipped') {
+    if (!G.tracker.equipmentTimeline[name]) G.tracker.equipmentTimeline[name] = { turnEquipped:[], turnLost:[], heldAtHydra:0 };
+    G.tracker.equipmentTimeline[name].turnEquipped.push(G.turn);
+  }
+  if (field === 'discarded' || field === 'lostWith') {
+    if (!G.tracker.equipmentTimeline[name]) G.tracker.equipmentTimeline[name] = { turnEquipped:[], turnLost:[], heldAtHydra:0 };
+    G.tracker.equipmentTimeline[name].turnLost.push(G.turn);
+  }
 }
 
 function trackEncounter(name, field) {
@@ -909,6 +937,10 @@ function trackFollower(name, field) {
   if (!G.tracker.followers) G.tracker.followers = {};
   if (!G.tracker.followers[name]) G.tracker.followers[name] = { drawn:0, helpedWin:0, lost:0 };
   if (G.tracker.followers[name][field] !== undefined) G.tracker.followers[name][field]++;
+  // Timeline tracking
+  if (!G.tracker.followerTimeline[name]) G.tracker.followerTimeline[name] = { turnDrawn:[], turnLost:[], heldAtEnd:0 };
+  if (field === 'drawn') G.tracker.followerTimeline[name].turnDrawn.push(G.turn);
+  if (field === 'lost') G.tracker.followerTimeline[name].turnLost.push(G.turn);
 }
 
 function trackSkill(heroId, skillName, field) {
@@ -929,6 +961,10 @@ function trackSkill(heroId, skillName, field) {
 function trackTrap(name, field) {
   if (!G.tracker.traps[name]) G.tracker.traps[name] = { triggered:0, survived:0, ko:0 };
   G.tracker.traps[name][field]++;
+}
+function trackTrapResource(name, resource) {
+  if (!G.tracker.trapResourcesLost[name]) G.tracker.trapResourcesLost[name] = { equipLost:0, followersLost:0, skillsExhausted:0 };
+  G.tracker.trapResourcesLost[name][resource]++;
 }
 
 function trackStalker(name, field) {
@@ -1157,15 +1193,19 @@ function exhaustOneSkill(hero, reason) {
 
 function checkCursedArmour(hero) {
   if (readySkillCount(hero) === 0 && hero.equipment.find(e => e.effect === 'exhaust_all_recharge_1')) {
-    rechargeOneSkill(hero);
+    rechargeOneSkill(hero, 'cursed_armour');
     log(`    Cursed Armour: recharges 1 skill!`, 'legendary');
   }
 }
 
-function rechargeOneSkill(hero) {
+function rechargeOneSkill(hero, source) {
   const idx = hero.skillStates.findIndex(s => s === 'exhausted');
   if (idx >= 0) {
     hero.skillStates[idx] = 'ready';
+    if (G && G.tracker && source) {
+      if (!G.tracker.skillRechargeSources[source]) G.tracker.skillRechargeSources[source] = 0;
+      G.tracker.skillRechargeSources[source]++;
+    }
   }
 }
 
@@ -1184,6 +1224,12 @@ function gilReward(hero, enemyStr) {
 function gilSpendAtEntrance(hero) {
   if (!gilEnabled()) return;
   if (hero.pos !== 'entrance') return;
+  // Track visit type
+  if (G.tracker) {
+    const wasKO = hero._justRespawned;
+    if (wasKO) G.tracker.gilVisits.koRespawn++;
+    else G.tracker.gilVisits.voluntary++;
+  }
   const tw = G._tweaks || {};
   const rechargeCost = tw.gilRechargeSkillCost || 3;
   const equipCost = tw.gilBuyEquipCost || 6;
@@ -1201,7 +1247,7 @@ function gilSpendAtEntrance(hero) {
   while (hero.gil >= rechargeCost && exhaustedSkills > 0 && hero.skillStates.some(s => s === 'exhausted')) {
     hero.gil -= rechargeCost;
     hero.gilSpentSkill += rechargeCost;
-    rechargeOneSkill(hero);
+    rechargeOneSkill(hero, 'gil');
     log(`  💰 Spent ${rechargeCost} Gil → recharged 1 Skill! (${hero.gil} Gil left)`, 'legendary');
   }
 }
@@ -1244,12 +1290,13 @@ function runTurn() {
 
   // Gil: spend at entrance if at entrance
   gilSpendAtEntrance(hero);
+  hero._justRespawned = false;
 
   // Turn-start: Wizard Hat
   if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
     const r = Math.floor(Math.random() * 6) + 1;
     if (r >= 4) {
-      rechargeOneSkill(hero);
+      rechargeOneSkill(hero, 'wizard_hat');
       log(`  🎩 Wizard Hat: rolled ${r} — recharged a skill!`, 'legendary');
     } else {
       log(`  🎩 Wizard Hat: rolled ${r} — no recharge`, 'system');
@@ -1270,7 +1317,7 @@ function runTurn() {
     })[0];
     if (neediest) {
       useSkill(gigiForHerb, 'Herbalist');
-      rechargeOneSkill(neediest);
+      rechargeOneSkill(neediest, 'herbalist');
       trackSkill('gigi', 'Herbalist', 'activated');
       log(`  🌿 Herbalist: Gigi recharges a skill for ${neediest.name}${neediest.id === 'gigi' ? ' (self)' : ''}!`, 'wonder');
     }
@@ -1286,7 +1333,8 @@ function runTurn() {
       const candidates = G.heroes.filter(h => h.skillStates.some(s => s === 'exhausted'));
       const neediest = candidates.sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
       if (neediest) {
-        rechargeOneSkill(neediest);
+        rechargeOneSkill(neediest, 'herbalist');
+        G.tracker.copycatDetails.push({ copiedSkill: 'Herbalist', won: null, context: 'dungeon' });
         log(`  🎭 Copycat → Herbalist: ${hero.name} recharges a skill for ${neediest.name}!`, 'flame');
       }
     }
@@ -1625,10 +1673,15 @@ function resolveWonderCard(hero, card) {
   switch(card.type) {
     case 'encounter':
       if (card.effect === 'recharge_all_skills') {
+        const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
         hero.skillStates = hero.skillStates.map(() => 'ready');
+        if (G && G.tracker && exhaustedCount > 0) {
+          if (!G.tracker.skillRechargeSources['priestess_of_light']) G.tracker.skillRechargeSources['priestess_of_light'] = 0;
+          G.tracker.skillRechargeSources['priestess_of_light'] += exhaustedCount;
+        }
         log(`    ${hero.name}: all skills recharged!`, 'wonder');
       } else if (card.effect === 'recharge_1_skill') {
-        rechargeOneSkill(hero);
+        rechargeOneSkill(hero, 'wisp');
         log(`    ${hero.name}: 1 skill recharged!`, 'wonder');
       } else if (card.effect === 'draw_legendary') {
         drawLegendaryItem(hero);
@@ -1737,6 +1790,7 @@ function resolveTrap(hero, card) {
     case 'exhaust_or_ko': {
       if (readySkillCount(hero) > 0) {
         exhaustOneSkill(hero, "Skill Burn (reroll)");
+        trackTrapResource('Giant Web', 'skillsExhausted');
         log(`    ${hero.name} escapes the web!`, 'mishap');
       } else {
         log(`    No skills to exhaust — KO!`, 'ko');
@@ -1758,8 +1812,10 @@ function resolveTrap(hero, card) {
     }
     case 'ko_or_exhaust_all': {
       if (readySkillCount(hero) > 0) {
+        const exhaustedByTribute = readySkillCount(hero);
         hero.skillStates = hero.skillStates.map(() => 'exhausted');
         checkCursedArmour(hero);
+        for (let _t = 0; _t < exhaustedByTribute; _t++) trackTrapResource('The Tribute', 'skillsExhausted');
         log(`    ${hero.name} pays The Tribute. All skills exhausted.`, 'misfortune');
       } else {
         log(`    No skills to pay — KO!`, 'ko');
@@ -1810,6 +1866,7 @@ function resolveTrap(hero, card) {
             if (removable.length > 0) {
               const removed = removable[removable.length - 1];
               h.equipment = h.equipment.filter(e => e !== removed);
+              trackTrapResource('Magnetic Field', 'equipLost');
               log(`    ${h.name} rolls ${r.val} — loses ${removed.name}!`, 'misfortune');
             }
           }
@@ -1823,6 +1880,7 @@ function resolveTrap(hero, card) {
         removable.sort((a, b) => (a.str || 0) - (b.str || 0));
         const removed = removable[0];
         hero.equipment = hero.equipment.filter(e => e !== removed);
+        trackTrapResource('Spectral Theft', 'equipLost');
         log(`    Lost ${removed.name}!`, 'misfortune');
       }
       break;
@@ -1831,6 +1889,7 @@ function resolveTrap(hero, card) {
       if (hero.followers.length > 0) {
         const count = hero.followers.length;
         removeFollowers(hero);
+        for (let _f = 0; _f < count; _f++) trackTrapResource('Stink Bomb', 'followersLost');
         log(`    Lost ${count} followers!`, 'misfortune');
       }
       break;
@@ -1903,9 +1962,13 @@ function combat(hero, enemyCard, tier) {
     if (heroTotalStr > enemyStr) {
       log(`    Bully sees ${hero.name}'s STR ${heroTotalStr} and flees!`, 'wonder');
       trackEncounter(enemyCard.name, 'fled');
+      if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
+      G.tracker.decisionEnemies[enemyCard.name].choiceA++; // fled
       return;
     }
     enemyStr = 6;
+    if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
+    G.tracker.decisionEnemies[enemyCard.name].choiceB++; // fought
     log(`    Bully stands ground at STR 6!`, 'combat');
   }
 
@@ -1927,8 +1990,12 @@ function combat(hero, enemyCard, tier) {
       hero.equipment = hero.equipment.filter(e => e !== removed);
       log(`    ${hero.name} pays off the Bandit with ${removed.name}!`, 'mishap');
       trackEncounter(enemyCard.name, 'avoided');
+      if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
+      G.tracker.decisionEnemies[enemyCard.name].choiceA++; // paid (avoided)
       return;
     }
+    if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
+    G.tracker.decisionEnemies[enemyCard.name].choiceB++; // fought
   }
 
   // === SPELL MIRROR: cancel dangerous enemy effects ===
@@ -2008,12 +2075,14 @@ function combat(hero, enemyCard, tier) {
       useSkill(eggoForCopy, 'Copycat');
       enemyStr -= 2;
       trackSkill('eggo', 'Copycat', 'activated');
+      G.tracker.copycatDetails.push({ copiedSkill: 'Siphon', won: null, context: 'dungeon' });
       const who = hero.id === 'eggo' ? '' : ` (helping ${hero.name})`;
       log(`  🎭 Copycat → Siphon${who}: Enemy -2 STR (now ${enemyStr})`, 'flame');
     } else if (gigiH && isSkillReady(gigiH, 'Pack Leader') && hero.followers.length >= 2) {
       useSkill(eggoForCopy, 'Copycat');
       packLeaderBonus = hero.followers.length;
       trackSkill('eggo', 'Copycat', 'activated');
+      G.tracker.copycatDetails.push({ copiedSkill: 'Pack Leader', won: null, context: 'dungeon' });
       log(`  🎭 Copycat → Pack Leader: +${packLeaderBonus} STR`, 'flame');
     }
   }
@@ -2133,7 +2202,9 @@ function combat(hero, enemyCard, tier) {
   gilReward(hero, enemyStr);
   ht.wins++;
   trackEncounter(enemyCard.name, 'won');
-  G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, won:true, tier, turn:G.turn });
+  const _lfr = G._lastFightResult || {};
+  G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, heroTotal:_lfr.heroTotal, enemyTotal:_lfr.enemyTotal, won:true, margin:_lfr.margin, tier, turn:G.turn, readySkills:readySkillCount(hero), equipCount:hero.equipment.length, followerCount:hero.followers.length, heroTotalStr:totalStr(hero) });
+  initHeroTracker(G.tracker, hero.id).enemiesKilled++;
   log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
 
   // === ON-WIN EFFECTS ===
@@ -2164,8 +2235,8 @@ function combat(hero, enemyCard, tier) {
   // Battlecry (Juju): all heroes recharge 2 skills on win
   if (rallyingBlowActive) {
     G.heroes.forEach(h => {
-      rechargeOneSkill(h);
-      rechargeOneSkill(h);
+      rechargeOneSkill(h, 'battlecry');
+      rechargeOneSkill(h, 'battlecry');
     });
     log(`    ⚔ Battlecry victory! All heroes recharge 2 skills!`, 'flame');
   }
@@ -2183,7 +2254,12 @@ function combat(hero, enemyCard, tier) {
 
   // Mystic Wand: recharge all on win
   if (hero.equipment.find(e => e.effect === 'win_recharge_all')) {
+    const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
     hero.skillStates = hero.skillStates.map(() => 'ready');
+    if (G && G.tracker && exhaustedCount > 0) {
+      if (!G.tracker.skillRechargeSources['mystic_wand']) G.tracker.skillRechargeSources['mystic_wand'] = 0;
+      G.tracker.skillRechargeSources['mystic_wand'] += exhaustedCount;
+    }
     log(`    Mystic Wand: all skills recharged!`, 'wonder');
   }
 
@@ -2272,6 +2348,12 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     // Battlecry: roll 2 dice, keep worst
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero);
     heroRoll = r1.val <= r2.val ? r1 : r2;
+    // Track Battlecry details
+    G.tracker.battlecryDetails.push({
+      roll1: r1.val, roll2: r2.val, kept: heroRoll.val,
+      bestRoll: Math.max(r1.val, r2.val),
+      isFlame1: r1.isFlame, isFlame2: r2.isFlame
+    });
     log(`    Battlecry: rolled [${r1.val}, ${r2.val}] keeps worst ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'flame');
   } else if (hasTripleAxe) {
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero), r3 = heroRollDie(hero);
@@ -2462,6 +2544,12 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     if (margin >= 5) G.tracker.overkills.push({ hero: hero.name, enemy: enemyCard.name, margin });
     // Track equipment that helped win
     hero.equipment.forEach(e => trackEquip(e.name, 'wonWith'));
+    // Store fight details for combat() to use in combatLog
+    G._lastFightResult = { heroTotal, enemyTotal, margin };
+    // Second Nature tracking
+    if (secondNatureBonus > 0) {
+      G.tracker.secondNatureDetails.push({ won: true, wasDifferenceMaker: margin < secondNatureBonus });
+    }
     return 'win';
   } else {
     const margin = (enemyTotal + beatMargin) - heroTotal;
@@ -2469,7 +2557,11 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     ht.losses++;
     ht.damageTaken += margin;
     trackEncounter(enemyCard.name, 'lost');
-    G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, won:false, margin:-margin, tier, turn:G.turn });
+    G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, won:false, margin:-margin, tier, turn:G.turn, heroTotal, enemyTotal, readySkills:readySkillCount(hero), equipCount:hero.equipment.length, followerCount:hero.followers.length, heroTotalStr:totalStr(hero) });
+    // Second Nature tracking on loss
+    if (secondNatureBonus > 0) {
+      G.tracker.secondNatureDetails.push({ won: false, wasDifferenceMaker: false });
+    }
     // === NOT TODAY! (Juju) — turn close loss (margin 1-2) into a win ===
     if (margin <= 2) {
       const jujuForNT = G.heroes.find(h => h.id === 'juju' && isSkillReady(h, 'Not Today!'));
@@ -2487,7 +2579,12 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
         if (frogmanSwallowed) { hero.equipment.push(frogmanSwallowed); log(`    Recovered ${frogmanSwallowed.name}!`, 'wonder'); }
         // Post-win effects
         if (hero.equipment.find(e => e.effect === 'win_recharge_all')) {
+          const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
           hero.skillStates = hero.skillStates.map(() => 'ready');
+          if (G && G.tracker && exhaustedCount > 0) {
+            if (!G.tracker.skillRechargeSources['mystic_wand']) G.tracker.skillRechargeSources['mystic_wand'] = 0;
+            G.tracker.skillRechargeSources['mystic_wand'] += exhaustedCount;
+          }
           log(`    Mystic Wand: all skills recharged!`, 'wonder');
         }
         return 'win';
@@ -2532,6 +2629,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
       useSkill(hero, 'Copycat');
       trackSkill(hero.id, 'Copycat', 'activated');
       trackSkill(hero.id, 'Copycat', 'savedFromKO');
+      G.tracker.copycatDetails.push({ copiedSkill: 'Shield Wall', won: null, context: 'dungeon' });
       log(`  🎭 Copycat: ${hero.name} copies Shield Wall from Juju! KO prevented!`, 'flame');
       return;
     }
@@ -2798,6 +2896,7 @@ function applyKO(hero) {
     droppedItems.forEach(e => G.hydraFloorEquipment.push(e));
     hero.equipment = parasiteSword ? [parasiteSword] : [];
     removeFollowers(hero);
+    hero._justRespawned = true;
     hero.pos = 'entrance';
     hero.runningToHydra = true;
     G.heroesInHydraArea.delete(hero.id);
@@ -2835,6 +2934,7 @@ function applyKO(hero) {
   hero.equipment = parasiteSword ? [parasiteSword] : [];
   removeFollowers(hero);
   hero.stalkers = [];
+  hero._justRespawned = true;
   hero.pos = 'entrance';
   if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
   hero.ko = true;
@@ -2872,7 +2972,7 @@ function triggerTalent(hero, context) {
       break;
     }
     case 'lulu':
-      rechargeOneSkill(hero);
+      rechargeOneSkill(hero, 'talent_lulu');
       log(`    🔥 Arcane Recharge! ${hero.name} recharges a skill`, 'flame');
       break;
     case 'eggo':
@@ -2921,6 +3021,7 @@ function spawnHydra() {
   });
   G.hydraActive = true;
   recalcHydraStr();
+  G.tracker.hydraStartingHeads = G.hydraHeads.map(h => h.name);
   G.hydraHeads.forEach(h => {
     trackHydraHead(h.name, 'spawned');
     log(`    Head: ${h.name} (STR ${h.effectiveStr}) — ${h.skill}`, 'hydra');
@@ -3012,7 +3113,7 @@ function hydraAttack(hero) {
   if (checkAssassin(hero, heroRoll)) {
     applyKO(hero);
     if (G.gameOver) return;
-    growHydraHead();
+    growHydraHead('assassin_ko');
     return;
   }
 
@@ -3035,7 +3136,7 @@ function hydraAttack(hero) {
       log(`    Doomhammer curse! Rolled ${doomRoll} — KO!`, 'ko');
       applyKO(hero);
       if (G.gameOver) return;
-      growHydraHead();
+      growHydraHead('doomhammer_ko');
       return;
     } else if (doomRoll <= 4) { doomhammerBonus = 1; }
     else { doomhammerBonus = 3; }
@@ -3084,6 +3185,7 @@ function hydraAttack(hero) {
       useSkill(hero, 'Copycat');
       siphonSkillDrain += 2;
       trackSkill(hero.id, 'Copycat', 'activated');
+      G.tracker.copycatDetails.push({ copiedSkill: 'Siphon', won: null, context: 'hydra' });
       log(`    🎭 Copycat copies Siphon! Head -2 STR (total drain: -${siphonSkillDrain})`, 'flame');
     }
   }
@@ -3095,6 +3197,7 @@ function hydraAttack(hero) {
         useSkill(eggo, 'Copycat');
         siphonSkillDrain += 2;
         trackSkill('eggo', 'Copycat', 'activated');
+        G.tracker.copycatDetails.push({ copiedSkill: 'Siphon', won: null, context: 'hydra' });
         log(`    🎭 Copycat: Eggo copies Siphon to help ${hero.name}! Head -2 STR (total drain: -${siphonSkillDrain})`, 'flame');
       }
     }
@@ -3196,6 +3299,8 @@ function hydraAttack(hero) {
     G.hydraDestroyedCount++;
     G.hydraMaxHeads--;  // Hydra permanently loses a head slot
     trackHydraHead(head.name, 'destroyed');
+    G.tracker.hydraHeadKillOrder.push({ head: head.name, turn: G.turn, killedBy: hero.id });
+    initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
     log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max ${G.hydraMaxHeads})`, 'victory');
 
     // On Defeat effects
@@ -3206,14 +3311,19 @@ function hydraAttack(hero) {
       }
       if (head.growOnDefeat) {
         log(`    The Spite: grows 1 extra head!`, 'misfortune');
-        growHydraHead();
+        growHydraHead('spite_on_defeat');
       }
     }
     recalcHydraStr();
 
     // Mystic Wand on Hydra win
     if (hero.equipment.find(e => e.effect === 'win_recharge_all')) {
+      const exhaustedCount = hero.skillStates.filter(s => s === 'exhausted').length;
       hero.skillStates = hero.skillStates.map(() => 'ready');
+      if (G && G.tracker && exhaustedCount > 0) {
+        if (!G.tracker.skillRechargeSources['mystic_wand']) G.tracker.skillRechargeSources['mystic_wand'] = 0;
+        G.tracker.skillRechargeSources['mystic_wand'] += exhaustedCount;
+      }
       log(`    Mystic Wand: all skills recharged!`, 'wonder');
     }
 
@@ -3252,6 +3362,8 @@ function hydraAttack(hero) {
         G.hydraDestroyedCount++;
         G.hydraMaxHeads--;
         trackHydraHead(head.name, 'destroyed');
+        G.tracker.hydraHeadKillOrder.push({ head: head.name, turn: G.turn, killedBy: hero.id });
+        initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
         recalcHydraStr();
         log(`    Berserker Helmet wins! ${head.name} DESTROYED!`, 'victory');
         hero._berserkerUsed = false;
@@ -3287,6 +3399,7 @@ function hydraAttack(hero) {
         useSkill(hero, 'Copycat');
         trackSkill(hero.id, 'Copycat', 'activated');
         trackSkill(hero.id, 'Copycat', 'savedFromKO');
+        G.tracker.copycatDetails.push({ copiedSkill: 'Shield Wall', won: null, context: 'hydra' });
         log(`    🎭 Copycat: copies Shield Wall! KO prevented!`, 'flame');
         hydraKOPrevented = true;
       }
@@ -3294,20 +3407,20 @@ function hydraAttack(hero) {
 
     if (hydraKOPrevented) {
       // Skill saved the hero — head still grows but hero stays
-      growHydraHead();
+      growHydraHead('failed_attack');
       if (G.gameOver) return;
     } else {
       log(`    ${hero.name} is KO'd at the Hydra!`, 'ko');
       trackHydraHead(head.name, 'causedKO');
       applyKO(hero);
       if (G.gameOver) return;
-      growHydraHead();
+      growHydraHead('hero_ko');
     }
   }
 
   // Battlecry bonus: if Juju won with it, all heroes recharge 2
   if (rallyingBlowActive && heroTotal >= effectiveHeadStr) {
-    G.heroes.forEach(h => { rechargeOneSkill(h); rechargeOneSkill(h); });
+    G.heroes.forEach(h => { rechargeOneSkill(h, 'battlecry'); rechargeOneSkill(h, 'battlecry'); });
     log(`    ⚔ Battlecry victory! All heroes recharge 2 Skills`, 'wonder');
   }
 
@@ -3330,7 +3443,7 @@ function hydraAttack(hero) {
   }
 }
 
-function growHydraHead() {
+function growHydraHead(source) {
   const aliveCount = G.hydraHeads.filter(h => !h.destroyed).length;
   const overflowEnabled = !G._tweaks || G._tweaks.overflowGameOver !== false;
   if (aliveCount >= G.hydraMaxHeads) {
@@ -3352,6 +3465,7 @@ function growHydraHead() {
     G.hydraHeads.push(newHead);
     trackHydraHead(newHead.name, 'spawned');
     recalcHydraStr();
+    G.tracker.hydraGrowthLog.push({ head: newHead.name, turn: G.turn, source: source || 'unknown' });
     log(`    New head grows: ${newHead.name} (STR ${newHead.effectiveStr})`, 'misfortune');
   } else {
     const dead = G.hydraHeads.find(h => h.destroyed);
@@ -3359,6 +3473,7 @@ function growHydraHead() {
       dead.destroyed = false;
       trackHydraHead(dead.name, 'spawned');  // count regeneration as a spawn
       recalcHydraStr();
+      G.tracker.hydraGrowthLog.push({ head: dead.name, turn: G.turn, source: source || 'unknown' });
       log(`    ${dead.name} regenerates!`, 'misfortune');
     }
   }
@@ -3406,7 +3521,7 @@ function nextHero() {
       const anyoneAtHydra = G.heroes.some(h => G.heroesInHydraArea.has(h.id));
       if (!anyoneAtHydra && G.exitRevealed) {
         log(`  🐉 Hydra Area empty! Head grows!`, 'misfortune');
-        growHydraHead();
+        growHydraHead('hydra_area_empty');
       }
       G.heroes.forEach(h => {
         if (!G.heroesInHydraArea.has(h.id) && !h.runningToHydra) {
@@ -3545,1200 +3660,747 @@ function render() {
 // ========== ANALYSIS ENGINE ==========
 function generateReport(results) {
   const n = results.length;
-  const wins = results.filter(r => r.victory).length;
-  const winRate = ((wins / n) * 100).toFixed(1);
-  const avgTurns = (results.reduce((s, r) => s + r.turn, 0) / n).toFixed(1);
-  const avgKO = (results.reduce((s, r) => s + r.stats.ko, 0) / n).toFixed(1);
-  const avgCombats = (results.reduce((s, r) => s + r.stats.combats, 0) / n).toFixed(1);
-  const avgRelicsSpent = (results.reduce((s, r) => s + r.stats.relicsSpent, 0) / n).toFixed(1);
-  const avgSkillBurns = (results.reduce((s, r) => s + r.stats.skillBurns, 0) / n).toFixed(1);
-  const heroNames = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'};
+  const wins = results.filter(r => r.victory);
+  const losses = results.filter(r => !r.victory);
+  const winRate = (wins.length / n * 100).toFixed(1);
   const heroIds = ['juju','gigi','lulu','eggo'];
+  const heroNames = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'};
+  const avg = (arr, fn) => arr.length ? (arr.reduce((s,r) => s + fn(r), 0) / arr.length) : 0;
+  const pct = (a, b) => b ? (a / b * 100).toFixed(1) : '0.0';
+  const fix1 = v => Number(v).toFixed(1);
+  const std = (arr, fn) => { const m = avg(arr, fn); return arr.length > 1 ? Math.sqrt(arr.reduce((s,r) => s + Math.pow(fn(r) - m, 2), 0) / (arr.length - 1)) : 0; };
 
-  let html = '<h2>PLAYTEST REPORT</h2>';
-  // Tweaks diff section
+  // Collect all flags for gap analysis
+  const allFlags = [];
+  function flag(category, severity, msg) { allFlags.push({category, severity, msg}); }
+
+  // Helper: bar chart
+  function bar(val, max, color) {
+    const w = max > 0 ? Math.min(100, val / max * 100) : 0;
+    return `<div style="display:flex;align-items:center;gap:6px"><div style="width:120px;height:8px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${w.toFixed(0)}%;height:100%;background:${color||'var(--accent)'}"></div></div><span style="font-size:10px">${typeof val==='number'?fix1(val):val}</span></div>`;
+  }
+  function statRow(label, value) { return `<div class="report-stat"><span class="rl">${label}</span><span class="rv">${value}</span></div>`; }
+
+  let html = '<h2>PLAYTEST REPORT — ' + n + ' GAMES</h2>';
+
+  // Tweaks section
   if (currentTweaks) {
-    var tweakDiffs = getTweaksDiff(currentTweaks);
+    const tweakDiffs = getTweaksDiff(currentTweaks);
     if (tweakDiffs.length > 0) {
       html += '<div class="report-section"><h3>Tweaks Applied</h3><div class="report-card insight">';
-      tweakDiffs.forEach(function(d) { html += '<div style="font-size:11px;padding:1px 0">- ' + d + '</div>'; });
+      tweakDiffs.forEach(d => html += `<div style="font-size:11px;padding:1px 0">- ${d}</div>`);
       html += '</div></div>';
-    } else {
-      html += '<div class="report-section"><h3>Tweaks Applied</h3><div class="report-card" style="font-size:11px;color:var(--dim)">Default settings (no changes)</div></div>';
     }
   }
-  // Tab navigation
+
+  // TAB NAVIGATION
   html += `<div class="report-tabs">
     <div class="report-tab active" onclick="switchReportTab(this,'tab-overview')">Overview</div>
-    <div class="report-tab" onclick="switchReportTab(this,'tab-encounters')">Encounters & Creatures</div>
-    <div class="report-tab" onclick="switchReportTab(this,'tab-equipment')">Equipment & Skills</div>
+    <div class="report-tab" onclick="switchReportTab(this,'tab-heroes')">Heroes</div>
+    <div class="report-tab" onclick="switchReportTab(this,'tab-skills-equip')">Skills & Equip</div>
+    <div class="report-tab" onclick="switchReportTab(this,'tab-enemies')">Enemies & Creatures</div>
+    <div class="report-tab" onclick="switchReportTab(this,'tab-hydra-econ')">Hydra & Economy</div>
   </div>`;
 
-  // ==================== TAB 1: OVERVIEW ====================
-  html += '<div id="tab-overview" class="report-tab-content active">';
-  html += '<div class="report-section"><h3>Overview (' + n + ' games)</h3>';
-  html += `<div class="report-card">`;
-  html += `<div class="report-stat"><span class="rl">Win Rate</span><span class="rv" style="color:${winRate > 50 ? 'var(--heal)' : 'var(--ko)'}">${winRate}% (${wins}/${n})</span></div>`;
-  html += `<div class="report-stat"><span class="rl">Avg Turns</span><span class="rv">${avgTurns}</span></div>`;
-  html += `<div class="report-stat"><span class="rl">Avg Combats</span><span class="rv">${avgCombats}</span></div>`;
-  html += `<div class="report-stat"><span class="rl">Avg KOs</span><span class="rv">${avgKO}</span></div>`;
-  html += `<div class="report-stat"><span class="rl">Avg Skill Burns</span><span class="rv">${avgSkillBurns}</span></div>`;
-  html += `<div class="report-stat"><span class="rl">Avg Relics Spent</span><span class="rv">${avgRelicsSpent}</span></div>`;
-  // Gil stats in batch
-  const gilActive = results[0] && results[0].heroes && results[0].heroes[0] && results[0].heroes[0].gilEarned !== undefined;
-  if (gilActive) {
-    const avgGilEarned = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gilEarned||0), 0), 0) / n).toFixed(1);
-    const avgGilSpentSkill = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gilSpentSkill||0), 0), 0) / n).toFixed(1);
-    const avgGilSpentEquip = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gilSpentEquip||0), 0), 0) / n).toFixed(1);
-    const avgGilRemaining = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.gil||0), 0), 0) / n).toFixed(1);
-    html += `<div class="report-stat"><span class="rl">💰 Avg Gil Earned (party)</span><span class="rv">${avgGilEarned}</span></div>`;
-    html += `<div class="report-stat"><span class="rl">💰 Avg Gil → Skills</span><span class="rv">${avgGilSpentSkill}</span></div>`;
-    html += `<div class="report-stat"><span class="rl">💰 Avg Gil → Equip</span><span class="rv">${avgGilSpentEquip}</span></div>`;
-    html += `<div class="report-stat"><span class="rl">💰 Avg Gil Unspent</span><span class="rv">${avgGilRemaining}</span></div>`;
-    // Per-hero Gil breakdown
-    const heroGil = {};
-    ['juju','gigi','lulu','eggo'].forEach(hid => {
-      heroGil[hid] = { earned:0, spentSkill:0, spentEquip:0, remaining:0 };
-    });
-    results.forEach(r => {
-      r.heroes.forEach(h => {
-        if (heroGil[h.id]) {
-          heroGil[h.id].earned += h.gilEarned || 0;
-          heroGil[h.id].spentSkill += h.gilSpentSkill || 0;
-          heroGil[h.id].spentEquip += h.gilSpentEquip || 0;
-          heroGil[h.id].remaining += h.gil || 0;
-        }
-      });
-    });
-    html += `<div class="report-stat" style="flex-direction:column;align-items:flex-start"><span class="rl">💰 Gil per Hero (avg/game)</span>`;
-    ['juju','gigi','lulu','eggo'].forEach(hid => {
-      const d = heroGil[hid];
-      const hName = {juju:'Juju',gigi:'Gigi',lulu:'Lulu',eggo:'Eggo'}[hid];
-      html += `<span class="rv" style="font-size:10px;color:var(--${hid})">  ${hName}: earned ${(d.earned/n).toFixed(1)}, skills ${(d.spentSkill/n).toFixed(1)}, equip ${(d.spentEquip/n).toFixed(1)}, left ${(d.remaining/n).toFixed(1)}</span>`;
-    });
-    html += `</div>`;
-  }
-  // Overview commentary
-  let overviewNote = '';
-  if (winRate > 70) overviewNote = `Win rate is high (${winRate}%). Heroes are winning too easily. Consider: buff Hydra heads, increase Dread room %, or nerf equipment.`;
-  else if (winRate > 50) overviewNote = `Win rate is balanced (${winRate}%). Games feel winnable but not guaranteed. Good target range is 45-65%.`;
-  else if (winRate > 30) overviewNote = `Win rate is low (${winRate}%). Heroes struggle. Consider: lower Hydra STR, buff equipment, or reduce Dread room %.`;
-  else overviewNote = `Win rate is very low (${winRate}%). Heroes get crushed. Something is too punishing — check Hydra heads STR vs hero total STR in the Defeat Analysis below.`;
-  if (avgKO > 3) overviewNote += ` Heroes average ${avgKO} KOs/game which is high and will feel punishing.`;
-  if (avgSkillBurns > 5) overviewNote += ` High Skill Burn usage (${avgSkillBurns}/game) means heroes rely heavily on rerolls. Skills that provide alternatives to Skill Burn would feel meaningful.`;
-  html += `</div><div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Analysis</span>${overviewNote}</div></div>`;
+  // ===================== SECTION 1: OVERVIEW =====================
+  html += `<div class="report-section"><h3>Overview</h3>`;
+  const avgTurns = fix1(avg(results, r => r.turn));
+  const avgCombats = fix1(avg(results, r => r.stats.combats));
+  const avgKO = fix1(avg(results, r => r.stats.ko));
+  const avgBurns = fix1(avg(results, r => r.stats.skillBurns));
+  const avgRelics = fix1(avg(results, r => r.stats.relicsSpent));
+  const avgWinTurn = wins.length ? fix1(avg(wins, r => r.turn)) : '-';
+  const avgLossTurn = losses.length ? fix1(avg(losses, r => r.turn)) : '-';
 
-  // === GAME PACING ===
-  html += `<div class="report-section"><h3>Game Pacing</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Average turn when key milestones happen. Shows how the game unfolds over time.</p>`;
-  const pacingAgg = { firstEquip:[], firstKO:[], firstRelic:[], hydraSpawn:[], hydraArrival:[] };
-  results.forEach(r => {
-    const p = r.tracker.pacing;
-    if (p.firstEquip > 0) pacingAgg.firstEquip.push(p.firstEquip);
-    if (p.firstKO > 0) pacingAgg.firstKO.push(p.firstKO);
-    if (p.firstRelic > 0) pacingAgg.firstRelic.push(p.firstRelic);
-    if (p.hydraSpawn > 0) pacingAgg.hydraSpawn.push(p.hydraSpawn);
-    if (p.hydraArrival > 0) pacingAgg.hydraArrival.push(p.hydraArrival);
-  });
-  const pacingAvg = (arr) => arr.length > 0 ? (arr.reduce((s,v)=>s+v,0)/arr.length).toFixed(1) : '-';
-  const pacingMax = Math.max(...Object.values(pacingAgg).flat(), 1);
-  const milestones = [
-    { key:'firstEquip', label:'First Equipment', color:'var(--accent)', icon:'&#9876;' },
-    { key:'firstKO', label:'First KO', color:'var(--ko)', icon:'&#9760;' },
-    { key:'firstRelic', label:'First Relic', color:'var(--hydra)', icon:'&#9670;' },
-    { key:'hydraSpawn', label:'Hydra Spawns', color:'var(--misfortune)', icon:'&#9733;' },
-    { key:'hydraArrival', label:'First Hero at Hydra', color:'var(--flame)', icon:'&#9889;' },
-  ];
   html += `<div class="report-card">`;
-  milestones.forEach(m => {
-    const avg = pacingAvg(pacingAgg[m.key]);
-    const count = pacingAgg[m.key].length;
-    const pct = avg !== '-' ? (parseFloat(avg) / pacingMax * 100).toFixed(0) : 0;
-    html += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">`;
-    html += `<span style="width:140px;font-size:10px;color:${m.color}">${m.icon} ${m.label}</span>`;
-    html += `<div style="flex:1;height:12px;background:#1a1a2a;border-radius:3px;overflow:hidden;position:relative">`;
-    html += `<div style="width:${pct}%;height:100%;background:${m.color};opacity:0.5;border-radius:3px"></div>`;
-    html += `</div>`;
-    html += `<span style="width:80px;text-align:right;font-size:10px;color:var(--dim)">turn ${avg} <span style="font-size:8px">(${count}/${n})</span></span>`;
-    html += `</div>`;
-  });
-  // Pacing insight
-  const avgEquipTurn = pacingAvg(pacingAgg.firstEquip);
-  const avgHydraSpawnTurn = pacingAvg(pacingAgg.hydraSpawn);
-  let pacingNote = '';
-  if (avgEquipTurn !== '-' && avgHydraSpawnTurn !== '-') {
-    const equipGap = parseFloat(avgHydraSpawnTurn) - parseFloat(avgEquipTurn);
-    if (equipGap < 5) pacingNote = `Heroes get their first equipment only ${equipGap.toFixed(0)} turns before the Hydra spawns. Feels rushed — they barely have time to prepare.`;
-    else if (equipGap > 15) pacingNote = `Heroes get equipped ${equipGap.toFixed(0)} turns before the Hydra. Plenty of preparation time — if the game still feels hard, the issue is at the Hydra itself, not dungeon pacing.`;
-    else pacingNote = `${equipGap.toFixed(0)}-turn gap between first gear and Hydra spawn. Enough time to build up but not so much that exploration drags.`;
-  }
-  if (pacingAgg.firstKO.length > 0 && pacingAgg.firstEquip.length > 0) {
-    const koBeforeEquip = pacingAgg.firstKO.filter((ko, i) => pacingAgg.firstEquip[i] && ko < pacingAgg.firstEquip[i]).length;
-    if (koBeforeEquip > n * 0.3) pacingNote += ` In ${Math.round(koBeforeEquip/n*100)}% of games, a hero gets KO'd before anyone finds equipment. Early game feels punishing.`;
-  }
-  if (pacingNote) html += `<div style="margin-top:8px;font-size:10px;color:var(--dim)">${pacingNote}</div>`;
-  html += `</div></div>`;
+  html += statRow('Total Games', n);
+  html += statRow('Win Rate', `${winRate}% (${wins.length}W / ${losses.length}L)`);
+  html += statRow('Avg Game Length', `${avgTurns} turns`);
+  html += statRow('Avg Combats / Game', avgCombats);
+  html += statRow('Avg KOs / Game', avgKO);
+  html += statRow('Avg Skill Burns / Game', avgBurns);
+  html += statRow('Avg Relics Spent / Game', avgRelics);
+  html += statRow('Avg Victory Turn', avgWinTurn);
+  html += statRow('Avg Defeat Turn', avgLossTurn);
+  html += `</div>`;
 
-  // === PER-HERO ANALYSIS ===
+  // Defeat breakdown
+  if (losses.length > 0) {
+    const defeatCauses = {};
+    losses.forEach(r => { const c = r.defeatCause ? r.defeatCause.cause : 'unknown'; defeatCauses[c] = (defeatCauses[c]||0) + 1; });
+    html += `<div class="report-card"><b>Defeat Causes</b>`;
+    Object.entries(defeatCauses).sort((a,b) => b[1]-a[1]).forEach(([cause, count]) => {
+      html += statRow(cause.replace(/_/g,' '), `${count} (${pct(count, losses.length)}%)`);
+    });
+    html += `</div>`;
+  }
+
+  if (parseFloat(winRate) < 40) flag('balance', 'high', `Win rate ${winRate}% is very low — game may be too hard`);
+  if (parseFloat(winRate) > 85) flag('balance', 'high', `Win rate ${winRate}% is very high — game may be too easy`);
+  html += `</div>`;
+
+  // ===================== SECTION 2: HERO PERFORMANCE =====================
   html += `<div class="report-section"><h3>Hero Performance</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Shows each hero's combat effectiveness including all skills, equipment, and talents.</p>`;
-  heroIds.forEach(hid => {
-    const agg = { combats:0, wins:0, losses:0, ko:0, skillsBurned:0, damageDealt:0, damageTaken:0, relicsSpent:0, gaps:[] };
-    results.forEach(r => {
-      const ht = r.tracker.heroes[hid];
-      if (!ht) return;
-      agg.combats += ht.combats;
-      agg.wins += ht.wins;
-      agg.losses += ht.losses;
-      agg.ko += ht.ko;
-      agg.skillsBurned += ht.skillsBurned;
-      agg.damageDealt += ht.damageDealt;
-      agg.damageTaken += ht.damageTaken;
-      agg.relicsSpent += ht.relicsSpent;
-      ht.neededButDidntHave.forEach(g => agg.gaps.push(g));
-    });
-    const wr = agg.combats > 0 ? ((agg.wins / agg.combats) * 100).toFixed(0) : 'N/A';
-    const avgMarginW = agg.wins > 0 ? (agg.damageDealt / agg.wins).toFixed(1) : '0';
-    const avgMarginL = agg.losses > 0 ? (agg.damageTaken / agg.losses).toFixed(1) : '0';
-    html += `<div class="report-card">`;
-    html += `<b style="color:var(--${hid})">${heroNames[hid]}</b>`;
-    html += `<div class="report-stat"><span class="rl">Combats</span><span class="rv">${agg.combats} (${wr}% win)</span></div>`;
-    html += `<div class="report-stat"><span class="rl">KOs</span><span class="rv">${agg.ko} (${(agg.ko/n).toFixed(1)}/game)</span></div>`;
-    html += `<div class="report-stat"><span class="rl">Avg Win Margin</span><span class="rv">+${avgMarginW}</span></div>`;
-    html += `<div class="report-stat"><span class="rl">Avg Loss Margin</span><span class="rv">-${avgMarginL}</span></div>`;
-    html += `<div class="report-stat"><span class="rl">Skill Burns</span><span class="rv">${agg.skillsBurned}</span></div>`;
-    html += `<div class="report-stat"><span class="rl">Relics Spent</span><span class="rv">${agg.relicsSpent}</span></div>`;
+
+  heroIds.forEach(id => {
+    const name = heroNames[id];
+    // 2a: Combat stats
+    const combats = results.reduce((s,r) => { const h = r.tracker.heroes[id]; return s + (h ? h.combats : 0); }, 0);
+    const heroWins = results.reduce((s,r) => { const h = r.tracker.heroes[id]; return s + (h ? h.wins : 0); }, 0);
+    const heroKO = results.reduce((s,r) => { const h = r.tracker.heroes[id]; return s + (h ? h.ko : 0); }, 0);
+    const heroRelics = results.reduce((s,r) => { const h = r.tracker.heroes[id]; return s + (h ? h.relicsSpent : 0); }, 0);
+    const heroBurns = results.reduce((s,r) => { const h = r.tracker.heroes[id]; return s + (h ? h.skillsBurned : 0); }, 0);
+    const heroEnemiesKilled = results.reduce((s,r) => { const h = r.tracker.heroes[id]; return s + (h ? (h.enemiesKilled||0) : 0); }, 0);
+    const heroHeadsDestroyed = results.reduce((s,r) => { const h = r.tracker.heroes[id]; return s + (h ? (h.hydraHeadsDestroyed||0) : 0); }, 0);
+
+    html += `<div class="report-card" style="border-left:3px solid var(--${id})"><b style="color:var(--${id})">${name}</b>`;
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;margin-top:4px;font-size:11px">`;
+    html += statRow('Combats', combats);
+    html += statRow('Win Rate', combats ? pct(heroWins, combats) + '%' : '-');
+    html += statRow('KOs (total / per game)', `${heroKO} / ${fix1(heroKO/n)}`);
+    html += statRow('Relics Spent', `${heroRelics} / ${fix1(heroRelics/n)}`);
+    html += statRow('Skill Burns', heroBurns);
+    html += statRow('Enemies Killed', heroEnemiesKilled);
+    html += statRow('Hydra Heads Destroyed', `${heroHeadsDestroyed} (${fix1(heroHeadsDestroyed/n)}/game)`);
     html += `</div>`;
 
-    // Skill gap analysis removed — skills are finalized, see Balance Improvements section
+    // 2c: State at combat distribution
+    const heroCombatLogs = [];
+    results.forEach(r => r.tracker.combatLog.forEach(c => { if (c.heroId === id) heroCombatLogs.push(c); }));
+    if (heroCombatLogs.length > 0) {
+      const equipDist = [0,0,0]; // 0,1,2 items
+      const skillDist = [0,0,0,0,0]; // 0-4 ready skills
+      heroCombatLogs.forEach(c => {
+        const eq = Math.min(c.equipCount||0, 2);
+        equipDist[eq]++;
+        const sk = Math.min(c.readySkills||0, 4);
+        skillDist[sk]++;
+      });
+      const total = heroCombatLogs.length;
+      html += `<div style="font-size:10px;margin-top:6px;color:var(--dim)">State at Combat (${total} fights):</div>`;
+      html += `<div style="font-size:10px">Equipment: 0 items ${pct(equipDist[0],total)}% | 1 item ${pct(equipDist[1],total)}% | 2 items ${pct(equipDist[2],total)}%</div>`;
+      html += `<div style="font-size:10px">Ready Skills: `;
+      for (let i=0;i<=4;i++) html += `${i}sk ${pct(skillDist[i],total)}% `;
+      html += `</div>`;
+      if (equipDist[0] / total > 0.35) flag('equipment', 'medium', `${name} fights with 0 equipment ${pct(equipDist[0],total)}% of the time`);
+    }
+    html += `</div>`;
   });
+
+  // 2d: State at game end (winners vs losers)
+  html += `<div class="report-card"><b>State at Game End: Winners vs Losers</b>`;
+  html += `<table style="width:100%;font-size:10px;margin-top:6px;border-collapse:collapse">`;
+  html += `<tr style="border-bottom:1px solid var(--border)"><th></th>`;
+  heroIds.forEach(id => html += `<th colspan="2" style="color:var(--${id})">${heroNames[id]}</th>`);
+  html += `</tr><tr><td></td>`;
+  heroIds.forEach(() => html += `<td style="color:var(--heal);font-size:9px">Win</td><td style="color:var(--ko);font-size:9px">Loss</td>`);
+  html += `</tr>`;
+
+  const endStateMetrics = ['totalStr','equipCount','followerCount','readySkills','relics','gil'];
+  const endStateLabels = ['Total STR','Equipment','Followers','Ready Skills','Relics','Gil'];
+  endStateMetrics.forEach((metric, mi) => {
+    html += `<tr><td style="color:var(--dim)">${endStateLabels[mi]}</td>`;
+    heroIds.forEach(id => {
+      const wVals = wins.map(r => r.tracker.heroEndState[id] ? r.tracker.heroEndState[id][metric]||0 : 0);
+      const lVals = losses.map(r => r.tracker.heroEndState[id] ? r.tracker.heroEndState[id][metric]||0 : 0);
+      const wAvg = wVals.length ? fix1(wVals.reduce((a,b)=>a+b,0)/wVals.length) : '-';
+      const lAvg = lVals.length ? fix1(lVals.reduce((a,b)=>a+b,0)/lVals.length) : '-';
+      html += `<td style="text-align:center">${wAvg}</td><td style="text-align:center">${lAvg}</td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</table></div>`;
   html += `</div>`;
 
-  // === EQUIPMENT BALANCE ===
-  html += `<div class="report-section"><h3>Equipment Balance</h3>`;
-  const equipAgg = {};
-  results.forEach(r => {
-    Object.entries(r.tracker.equipment).forEach(([name, data]) => {
-      if (!equipAgg[name]) equipAgg[name] = { equipped:0, wonWith:0, lostWith:0, survivedKO:0 };
-      equipAgg[name].equipped += data.equipped;
-      equipAgg[name].wonWith += data.wonWith;
-      equipAgg[name].lostWith += data.lostWith;
-      equipAgg[name].survivedKO += data.survivedKO;
-    });
-  });
-  // Calculate average win rate across all equipment to compare relatively
-  const allEquipFights = Object.values(equipAgg).reduce((s,d) => s + d.wonWith + d.lostWith, 0);
-  const allEquipWins = Object.values(equipAgg).reduce((s,d) => s + d.wonWith, 0);
-  const avgEquipWR = allEquipFights > 0 ? (allEquipWins / allEquipFights * 100) : 50;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Win rate = combats won while holding this item. Average across all equipment: ${avgEquipWR.toFixed(0)}%. Most dungeon enemies are STR 1-3, so high win rates are normal — the real question is whether the item helps at the Hydra. Items flagged "Strong" are above average; "Weak" are below.</p>`;
-  const equipData = LEGENDARY_EQUIPMENT.reduce((m,e) => { m[e.name] = e; return m; }, {});
-  Object.entries(equipAgg).filter(([,d]) => d.equipped >= 2).sort((a,b) => {
-    const wrA = a[1].wonWith / Math.max(1, a[1].wonWith + a[1].lostWith);
-    const wrB = b[1].wonWith / Math.max(1, b[1].wonWith + b[1].lostWith);
-    return wrB - wrA;
-  }).forEach(([name, d]) => {
-    const total = d.wonWith + d.lostWith;
-    const wr = total > 0 ? ((d.wonWith / total) * 100).toFixed(0) : 'N/A';
-    // Relative classification: compare to average, not absolute 85%
-    const wrNum = total > 0 ? (d.wonWith / total * 100) : 50;
-    const isStrong = total >= 3 && wrNum > avgEquipWR + 10;
-    const isWeak = total >= 3 && d.lostWith > d.wonWith;
-    const cls = isStrong ? 'insight' : isWeak ? 'need' : '';
-    const tag = isStrong ? '<span class="tag insight-tag">Strong</span>' : isWeak ? '<span class="tag need-tag">Weak</span>' : '';
-    const eq = equipData[name] || {};
-    let comment = '';
-    // Only give specific comments for notable items
-    if (eq.effect === 'roll_3_keep_best') comment = ` Rolls 3 dice, keeps best. Reduces variance, nearly guarantees 5-6.`;
-    else if (eq.effect === 'roll_gamble') comment = ` KO on 1-2 (33% risk), +1 on 3-4, +3 on 5+. High risk/reward.`;
-    else if (eq.effect === 'roll_1_auto_win') comment = ` Auto-win on roll 1 (1/6 chance) plus +2 STR base.`;
-    else if (eq.effect === 'cannot_remove_blocks_talent') comment = ` +3 STR is the highest, but blocks your Innate Talent and can't be removed. Tradeoff weapon.`;
-    else if (eq.effect === 'drain_1') comment = ` +1 hero, -1 enemy = effective +3 swing.`;
-    else if (eq.effect === 'win_recharge_all') comment = ` Recharges all skills on win. Synergizes with skill-heavy heroes.`;
-    else if (eq.effect === '+1_per_ready_skill') comment = ` +1 STR per ready skill (max +2). Best when skills are full.`;
-    else if (eq.effect === 'exhaust_all_recharge_1') comment = ` -1 STR penalty, but auto-recharges 1 skill when all are exhausted.`;
-    if (d.survivedKO > 0) comment += ` Survived ${d.survivedKO} KOs.`;
-    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> (STR ${eq.str >= 0 ? '+' : ''}${eq.str || 0}) — equipped ${d.equipped}x, win rate ${wr}% (${d.wonWith}W/${d.lostWith}L)${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
-  });
-  html += `</div>`;
+  // ===================== SECTION 3: HERO × ENEMY MATCHUP MATRIX =====================
+  html += `<div class="report-section"><h3>Hero × Enemy Matchup Matrix</h3>`;
 
-  // === ENCOUNTER BALANCE ===
-  html += `<div class="report-section"><h3>Encounter Balance</h3>`;
-  const encAgg = {};
-  results.forEach(r => {
-    Object.entries(r.tracker.encounters).forEach(([name, data]) => {
-      if (!encAgg[name]) encAgg[name] = { drawn:0, won:0, lost:0, fled:0, avoided:0 };
-      Object.keys(data).forEach(k => encAgg[name][k] += data[k]);
-    });
+  const allCombatLogs = results.flatMap(r => r.tracker.combatLog);
+  const enemyNames = [...new Set(allCombatLogs.map(c => c.enemy))].sort();
+  const matchups = {};
+  allCombatLogs.forEach(c => {
+    const key = `${c.heroId}|${c.enemy}`;
+    if (!matchups[key]) matchups[key] = { fights:0, wins:0, totalMargin:0, totalHeroStr:0 };
+    matchups[key].fights++;
+    if (c.won) matchups[key].wins++;
+    matchups[key].totalMargin += c.margin || 0;
+    matchups[key].totalHeroStr += c.heroTotalStr || 0;
   });
-  // === COMBAT THREAT SUMMARY ===
-  const totalEncWins = Object.values(encAgg).reduce((s,d) => s + d.won, 0);
-  const totalEncLosses = Object.values(encAgg).reduce((s,d) => s + d.lost, 0);
-  const totalEncFights = totalEncWins + totalEncLosses;
-  const totalFreeWins = results.reduce((s, r) => s + r.tracker.overkills.length, 0);
-  const totalTenseFights = results.reduce((s, r) => s + r.tracker.closeCalls.length, 0);
-  const totalHeroLosses = totalEncLosses;
-  if (totalEncFights > 0) {
-    const freeWinPct = (totalFreeWins / totalEncFights * 100).toFixed(0);
-    const tensePct = (totalTenseFights / totalEncFights * 100).toFixed(0);
-    const lossPct = (totalHeroLosses / totalEncFights * 100).toFixed(0);
-    const comfortPct = Math.max(0, 100 - parseInt(freeWinPct) - parseInt(tensePct) - parseInt(lossPct));
-    html += `<div class="report-card" style="margin-bottom:12px">`;
-    html += `<b>Combat Threat Summary</b> <span style="color:var(--dim);font-size:10px">(${totalEncFights} total fights across ${n} games)</span>`;
-    html += `<div style="display:flex;height:18px;border-radius:4px;overflow:hidden;margin:8px 0 4px;font-size:9px;font-weight:600">`;
-    html += `<div style="width:${freeWinPct}%;background:#2a5a2a;display:flex;align-items:center;justify-content:center;color:#8f8" title="Free Wins (margin 5+)">${parseInt(freeWinPct)>3?freeWinPct+'%':''}</div>`;
-    html += `<div style="width:${comfortPct}%;background:#2a3a5a;display:flex;align-items:center;justify-content:center;color:#8af" title="Comfortable Wins">${comfortPct>3?comfortPct+'%':''}</div>`;
-    html += `<div style="width:${tensePct}%;background:#5a5a2a;display:flex;align-items:center;justify-content:center;color:#ee8" title="Tense Fights (margin 0-1)">${parseInt(tensePct)>3?tensePct+'%':''}</div>`;
-    html += `<div style="width:${lossPct}%;background:#5a2a2a;display:flex;align-items:center;justify-content:center;color:#f88" title="Hero Losses">${parseInt(lossPct)>3?lossPct+'%':''}</div>`;
-    html += `</div>`;
-    html += `<div style="display:flex;gap:12px;font-size:9px;color:var(--dim);margin-bottom:6px">`;
-    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#2a5a2a;border-radius:2px"></span> Free Win ${freeWinPct}%</span>`;
-    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#2a3a5a;border-radius:2px"></span> Comfortable ${comfortPct}%</span>`;
-    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#5a5a2a;border-radius:2px"></span> Tense ${tensePct}%</span>`;
-    html += `<span><span style="display:inline-block;width:8px;height:8px;background:#5a2a2a;border-radius:2px"></span> Lost ${lossPct}%</span>`;
-    html += `</div>`;
-    let threatNote = '';
-    if (parseInt(freeWinPct) > 50) threatNote = `${freeWinPct}% of dungeon fights are free wins — most enemies are not threatening. Only ${tensePct}% of fights feel tense. Consider buffing weak enemies or adding secondary effects on draw.`;
-    else if (parseInt(lossPct) > 30) threatNote = `Heroes lose ${lossPct}% of fights, which is punishing. Players will feel like the dungeon is unfair. Consider lowering average enemy STR or adding more escape options.`;
-    else if (parseInt(tensePct) > 30) threatNote = `${tensePct}% of fights come down to the wire — strong tension. Make sure KO recovery is not too punishing or players will feel ground down.`;
-    else threatNote = `Good distribution of fight outcomes. Mix of easy wins, tense moments, and losses keeps the dungeon interesting.`;
-    html += `<div style="font-size:10px;color:var(--dim)">${threatNote}</div>`;
-    html += `</div>`;
-  }
 
-  // Identify enemy tier from card data
-  const mishapNames = new Set(MISHAP_CARDS.filter(c=>c.type==='enemy').map(c=>c.name));
-  const misfortuneNames = new Set(MISFORTUNE_CARDS.filter(c=>c.type==='enemy').map(c=>c.name));
-  // Separate into tiers
-  const mishapEnemies = Object.entries(encAgg).filter(([n]) => mishapNames.has(n) && encAgg[n].drawn >= 3);
-  const misfortuneEnemies = Object.entries(encAgg).filter(([n]) => misfortuneNames.has(n) && encAgg[n].drawn >= 3);
+  html += `<div style="overflow-x:auto"><table style="font-size:9px;border-collapse:collapse;width:100%">`;
+  html += `<tr><th style="position:sticky;left:0;background:var(--panel);min-width:120px">Enemy</th>`;
+  heroIds.forEach(id => html += `<th style="color:var(--${id});min-width:70px">${heroNames[id]}</th>`);
+  html += `<th style="min-width:60px">Overall</th></tr>`;
 
-  // Mishap enemies (STR 1-3): expected hero win rate 80-95%
-  html += `<h4 style="color:var(--mishap);margin:12px 0 6px">Mishap Enemies (STR 1-3)</h4>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:6px">These are the easy tier. Heroes SHOULD win 80-95% of the time. Flagged only if outside that range.</p>`;
-  const mishapSorted = mishapEnemies.sort((a,b) => {
-    const wrA = a[1].won / Math.max(1, a[1].won + a[1].lost);
-    const wrB = b[1].won / Math.max(1, b[1].won + b[1].lost);
-    return wrA - wrB;
-  });
-  let mishapFlags = 0;
-  mishapSorted.forEach(([name, d]) => {
-    const fights = d.won + d.lost;
-    if (fights === 0) return;
-    const heroWinRate = (d.won / fights * 100);
-    const wr = heroWinRate.toFixed(0);
-    const card = MISHAP_CARDS.find(c => c.name === name) || {};
-    const str = card.str || '?';
-    // Flag only outliers: too hard (hero wins < 70%) or too trivial (hero wins 100% with many fights)
-    let cls = '', tag = '', comment = '';
-    if (heroWinRate < 70 && fights >= 5) {
-      cls = 'op'; tag = '<span class="tag op-tag">Too Hard</span>';
-      comment = `Heroes win only ${wr}%. For a Mishap enemy this is too punishing. Consider: lower STR or simplify the special effect.`;
-      mishapFlags++;
-    } else if (heroWinRate >= 99.5 && fights >= 10) {
-      cls = 'weak'; tag = '<span class="tag weak-tag">Trivial</span>';
-      // Gameplay-focused suggestions for specific weak enemies
-      const weakSuggestions = {
-        'Sacerdote Fishfolk': `STR 1 is trivial. Consider: roll 1-2 = ALL heroes go to entrance (not just this one). Makes it a team-disruption card.`,
-        'Wind Elemental': `Too easy and the "move to revealed room" on loss barely matters since you almost always win. Consider: if YOU lose, Wind Elemental picks where you go.`,
-        'Thiefling Rats': `Discard 1 equip is painful BUT you win ${wr}% so it rarely triggers. Consider: the equip discard happens BEFORE the fight (like FROGman), not on loss.`,
-        'Djin': `Flame-only should be restricting but 50% flame chance is too generous. Consider: only EVEN flame faces count (reducing to ~16% hit chance).`,
-      };
-      if (weakSuggestions[name]) {
-        comment = weakSuggestions[name];
+  enemyNames.forEach(enemy => {
+    html += `<tr><td style="position:sticky;left:0;background:var(--panel);white-space:nowrap">${enemy}</td>`;
+    let totalFights = 0, totalWins = 0;
+    heroIds.forEach(id => {
+      const m = matchups[`${id}|${enemy}`];
+      if (m && m.fights >= 5) {
+        const wr = m.wins / m.fights * 100;
+        const color = wr < 20 ? 'var(--ko)' : wr > 95 ? 'var(--heal)' : 'var(--text)';
+        const bg = wr < 20 ? '#2a1a1a' : wr > 95 ? '#1a2a1a' : 'transparent';
+        html += `<td style="text-align:center;color:${color};background:${bg}">${wr.toFixed(0)}%<br><span style="font-size:8px;color:var(--dim)">${m.fights}f</span></td>`;
+        if (wr < 20 && m.fights >= 20) flag('matchup', 'high', `${heroNames[id]} vs ${enemy}: ${wr.toFixed(0)}% win rate (${m.fights} fights) — hero gets destroyed`);
+        if (wr > 95 && m.fights >= 20) flag('matchup', 'low', `${heroNames[id]} vs ${enemy}: ${wr.toFixed(0)}% win rate — no tension`);
+      } else if (m) {
+        html += `<td style="text-align:center;color:var(--dim)">${(m.wins/m.fights*100).toFixed(0)}%<br><span style="font-size:8px">${m.fights}f</span></td>`;
       } else {
-        comment = `This enemy is a speed bump, not a challenge. Heroes win ${wr}% (${d.won}W/${d.lost}L). Consider adding: a triggered effect on draw (like "all heroes discard 1 Gil"), a blocking condition (can't pass this room until defeated), or a combo effect (if 2+ enemies are on the board, they gain +1 each).`;
+        html += `<td style="text-align:center;color:var(--dim)">-</td>`;
       }
-      mishapFlags++;
-    } else {
-      return; // Don't show balanced Mishap enemies
-    }
-    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> (STR ${str}) — ${wr}% hero win rate (${d.won}W/${d.lost}L in ${d.drawn} games). ${comment}</div>`;
-  });
-  if (mishapFlags === 0) {
-    html += `<div class="report-card insight"><span class="tag insight-tag">OK</span>All Mishap enemies are in the expected 80-95% hero win range. Working as intended.</div>`;
-  }
-
-  // Misfortune enemies (STR 3-7): expected hero win rate 40-75%
-  html += `<h4 style="color:var(--misfortune);margin:12px 0 6px">Misfortune Enemies (STR 3-7)</h4>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:6px">These are the hard tier. Heroes should win 40-75%. Below 40% = too punishing. Above 85% = not threatening enough.</p>`;
-  const misfortSorted = misfortuneEnemies.sort((a,b) => {
-    const wrA = a[1].won / Math.max(1, a[1].won + a[1].lost);
-    const wrB = b[1].won / Math.max(1, b[1].won + b[1].lost);
-    return wrA - wrB;
-  });
-  let misfortFlags = 0;
-  misfortSorted.forEach(([name, d]) => {
-    const fights = d.won + d.lost;
-    if (fights === 0) return;
-    const heroWinRate = (d.won / fights * 100);
-    const wr = heroWinRate.toFixed(0);
-    const card = MISFORTUNE_CARDS.find(c => c.name === name) || {};
-    const str = card.str || '?';
-    let cls = '', tag = '', comment = '';
-    if (heroWinRate < 30 && fights >= 5) {
-      cls = 'op'; tag = '<span class="tag op-tag">Too Hard</span>';
-      // Gameplay-focused suggestions for specific OP enemies
-      const opSuggestions = {
-        'Dragon': `${wr}% hero win rate (${d.won}W/${d.lost}L). Consider: add a flee condition (if hero STR > 3, may flee without fighting), or reduce initial STR to 4 with +1 growth on loss.`,
-      };
-      if (opSuggestions[name]) {
-        comment = opSuggestions[name];
-      } else {
-        comment = `Heroes win only ${wr}% (${d.won}W/${d.lost}L). Too punishing even for Misfortune. Consider: add a flee condition, reduce STR by 1, or let heroes spend resources to avoid the fight entirely.`;
-      }
-      misfortFlags++;
-    } else if (heroWinRate > 85 && fights >= 5) {
-      cls = 'weak'; tag = '<span class="tag weak-tag">Too Easy</span>';
-      comment = `Heroes win ${wr}% (${d.won}W/${d.lost}L). This enemy is a speed bump, not a Misfortune-level threat. Consider adding: a triggered effect on draw, a blocking condition, or a combo effect with other enemies on the board.`;
-      misfortFlags++;
-    } else {
-      // Show balanced ones too for Misfortune — they're the interesting data
-      cls = ''; tag = '<span class="tag" style="background:#2a2a3a;color:var(--text)">Balanced</span>';
-      comment = `${wr}% hero win rate (${d.won}W/${d.lost}L). Good challenge level.`;
-    }
-    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> (STR ${str}) — ${comment}</div>`;
-    misfortFlags++; // count all shown
-  });
-  if (misfortuneEnemies.length === 0) {
-    html += `<div class="report-card"><span style="color:var(--dim)">No Misfortune enemy data yet.</span></div>`;
-  }
-  html += `</div>`;
-
-  // === TALENT ANALYSIS ===
-  html += `<div class="report-section"><h3>Talent Analysis</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Talents trigger on Flame (3/6 faces = 50% chance per roll). "Combat impact" = Flame rolled during a fight. "Movement impact" = Flame rolled for movement (triggers Awakening after tile 10).</p>`;
-  const talentComments = {
-    juju: (agg) => {
-      const perGame = (agg.combatImpact / n).toFixed(1);
-      let c = `<b>Unwavering Power (+2 combat):</b> Triggered in combat ${agg.combatImpact}x (${perGame}/game). `;
-      if (perGame >= 1.5) c += `Strong impact. Juju gets a meaningful STR boost in roughly half his fights. The +2 is reliable enough to make him the party's main fighter.`;
-      else if (perGame >= 0.8) c += `Moderate impact. Triggers about once per game in combat. Useful but not game-defining. Consider whether +2 is enough or if it should be +3 on a less frequent trigger.`;
-      else c += `Low combat impact. Juju's talent mostly helps with Awakening (movement flames) rather than fights. Consider making it trigger on movement too, or increasing the combat bonus.`;
-      return c;
-    },
-    gigi: (agg) => {
-      let c = `<b>Nature's Gift (gift Flame to ally):</b> Triggered ${agg.triggered}x total. `;
-      c += `Gifting Flame to another hero means THEIR talent fires next turn: Juju gets +2 combat, Eggo gets Dodge, Lulu recharges a skill. `;
-      if (agg.blocked > 0) c += `Blocked ${agg.blocked}x by Cursed Beggar. `;
-      c += `Combined with Herbalist (which can also recharge Gigi's own skills), Gigi acts as the party's support engine — keeping allies' talents and skills cycling. The AI gifts Flame to the hero who benefits most based on upcoming threats.`;
-      return c;
-    },
-    lulu: (agg) => {
-      let c = `<b>Arcane Recharge (recharge 1 skill):</b> Triggered ${agg.triggered}x total. `;
-      c += `Arcane Recharge is key for cycling Lulu's powerful skills (Siphon, Overload, Spell Mirror). With cross-turn Siphon usage (${(agg.triggered / 4).toFixed(0)}+ recharges), Lulu can potentially use Siphon multiple times per round. `;
-      c += `Watch that this doesn't make Siphon feel unlimited — if Lulu recharges and uses Siphon every turn, every enemy effectively has -2 STR permanently.`;
-      return c;
-    },
-    eggo: (agg) => {
-      const dodgeSaves = Object.entries(results.reduce((s,r) => { const sk = r.tracker.skills; Object.entries(sk).forEach(([k,v]) => { if (k.includes('Dodge')) { s[k] = (s[k]||0) + v.savedFromKO; } }); return s; }, {}));
-      const saves = dodgeSaves.reduce((s,[,v]) => s+v, 0);
-      let c = `<b>Dodge (immune to KO this turn):</b> Triggered ${agg.triggered}x total. `;
-      if (saves > 0) c += `Prevented ${saves} KOs across ${n} games (${(saves/n).toFixed(1)}/game). `;
-      if (saves/n >= 0.5) c += `Very strong defensive talent. Eggo is significantly harder to kill than other heroes. `;
-      else c += `Dodge activates often but most of the time Eggo wasn't going to be KO'd anyway. The insurance value is real though. `;
-      c += `Consider: Dodge only lasts for ONE combat, not the whole turn, to add a decision layer.`;
-      return c;
-    }
-  };
-  heroIds.forEach(hid => {
-    const agg = { triggered:0, blocked:0, combatImpact:0, movementImpact:0 };
-    results.forEach(r => {
-      const t = r.tracker.talents[hid];
-      if (!t) return;
-      Object.keys(agg).forEach(k => agg[k] += (t[k] || 0));
+      if (m) { totalFights += m.fights; totalWins += m.wins; }
     });
-    if (agg.triggered + agg.blocked === 0) return;
-    const comment = talentComments[hid] ? talentComments[hid](agg) : '';
-    html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]}</b> — triggered ${agg.triggered}x, blocked ${agg.blocked}x<br>${comment}</div>`;
+    const overallWR = totalFights ? (totalWins/totalFights*100).toFixed(0) : '-';
+    html += `<td style="text-align:center;font-weight:600">${overallWR}%</td></tr>`;
+  });
+  html += `</table></div></div>`;
+
+  // ===================== SECTION 4: HERO × HYDRA HEAD MATCHUP =====================
+  html += `<div class="report-section"><h3>Hero × Hydra Head Matchup</h3>`;
+
+  const allHydraLogs = results.flatMap(r => r.tracker.hydraCombatLog);
+  const headNames = [...new Set(allHydraLogs.map(c => c.head))].sort();
+  const hydraMatchups = {};
+  allHydraLogs.forEach(c => {
+    const key = `${c.heroId}|${c.head}`;
+    if (!hydraMatchups[key]) hydraMatchups[key] = { attacks:0, wins:0, kos:0, totalHeroStr:0 };
+    hydraMatchups[key].attacks++;
+    if (c.won) hydraMatchups[key].wins++;
+    hydraMatchups[key].totalHeroStr += c.finalHeroTotal || c.heroTotal || 0;
+  });
+
+  html += `<div style="overflow-x:auto"><table style="font-size:9px;border-collapse:collapse;width:100%">`;
+  html += `<tr><th style="min-width:100px">Head</th>`;
+  heroIds.forEach(id => html += `<th style="color:var(--${id});min-width:70px">${heroNames[id]}</th>`);
+  html += `<th>Overall</th></tr>`;
+
+  headNames.forEach(head => {
+    html += `<tr><td>${head}</td>`;
+    let tA = 0, tW = 0;
+    heroIds.forEach(id => {
+      const m = hydraMatchups[`${id}|${head}`];
+      if (m && m.attacks > 0) {
+        const wr = m.wins / m.attacks * 100;
+        const color = wr < 30 ? 'var(--ko)' : wr > 95 ? 'var(--heal)' : 'var(--text)';
+        html += `<td style="text-align:center;color:${color}">${wr.toFixed(0)}%<br><span style="font-size:8px;color:var(--dim)">${m.attacks}atk</span></td>`;
+        if (wr < 30) flag('hydra', 'medium', `${heroNames[id]} vs ${head}: ${wr.toFixed(0)}% win — WALL`);
+        tA += m.attacks; tW += m.wins;
+      } else {
+        html += `<td style="text-align:center;color:var(--dim)">-</td>`;
+      }
+    });
+    html += `<td style="text-align:center;font-weight:600">${tA?pct(tW,tA)+'%':'-'}</td></tr>`;
+  });
+  html += `</table></div>`;
+
+  // Per-head stats
+  headNames.forEach(head => {
+    const headData = {};
+    results.forEach(r => { if (r.tracker.hydraHeads[head]) { Object.entries(r.tracker.hydraHeads[head]).forEach(([k,v]) => { headData[k] = (headData[k]||0) + v; }); }});
+    const killOrders = results.filter(r=>r.victory).map(r => { const ko = r.tracker.hydraHeadKillOrder || []; const idx = ko.findIndex(k => k.head === head); return idx; }).filter(i => i >= 0);
+    const lastKilled = killOrders.filter(i => { const r = results.find(rr => rr.victory); return r && i === (r.tracker.hydraHeadKillOrder||[]).length - 1; }).length;
+    if (headData.spawned) {
+      html += `<div style="font-size:10px;color:var(--dim);margin:2px 0">${head}: spawned ${headData.spawned||0}x, destroyed ${headData.destroyed||0}x (${pct(headData.destroyed||0, headData.spawned||0)}%), KOs caused: ${headData.causedKO||0}</div>`;
+    }
   });
   html += `</div>`;
 
-  // === SKILL ANALYSIS ===
+  // ===================== SECTION 5: SKILL ANALYSIS =====================
   html += `<div class="report-section"><h3>Skill Analysis</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">For each skill: how many times it was activated (with its effect) vs burned (exhausted for Skill Burn reroll or by enemy effects), and whether in Dungeon or at Hydra.</p>`;
 
-  const skillAgg = {};
+  const allSkills = {};
   results.forEach(r => {
     Object.entries(r.tracker.skills).forEach(([key, data]) => {
-      if (!skillAgg[key]) skillAgg[key] = {
-        activated:0, burned:0, savedFromKO:0, turnedFight:0,
-        activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0
-      };
-      Object.keys(data).forEach(k => { if (skillAgg[key][k] !== undefined) skillAgg[key][k] += data[k]; });
+      if (!allSkills[key]) allSkills[key] = { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
+      Object.entries(data).forEach(([f,v]) => { allSkills[key][f] = (allSkills[key][f]||0) + v; });
     });
   });
 
-  heroIds.forEach(hid => {
-    const heroSkillDefs = HEROES.find(h => h.id === hid).skills;
-    html += `<div class="report-card"><b style="color:var(--${hid})">${heroNames[hid]} Skills</b>`;
-    html += `<table style="width:100%;margin-top:6px;font-size:10px;border-collapse:collapse">`;
-    html += `<tr style="color:var(--dim);border-bottom:1px solid var(--border)">`;
-    html += `<th style="text-align:left;padding:2px 4px">Skill</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Used</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Dungeon</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Hydra</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Burned</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Burn D</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Burn H</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">KO Saved</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Fights Won</th>`;
-    html += `<th style="text-align:center;padding:2px 4px">Use/Burn</th>`;
-    html += `<th style="text-align:left;padding:2px 4px">Verdict</th></tr>`;
+  html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+  html += `<tr style="border-bottom:1px solid var(--border)"><th>Skill</th><th>Activated</th><th>Burned</th><th>Use/Burn</th><th>Dungeon</th><th>Hydra</th><th>KO Saved</th><th>Fight Changed</th></tr>`;
 
-    heroSkillDefs.forEach(skillDef => {
-      const key = hid + '_' + skillDef.name;
-      const d = skillAgg[key] || { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
-      const total = d.activated + d.burned;
-      const perGame = (d.activated / n).toFixed(1);
-
-      let verdict = '';
-      let verdictColor = 'var(--dim)';
-      if (d.activated === 0 && d.burned === 0) {
-        verdict = 'Never touched';
-        verdictColor = '#884444';
-      } else if (d.activated === 0 && d.burned > 0) {
-        verdict = 'Only burned, never used';
-        verdictColor = '#cc8833';
-      } else if (d.burned > d.activated * 2) {
-        verdict = 'Burned more than used (' + Math.round(d.burned/(d.burned+d.activated)*100) + '% burn rate)';
-        verdictColor = '#cc8833';
-      } else if (d.activatedHydra > d.activatedDungeon && d.activatedHydra > 0) {
-        verdict = 'Mostly Hydra (' + d.activatedHydra + 'H/' + d.activatedDungeon + 'D)';
-        verdictColor = 'var(--hydra)';
-      } else if (d.activatedDungeon > d.activatedHydra && d.activatedDungeon > 0) {
-        verdict = 'Mostly Dungeon (' + d.activatedDungeon + 'D/' + d.activatedHydra + 'H)';
-        verdictColor = 'var(--wonder)';
-      } else if (d.activated > 0) {
-        verdict = 'Mixed use';
-        verdictColor = 'var(--text)';
-      }
-      if (d.savedFromKO > 0) verdict += ' | Life saver!';
-      if (d.turnedFight > 0) verdict += ' | Fight turner';
-      if (perGame >= 1.5) verdict = 'Core skill | ' + verdict;
-
-      const rowBg = d.activated === 0 && d.burned === 0 ? '#1a1015' : '#0e0e16';
-      html += `<tr style="border-bottom:1px solid #1a1a2a;background:${rowBg}">`;
-      html += `<td style="padding:3px 4px;font-weight:600">${skillDef.name}</td>`;
-      html += `<td style="text-align:center;padding:3px 4px;color:${d.activated>0?'var(--heal)':'#884444'}">${d.activated} (${perGame}/g)</td>`;
-      html += `<td style="text-align:center;padding:3px 4px">${d.activatedDungeon}</td>`;
-      html += `<td style="text-align:center;padding:3px 4px">${d.activatedHydra}</td>`;
-      html += `<td style="text-align:center;padding:3px 4px;color:${d.burned>0?'#cc8833':'var(--dim)'}">${d.burned}</td>`;
-      html += `<td style="text-align:center;padding:3px 4px">${d.burnedDungeon}</td>`;
-      html += `<td style="text-align:center;padding:3px 4px">${d.burnedHydra}</td>`;
-      html += `<td style="text-align:center;padding:3px 4px;color:${d.savedFromKO>0?'var(--heal)':'var(--dim)'}">${d.savedFromKO || '-'}</td>`;
-      html += `<td style="text-align:center;padding:3px 4px;color:${d.turnedFight>0?'var(--heal)':'var(--dim)'}">${d.turnedFight || '-'}</td>`;
-      // Use vs Burn ratio bar
-      let useBurnHtml = '-';
-      if (total > 0) {
-        const usePct = Math.round(d.activated / total * 100);
-        const burnPct = 100 - usePct;
-        const barW = 50;
-        const useW = Math.round(barW * usePct / 100);
-        const burnW = barW - useW;
-        let label = '';
-        let labelColor = 'var(--dim)';
-        if (usePct >= 80) { label = 'Used ' + usePct + '%'; labelColor = 'var(--heal)'; }
-        else if (burnPct >= 80) { label = 'Burned ' + burnPct + '%'; labelColor = '#cc8833'; }
-        else { label = usePct + '/' + burnPct + '%'; labelColor = 'var(--text)'; }
-        useBurnHtml = '<div style="display:flex;align-items:center;gap:3px;justify-content:center">'
-          + '<div style="width:' + barW + 'px;height:6px;background:#2a1a1a;border-radius:3px;overflow:hidden;display:flex">'
-          + '<div style="width:' + useW + 'px;background:var(--heal)"></div>'
-          + '<div style="width:' + burnW + 'px;background:#cc8833"></div></div>'
-          + '<span style="font-size:8px;color:' + labelColor + '">' + label + '</span></div>';
-      }
-      html += `<td style="text-align:center;padding:3px 4px">${useBurnHtml}</td>`;
-      html += `<td style="padding:3px 4px;color:${verdictColor};font-size:9px">${verdict}</td>`;
-      html += `</tr>`;
-    });
-    html += `</table>`;
-
-    // Per-skill WHY commentary
-    html += `<div style="margin-top:8px;padding:6px;background:#0e0e16;border-radius:3px;font-size:10px;line-height:1.6">`;
-    heroSkillDefs.forEach(skillDef => {
-      const key = hid + '_' + skillDef.name;
-      const d = skillAgg[key] || { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
-      const total = d.activated + d.burned;
-      if (total === 0) {
-        html += `<div style="margin:3px 0"><b style="color:#884444">${skillDef.name}</b>: Never triggered. The AI never found a situation where activating or burning this skill was worth it. <i style="color:var(--dim)">This could mean: the skill's conditions rarely come up, the hero has better options, or the AI logic doesn't recognize when to use it.</i></div>`;
-        return;
-      }
-      const usePct = Math.round(d.activated / total * 100);
-      const burnPct = 100 - usePct;
-      let why = `<b style="color:var(--${hid})">${skillDef.name}</b>: `;
-      if (d.activated === 0 && d.burned > 0) {
-        why += `Only burned (${d.burned}x), never activated. The AI always preferred a Skill Burn reroll over using this skill's effect. <i style="color:var(--dim)">This suggests the skill's effect is too situational or weaker than a simple reroll. Consider making the effect stronger or broader.</i>`;
-      } else if (usePct >= 80) {
-        why += `Used ${usePct}% of the time (${d.activated} used vs ${d.burned} burned). The skill's effect is almost always more valuable than a reroll. `;
-        if (d.savedFromKO > 0) why += `Saved from ${d.savedFromKO} KOs — a genuine life-saver. `;
-        if (d.turnedFight > 0) why += `Turned ${d.turnedFight} fights — a combat changer. `;
-        if (d.activatedHydra > d.activatedDungeon * 2) why += `<i style="color:var(--hydra)">Mostly used at the Hydra (${d.activatedHydra}H vs ${d.activatedDungeon}D) — it's a boss-fight skill.</i>`;
-        else if (d.activatedDungeon > d.activatedHydra * 2) why += `<i style="color:var(--wonder)">Mostly used in the Dungeon (${d.activatedDungeon}D vs ${d.activatedHydra}H) — good for exploration phase.</i>`;
-        else why += `<i style="color:var(--dim)">Used evenly across Dungeon and Hydra — versatile skill.</i>`;
-      } else if (burnPct >= 60) {
-        why += `Burned ${burnPct}% of the time (${d.burned} burned vs ${d.activated} used). The AI often prefers a reroll over activating this skill. `;
-        why += `<i style="color:var(--dim)">This means: in ${burnPct}% of situations, a random reroll was more likely to help than the skill's specific effect. Consider buffing the effect, lowering its condition threshold, or making it usable in more situations.</i>`;
-        if (d.activated > 0) why += ` When it IS used, it's in ${d.activatedHydra > d.activatedDungeon ? 'Hydra' : 'Dungeon'} situations.`;
-      } else {
-        why += `Balanced use: ${usePct}% activated, ${burnPct}% burned (${d.activated} used, ${d.burned} burned). `;
-        why += `<i style="color:var(--dim)">The AI sometimes prefers the effect, sometimes the reroll — this means the skill creates a meaningful decision.</i>`;
-        if (d.savedFromKO > 0) why += ` Saved ${d.savedFromKO} KOs when activated.`;
-        if (d.turnedFight > 0) why += ` Turned ${d.turnedFight} fights when activated.`;
-      }
-      html += `<div style="margin:3px 0">${why}</div>`;
-    });
-    html += `</div>`;
-
-    html += `</div>`;
-  });
-  html += `</div>`;
-
-  // === HYDRA HEAD ANALYSIS ===
-  html += `<div class="report-section"><h3>Hydra Heads</h3>`;
-  const headAgg = {};
-  results.forEach(r => {
-    Object.entries(r.tracker.hydraHeads).forEach(([name, data]) => {
-      if (!headAgg[name]) headAgg[name] = { spawned:0, destroyed:0, causedKO:0, regenerated:0 };
-      Object.keys(data).forEach(k => headAgg[name][k] += (data[k] || 0));
-    });
-  });
-  const hydraRef = HYDRA_HEADS.reduce((m,h) => { m[h.name] = h; return m; }, {});
-  const headComments = {
-    'The Nest': (d, ref) => `STR ${ref.str}. While alive, all other heads get +2 STR. ${d.destroyed === 0 ? 'Never destroyed in simulation. This means the +2 buff is always active, making every other head 2 points harder. If heroes can\'t kill STR 7, they can\'t kill anything. Consider: lower to STR 5-6 so heroes can realistically prioritize it, or change the passive to +1.' : `Destroyed ${d.destroyed}x. When it goes down, the fight gets much easier. Good design.`}`,
-    'The Brood': (d, ref) => `STR ${ref.str}. Disables all Flame effects (talents, Awakening). ${d.destroyed === 0 ? 'Never destroyed. Flame suppression means: no Juju +2, no Eggo Dodge, no Lulu recharge. This head neutralizes all talents permanently. Consider: lower STR to 6-7 so heroes can kill it, or make the suppression partial (e.g., only blocks talents, not Flame-triggered equipment).' : `Destroyed ${d.destroyed}x. Good counterplay target.`}`,
-    'The Wail': (d, ref) => `STR ${ref.str}. On destroy: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. At STR 10 this head is nearly unkillable even with skills. Heroes need total 10+ to beat it. Consider: lower to STR 8, or make the on-destroy effect less punishing (exhaust only the attacker).' : `Destroyed ${d.destroyed}x. The skill exhaust on death is a fair cost for removing a head.`}`,
-    'The Spite': (d, ref) => `STR ${ref.str}. On destroy: grow 1 extra head. ${d.destroyed === 0 ? 'Never destroyed. At STR 12 this is essentially a wall. Even with max equipment (+3 weapon, +2 base, roll 6) heroes barely reach 11. Consider: lower to STR 9-10, since the growth penalty already makes it risky to destroy.' : `Destroyed ${d.destroyed}x. Growing a head on death is a great mechanic that creates tension.`}`,
-    'The Fangs': (d, ref) => `STR ${ref.str}. When targeted: all heroes exhaust 1 Skill. ${d.destroyed === 0 ? 'Never destroyed. The on-attack trigger means heroes LOSE skills just for trying. At STR 9 it\'s also hard to kill. This head punishes aggression too much. Consider: lower to STR 7, or change to "attacker only exhaust 1" instead of all heroes.' : `Destroyed ${d.destroyed}x. Punishing but fair if killable.`}`,
-    'The Maw': (d, ref) => `STR ${ref.str}. When targeted: discard 1 Equipment or -2. ${d.destroyed === 0 ? 'Never destroyed. Heroes must sacrifice equipment just to attempt an attack. At STR 8 with Nest bonus (+2 = 10), heroes need 10+ after losing equipment. Consider: lower to STR 6, or change to "discard OR -1" instead of -2.' : `Destroyed ${d.destroyed}x. Equipment sacrifice adds an interesting cost.`}`
-  };
-  // Classify heads by danger: consider KOs caused AND kill difficulty relative to game outcome
-  const totalHeadKOs = Object.values(headAgg).reduce((s,d) => s + d.causedKO, 0);
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Tags reflect actual danger, not just kill rate. A head that's "destroyed often" but also causes many KOs is <b>Dangerous</b> (high cost to kill). "Manageable" = heroes handle it. "Wall" = rarely killed, blocks progress.</p>`;
-  Object.entries(headAgg).sort((a,b) => {
-    // Sort by danger: most KOs first, then lowest kill rate
-    return (b[1].causedKO / Math.max(1,b[1].spawned)) - (a[1].causedKO / Math.max(1,a[1].spawned));
-  }).forEach(([name, d]) => {
-    const killRate = d.spawned > 0 ? ((d.destroyed / d.spawned) * 100).toFixed(0) : 'N/A';
-    const koPerSpawn = d.spawned > 0 ? (d.causedKO / d.spawned) : 0;
-    const killRateNum = d.spawned > 0 ? (d.destroyed / d.spawned * 100) : 0;
-    // Classification logic:
-    // Wall: rarely killed (kill rate < 30%) — blocks progress
-    // Dangerous: high KO rate (>0.3 KOs per spawn) regardless of kill rate — costly fights
-    // Manageable: high kill rate AND low KO rate — heroes handle it fine
-    // Balanced: everything else
-    let cls = '', tag = '';
-    if (killRateNum < 30 && d.spawned >= 3) {
-      cls = 'op'; tag = '<span class="tag op-tag">Wall</span>';
-    } else if (koPerSpawn > 0.3 && d.spawned >= 3) {
-      cls = 'need'; tag = '<span class="tag need-tag">Dangerous</span>';
-    } else if (killRateNum >= 80 && koPerSpawn < 0.1 && d.spawned >= 3) {
-      cls = 'insight'; tag = '<span class="tag insight-tag">Manageable</span>';
-    } else {
-      cls = ''; tag = '<span class="tag" style="background:#2a2a3a;color:var(--text)">Balanced</span>';
-    }
-    const ref = hydraRef[name] || {};
-    const comment = headComments[name] ? headComments[name](d, ref) : '';
-    html += `<div class="report-card ${cls}">${tag}<b>${name}</b> — spawned ${d.spawned}x, destroyed ${d.destroyed}x (${killRate}%), caused ${d.causedKO} KOs (${(koPerSpawn).toFixed(1)}/spawn)${comment ? `<br><i style="color:var(--dim)">${comment}</i>` : ''}</div>`;
-  });
-  html += `</div>`;
-
-  // === HYDRA COMBAT REPORT ===
-  const allHydraAttacks = results.reduce((arr, r) => arr.concat(r.tracker.hydraCombatLog || []), []);
-  if (allHydraAttacks.length > 0) {
-    html += `<div class="report-section"><h3>Hydra Combat Breakdown</h3>`;
-    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Every attack attempt at the Hydra across all ${n} games. Shows why heroes win or lose the Hydra fight.</p>`;
-    const totalAtks = allHydraAttacks.length;
-    const wins = allHydraAttacks.filter(a => a.won).length;
-    const losses = allHydraAttacks.filter(a => !a.won).length;
-    const avgMarginWin = wins > 0 ? (allHydraAttacks.filter(a=>a.won).reduce((s,a)=>s+a.margin,0)/wins).toFixed(1) : 'N/A';
-    const avgMarginLoss = losses > 0 ? (allHydraAttacks.filter(a=>!a.won).reduce((s,a)=>s+a.margin,0)/losses).toFixed(1) : 'N/A';
-    const avgHeroTotal = (allHydraAttacks.reduce((s,a)=>s+a.finalHeroTotal,0)/totalAtks).toFixed(1);
-    const avgHeadStr = (allHydraAttacks.reduce((s,a)=>s+a.headStr,0)/totalAtks).toFixed(1);
-
-    html += `<div class="report-card"><b>Overall</b>: ${totalAtks} attacks, ${wins} won (${((wins/totalAtks)*100).toFixed(0)}%), ${losses} lost<br>`;
-    html += `Avg hero total: <b>${avgHeroTotal}</b> vs avg head STR: <b>${avgHeadStr}</b> (gap: ${(avgHeroTotal - avgHeadStr).toFixed(1)})<br>`;
-    html += `Avg win margin: <b>+${avgMarginWin}</b> | Avg loss margin: <b>${avgMarginLoss}</b>`;
-    if (Number(avgHeroTotal) < Number(avgHeadStr)) {
-      html += `<br><i style="color:var(--ko)">Heroes are WEAKER than heads on average. They need to roll high AND have good equipment to win. Most attacks fail.</i>`;
-    } else if (Number(avgHeroTotal) - Number(avgHeadStr) < 2) {
-      html += `<br><i style="color:var(--mishap)">Very tight. Heroes need average+ rolls to win. Skill Burns and skills are critical.</i>`;
-    } else {
-      html += `<br><i style="color:var(--wonder)">Heroes are stronger than heads. Most attacks succeed.</i>`;
-    }
-    html += `</div>`;
-
-    // Per-hero breakdown at Hydra
-    html += `<div class="report-card"><b>Per Hero at Hydra</b><br><br>`;
-    heroIds.forEach(hid => {
-      const heroAtks = allHydraAttacks.filter(a => a.heroId === hid);
-      if (heroAtks.length === 0) return;
-      const hw = heroAtks.filter(a=>a.won).length;
-      const hl = heroAtks.filter(a=>!a.won).length;
-      const hAvgTotal = (heroAtks.reduce((s,a)=>s+a.finalHeroTotal,0)/heroAtks.length).toFixed(1);
-      const hAvgStr = (heroAtks.reduce((s,a)=>s+a.heroStr,0)/heroAtks.length).toFixed(1);
-      html += `<div style="margin:3px 0;padding:3px 6px;background:#0e0e16;border-radius:3px;font-size:11px;border-left:3px solid var(--${hid})">`;
-      html += `<b style="color:var(--${hid})">${heroNames[hid]}</b>: ${heroAtks.length} attacks, ${hw}W/${hl}L (${((hw/heroAtks.length)*100).toFixed(0)}% win rate). Avg STR: ${hAvgStr}, avg total: ${hAvgTotal}`;
-      if (hw / heroAtks.length < 0.3) html += ` <span style="color:var(--ko)">← Too weak for Hydra</span>`;
-      else if (hw / heroAtks.length > 0.7) html += ` <span style="color:var(--wonder)">← Strong Hydra fighter</span>`;
-      html += `</div>`;
-    });
-    html += `</div>`;
-
-    // Per-head breakdown: who wins/loses vs each head
-    html += `<div class="report-card"><b>Per Head Matchup</b><br><br>`;
-    const headNames = [...new Set(allHydraAttacks.map(a=>a.head))];
-    headNames.sort((a,b) => {
-      const sA = allHydraAttacks.filter(x=>x.head===a);
-      const sB = allHydraAttacks.filter(x=>x.head===b);
-      const wrA = sA.filter(x=>x.won).length / Math.max(1,sA.length);
-      const wrB = sB.filter(x=>x.won).length / Math.max(1,sB.length);
-      return wrA - wrB;
-    });
-    headNames.forEach(hname => {
-      const atks = allHydraAttacks.filter(a => a.head === hname);
-      const hw = atks.filter(a=>a.won).length;
-      const avgStr = (atks.reduce((s,a)=>s+(a.headBaseStr||a.headStr),0)/atks.length).toFixed(0);
-      const avgHT = (atks.reduce((s,a)=>s+a.finalHeroTotal,0)/atks.length).toFixed(1);
-      const wr = ((hw/atks.length)*100).toFixed(0);
-      let barColor = wr >= 60 ? 'var(--wonder)' : wr >= 40 ? 'var(--mishap)' : 'var(--ko)';
-      html += `<div style="margin:2px 0;font-size:11px">`;
-      html += `<b>${hname}</b> (STR ${avgStr}): ${atks.length} attacks, <b>${wr}%</b> win rate (avg hero total ${avgHT}) `;
-      html += `<div style="background:#1a1a2a;border-radius:2px;height:8px;margin-top:2px"><div style="width:${Math.min(100,wr)}%;background:${barColor};height:100%;border-radius:2px"></div></div>`;
-      html += `</div>`;
-    });
-    html += `</div>`;
-
-    // Overflow analysis
-    const overflowGames = results.filter(r => !r.victory && r.defeatCause && r.defeatCause.cause === 'hydra_overflow');
-    if (overflowGames.length > 0) {
-      const avgHeadsAtOverflow = (overflowGames.reduce((s,r) => {
-        const lastLog = (r.tracker.hydraCombatLog || []);
-        if (lastLog.length > 0) return s + lastLog[lastLog.length-1].aliveHeads;
-        return s;
-      }, 0) / overflowGames.length).toFixed(1);
-      const avgMaxAtOverflow = (overflowGames.reduce((s,r) => {
-        const lastLog = (r.tracker.hydraCombatLog || []);
-        if (lastLog.length > 0) return s + lastLog[lastLog.length-1].maxHeads;
-        return s;
-      }, 0) / overflowGames.length).toFixed(1);
-      html += `<div class="report-card need"><span class="tag need-tag">Overflow Detail</span>`;
-      html += `${overflowGames.length} games ended in overflow. Avg heads alive at overflow: <b>${avgHeadsAtOverflow}</b>, avg max at that point: <b>${avgMaxAtOverflow}</b>.<br>`;
-      html += `<i style="color:var(--dim)">The gap between alive and max shrinks as heroes destroy heads (max decreases). If heroes can't kill heads fast enough, new growths push them over. The tipping point is usually when max drops to 3-4 and one failed attack triggers overflow.</i>`;
-      html += `</div>`;
-    }
-
-    html += `</div>`;
-  }
-
-  // === TRAP ANALYSIS ===
-  html += `<div class="report-section"><h3>Trap Analysis</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px"><b>Lethal</b> = directly KOs heroes. <b>Fun</b> = creates setbacks that add drama (lose resources, tempo). <b>Frustrating</b> = punishing with no counterplay, just feels bad. <b>Useless</b> = effect doesn't meaningfully change anything.</p>`;
-  const trapAgg = {};
-  results.forEach(r => {
-    Object.entries(r.tracker.traps).forEach(([name, data]) => {
-      if (!trapAgg[name]) trapAgg[name] = { triggered:0, survived:0, ko:0 };
-      Object.keys(data).forEach(k => trapAgg[name][k] += (data[k] || 0));
-    });
-  });
-  // Trap categories: what kind of pressure does each trap create?
-  // - 'lethal': directly KOs heroes at a meaningful rate
-  // - 'fun': creates a setback that feels fair and adds drama (lose resources, tempo, etc.)
-  // - 'frustrating': punishing but doesn't advance the game — just feels bad
-  // - 'useless': effect doesn't meaningfully change anything
-  const trapMeta = {
-    'Hall of Mirrors': { vibe:'useless', comment:'You fight yourself with 4 dice but no STR. Heroes have equipment + base STR, so they almost always win. The trap creates zero tension. Fix: the mirror copies your full STR, or rolls 4 dice AND adds your base STR.' },
-    'Spike Trap': { vibe:'lethal', comment:'Roll 1-3 = KO. 50% chance on paper. When it KOs, it feels fair because the player rolled the dice. When it doesn\'t, Skill Burn saved them — good tension.' },
-    'The Tribute': { vibe:'fun', comment:'Exhaust all skills OR go KO. Heroes always choose exhaust. It drains resources without killing, which creates interesting downstream decisions (no skills for next fight). Good design.' },
-    'Guillotine': { vibe:'useless', comment:'KO if fewer than 2 ready skills. By the time this triggers, heroes usually have 2+ ready. The condition is too easy to meet. Fix: KO if fewer than 3 ready skills, or KO if no equipment.' },
-    'Static Fog': { vibe:'fun', comment:'Blocks movement through a room. In real play this forces detours and creates board tension. Simulation can\'t capture this but it likely works well on the table.' },
-    'Spectral Theft': { vibe:'fun', comment:'Discard 1 equipment. Losing a weapon hurts but isn\'t devastating. Creates a "do I keep my best weapon or risk it" tension. Good design.' },
-    'Trap Alarm': { vibe:'fun', comment:'Triggers a full Dread encounter (Legendary + Misfortune). High risk, high reward. Can lead to KO from the Misfortune but the Legendary makes it exciting, not frustrating.' },
-    'Magnetic Field': { vibe:'fun', comment:'All heroes roll Flame or lose equipment. Group pressure that hits the whole party. Creates shared tension and makes Flame faces feel meaningful outside combat.' },
-    'Trap Door': { vibe:'frustrating', comment:'Back to entrance. No resource loss, just wasted tempo. In a game where turns matter, losing a turn with zero interaction feels bad. Fix: add a choice (exhaust 1 skill to resist, or lose followers too).' },
-    'Crumbling Floor': { vibe:'lethal', comment:'Roll 1-2 = KO (33% chance). Clean design — pure dice risk. Heroes can Skill Burn to reroll, spending resources to survive. Good tension.' },
-    'Giant Web': { vibe:'fun', comment:'Exhaust 1 skill or KO. Usually costs a skill. Quick decision, fair cost. Works as designed.' },
-    'Stink Bomb': { vibe:'frustrating', comment:'Lose all followers. If you have 2-3 followers this is devastating with no counterplay. Pure loss, no decision. Fix: lose 1 follower of your choice, or roll to save each one.' },
-    'Magnetic Field': { vibe:'fun', comment:'All heroes with Equipment roll Flame or discard. Group pressure that hits the whole party. Makes Flame faces feel meaningful outside combat.' }
-  };
-  const vibeStyles = {
-    'lethal': { cls:'op', tag:'<span class="tag op-tag">Lethal</span>' },
-    'fun': { cls:'insight', tag:'<span class="tag insight-tag">Fun</span>' },
-    'frustrating': { cls:'need', tag:'<span class="tag need-tag">Frustrating</span>' },
-    'useless': { cls:'weak', tag:'<span class="tag weak-tag">Useless</span>' }
-  };
-  Object.entries(trapAgg).filter(([,d]) => d.triggered >= 2).sort((a,b) => {
-    // Sort by: lethal first, then frustrating, then useless, then fun
-    const order = {lethal:0, frustrating:1, useless:2, fun:3};
-    const va = (trapMeta[a[0]] || {}).vibe || 'fun';
-    const vb = (trapMeta[b[0]] || {}).vibe || 'fun';
-    return (order[va] || 3) - (order[vb] || 3);
-  }).forEach(([name, d]) => {
-    const lethality = ((d.ko / Math.max(1, d.triggered)) * 100).toFixed(0);
-    const meta = trapMeta[name] || { vibe:'fun', comment:'' };
-    // Override vibe based on actual data: if it actually KOs at 40%+, it's lethal regardless
-    let vibe = meta.vibe;
-    if (d.ko > 0 && lethality >= 40) vibe = 'lethal';
-    if (d.ko === 0 && d.triggered >= 5 && (vibe === 'lethal')) vibe = 'useless'; // supposed to be lethal but never KOs
-    const style = vibeStyles[vibe] || vibeStyles['fun'];
-    html += `<div class="report-card ${style.cls}">${style.tag}<b>${name}</b> — ${d.triggered} triggers, ${d.ko} KOs (${lethality}%)${meta.comment ? `<br><i style="color:var(--dim)">${meta.comment}</i>` : ''}</div>`;
-  });
-  html += `</div>`;
-
-  // === COMBAT TENSION ===
-  const totalCloseCalls = results.reduce((s, r) => s + r.tracker.closeCalls.length, 0);
-  const totalOverkills = results.reduce((s, r) => s + r.tracker.overkills.length, 0);
-  html += `<div class="report-section"><h3>Combat Tension</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Close calls = won by 0-1 margin. Overkills = won by 5+ margin. A good game has close calls in roughly 30-50% of fights. Too many overkills = fights feel pointless. Too many close calls = feels punishing.</p>`;
-  html += `<div class="report-card insight">`;
-  html += `Close calls: <b>${totalCloseCalls}</b> (${(totalCloseCalls/n).toFixed(1)}/game) | Overkills: <b>${totalOverkills}</b> (${(totalOverkills/n).toFixed(1)}/game)<br><br>`;
-  if (totalOverkills > totalCloseCalls * 2) {
-    html += `<span class="tag weak-tag">Low Tension</span> Most fights are decided before the dice roll because hero STR is much higher than enemy STR. <b>Suggestion:</b> Increase average enemy STR by 1 across Mishap enemies, or reduce base weapon STR. This will create more close calls and make Skill Burn feel more important.`;
-  } else if (totalCloseCalls > totalOverkills * 3) {
-    html += `<span class="tag op-tag">High Tension</span> Fights are very tight. Heroes often win by the skin of their teeth. <b>What this means for design:</b> Any skill that gives +1 or +2 in combat will feel extremely impactful, because that's the typical margin between winning and losing. <b>Risk:</b> If KO rate is also high (${avgKO}+/game), players will feel the game is unfair. <b>Suggestion:</b> Either accept tight fights and add more KO-prevention skills, or slightly reduce enemy STR to create breathing room.`;
-  } else {
-    html += `<b>Balanced.</b> Good mix of close fights and comfortable wins. Skills that give +2 combat will turn roughly ${totalCloseCalls > 0 ? Math.round(totalCloseCalls * 0.6) : '?'} fights from close to comfortable, which feels satisfying without being broken.`;
-  }
-  html += `</div></div>`;
-
-  // === DEFEAT ANALYSIS ===
-  const losses = results.filter(r => !r.victory);
-  if (losses.length > 0) {
-    html += `<div class="report-section"><h3>Defeat Analysis (${losses.length} losses)</h3>`;
-    html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Why the party lost. Understanding the primary cause of defeat tells you what to fix first.</p>`;
-
-    // Count defeat causes
-    const causes = { hydra_overflow:0, no_relics:0, other:0, unknown:0 };
-    const overflowDetails = [];
-    const relicDetails = [];
-    losses.forEach(r => {
-      const dc = r.defeatCause || { cause:'unknown' };
-      causes[dc.cause] = (causes[dc.cause] || 0) + 1;
-      if (dc.cause === 'hydra_overflow') overflowDetails.push(dc);
-      if (dc.cause === 'no_relics') relicDetails.push(dc);
-    });
-
-    const totalLosses = losses.length;
-    const pct = (v) => ((v / totalLosses) * 100).toFixed(0);
-
-    if (causes.hydra_overflow > 0) {
-      const avgTurn = overflowDetails.length > 0 ? (overflowDetails.reduce((s,d) => s + (d.turn||0), 0) / overflowDetails.length).toFixed(0) : '?';
-      html += `<div class="report-card op"><span class="tag op-tag">${pct(causes.hydra_overflow)}%</span><b>Hydra Overflow</b> — ${causes.hydra_overflow}/${totalLosses} losses (avg turn ${avgTurn})<br>`;
-      html += `<i style="color:var(--dim)">Heroes can't kill heads fast enough, so new heads grow until they exceed the max. This means hero combat STR is too low relative to head STR. Fixes: lower head STR by 1-2, increase max heads limit, or add more +STR equipment/skills.</i></div>`;
-    }
-
-    if (causes.no_relics > 0) {
-      const whoFails = {};
-      relicDetails.forEach(d => { if (d.hero) whoFails[d.hero] = (whoFails[d.hero]||0) + 1; });
-      const avgTurn = relicDetails.length > 0 ? (relicDetails.reduce((s,d) => s + (d.turn||0), 0) / relicDetails.length).toFixed(0) : '?';
-      const whoStr = Object.entries(whoFails).sort((a,b)=>b[1]-a[1]).map(([h,c])=>`${h}: ${c}x`).join(', ');
-      html += `<div class="report-card op"><span class="tag op-tag">${pct(causes.no_relics)}%</span><b>Relics Exhausted</b> — ${causes.no_relics}/${totalLosses} losses (avg turn ${avgTurn})<br>`;
-      html += `Heroes who caused the final KO: ${whoStr}<br>`;
-      html += `<i style="color:var(--dim)">All 4 relics were spent on KO prevention before the Hydra was killed. Heroes are dying too often at the Hydra. Fixes: make heroes stronger (more equipment), reduce Hydra head STR, add skills that prevent KO without spending relics, or consider giving 5-6 relics instead of 4.</i></div>`;
-    }
-
-    if (causes.unknown > 0) {
-      html += `<div class="report-card"><b>Other/Unknown</b> — ${causes.unknown}/${totalLosses} losses</div>`;
-    }
-
-    // Average turn of defeat
-    const avgDefeatTurn = (losses.reduce((s,r) => s + r.turn, 0) / losses.length).toFixed(0);
-    const avgWinTurn = results.filter(r=>r.victory).length > 0 ? (results.filter(r=>r.victory).reduce((s,r)=>s+r.turn,0)/results.filter(r=>r.victory).length).toFixed(0) : 'N/A';
-    html += `<div class="report-card insight"><span class="tag insight-tag">Timing</span>Avg defeat turn: <b>${avgDefeatTurn}</b> | Avg victory turn: <b>${avgWinTurn}</b><br>`;
-    if (avgWinTurn !== 'N/A' && Number(avgDefeatTurn) < Number(avgWinTurn) * 0.7) {
-      html += `<i style="color:var(--dim)">Defeats happen much earlier than victories. The party snowballs if they survive the early Hydra, but often dies before building momentum. Consider a gentler Hydra ramp-up (start with 2 heads instead of 3).</i>`;
-    } else {
-      html += `<i style="color:var(--dim)">Defeats and victories happen at similar turns. The game doesn't snowball — it's a close fight to the end.</i>`;
-    }
-    html += `</div>`;
-
-    // Hero loadout at defeat
-    html += `<div class="report-card"><b>Average Hero Loadout at Defeat</b><br><br>`;
-    heroIds.forEach(hid => {
-      const snapshots = losses.map(r => r.heroes.find(h => h.id === hid)).filter(Boolean);
-      if (snapshots.length === 0) return;
-      const avgStr = (snapshots.reduce((s,h) => s + h.totalStr, 0) / snapshots.length).toFixed(1);
-      const avgEquip = (snapshots.reduce((s,h) => s + h.equipment.length, 0) / snapshots.length).toFixed(1);
-      const avgRelics = (snapshots.reduce((s,h) => s + h.relics, 0) / snapshots.length).toFixed(1);
-      const avgFollowers = (snapshots.reduce((s,h) => s + h.followers.length, 0) / snapshots.length).toFixed(1);
-      const avgReady = (snapshots.reduce((s,h) => s + h.readySkills, 0) / snapshots.length).toFixed(1);
-      const avgKO = (snapshots.reduce((s,h) => s + h.ko, 0) / snapshots.length).toFixed(1);
-      // Most common equipment
-      const equipCount = {};
-      snapshots.forEach(h => h.equipment.forEach(e => { equipCount[e.name] = (equipCount[e.name]||0) + 1; }));
-      const topEquip = Object.entries(equipCount).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([n,c])=>`${n} (${c}x)`).join(', ') || 'usually empty';
-
-      html += `<div style="margin:4px 0;padding:4px 6px;background:#0e0e16;border-radius:3px;font-size:11px;border-left:3px solid var(--${hid})">`;
-      html += `<b style="color:var(--${hid})">${heroNames[hid]}</b> — Total STR: <b>${avgStr}</b> | Equip: ${avgEquip} | Followers: ${avgFollowers} | Relics: ${avgRelics} | Ready Skills: ${avgReady}/4 | KOs suffered: ${avgKO}<br>`;
-      const hadNoEquip = snapshots.filter(h => h.equipment.length === 0).length;
-      const pctNoEquip = ((hadNoEquip / snapshots.length) * 100).toFixed(0);
-      html += `<span style="color:var(--dim)">Most held weapon at defeat (across ${snapshots.length} losses): ${topEquip}. No equip in ${pctNoEquip}% of losses.</span>`;
-      html += `</div>`;
-    });
-    html += `</div>`;
-
-    // Hydra state at defeat
-    const hydraDefeats = losses.filter(r => r.tracker.hydraHeads && Object.keys(r.tracker.hydraHeads).length > 0);
-    if (hydraDefeats.length > 0) {
-      const avgHeadsDestroyed = (hydraDefeats.reduce((s,r) => {
-        return s + Object.values(r.tracker.hydraHeads).reduce((ss,h) => ss + (h.destroyed||0), 0);
-      }, 0) / hydraDefeats.length).toFixed(1);
-      html += `<div class="report-card insight"><span class="tag insight-tag">Hydra at Defeat</span>Avg heads destroyed before losing: <b>${avgHeadsDestroyed}</b><br>`;
-      if (Number(avgHeadsDestroyed) < 1) {
-        html += `<i style="color:var(--dim)">Heroes can barely scratch the Hydra. Head STR is way too high relative to hero power. This is the root cause of most losses.</i>`;
-      } else if (Number(avgHeadsDestroyed) < 3) {
-        html += `<i style="color:var(--dim)">Heroes make some progress but can't finish the job. They run out of relics or heads overflow before clearing all heads.</i>`;
-      } else {
-        html += `<i style="color:var(--dim)">Heroes get close to winning. The Hydra fight is tight — small improvements could tip the balance.</i>`;
-      }
-      html += `</div>`;
-    }
-
-    html += `</div>`;
-  }
-
-  // === BALANCE IMPROVEMENT SUGGESTIONS ===
-  html += `<div class="report-section"><h3>Balance Improvements</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Concrete suggestions to improve existing skills, equipment, and enemies based on the data above.</p>`;
-
-  // --- Per-hero skill improvements ---
-  heroIds.forEach(hid => {
-    const heroSkills = HEROES.find(h => h.id === hid).skills;
-    const heroData = { combats:0, ko:0, wins:0, losses:0 };
-    results.forEach(r => {
-      const ht = r.tracker.heroes[hid];
-      if (ht) { heroData.combats += ht.combats; heroData.ko += ht.ko; heroData.wins += ht.wins; heroData.losses += ht.losses; }
-    });
-    const suggestions = [];
-
-    heroSkills.forEach(skillDef => {
-      const key = hid + '_' + skillDef.name;
-      const d = skillAgg[key] || { activated:0, burned:0, savedFromKO:0, turnedFight:0, activatedDungeon:0, activatedHydra:0, burnedDungeon:0, burnedHydra:0 };
-      const total = d.activated + d.burned;
-      const perGame = total > 0 ? (d.activated / n).toFixed(1) : '0';
-
-      if (total === 0) {
-        suggestions.push(`<b>${skillDef.name}</b>: never used or burned. The skill's trigger condition may be too narrow. Try: broaden when it activates, or make it passive so it doesn't compete with Skill Burn.`);
-      } else if (d.activated === 0 && d.burned > 0) {
-        suggestions.push(`<b>${skillDef.name}</b>: burned ${d.burned}x but never activated. A Skill Burn reroll is always more attractive than this effect. Try: make the effect stronger (e.g., +3 instead of +2), or make it free to use (doesn't exhaust on activation).`);
-      } else if (d.burned > d.activated * 2.5 && total >= n * 0.3) {
-        const burnPct = Math.round(d.burned / total * 100);
-        suggestions.push(`<b>${skillDef.name}</b>: burned ${burnPct}% of the time (${d.burned} burned vs ${d.activated} used). The effect exists but a reroll is usually better. Try: increase the bonus, add a secondary effect, or make it trigger automatically without exhausting.`);
-      } else if (d.activated > 0 && d.turnedFight === 0 && d.savedFromKO === 0 && d.activatedHydra === 0 && total >= n * 0.2) {
-        suggestions.push(`<b>${skillDef.name}</b>: used ${d.activated}x but never saved a KO or turned a fight, and never at the Hydra. The effect fires but doesn't change outcomes. Try: increase its impact or give it a Hydra-specific bonus.`);
-      }
-    });
-
-    // Hero-level observations
-    const winRate = heroData.combats > 0 ? (heroData.wins / heroData.combats * 100) : 0;
-    const koPerGame = heroData.ko / n;
-    if (winRate < 40 && heroData.combats > n) {
-      suggestions.push(`<b>Combat win rate ${winRate.toFixed(0)}%</b> — below 40%. Base STR ${HEROES.find(h=>h.id===hid).str} may need +1, or this hero needs a stronger passive combat bonus.`);
-    }
-    if (koPerGame > 2.5) {
-      suggestions.push(`<b>${koPerGame.toFixed(1)} KOs/game</b> — very fragile. Consider: a passive that reduces KO frequency (e.g., "first KO each game is prevented"), or increase base STR by 1.`);
-    }
-
-    if (suggestions.length > 0) {
-      html += `<div class="report-card need"><span class="tag need-tag">Improve</span><b style="color:var(--${hid})">${heroNames[hid]}</b><ul style="margin:4px 0 0 16px;padding:0">`;
-      suggestions.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
-      html += `</ul></div>`;
-    }
-  });
-
-  // --- Equipment improvement suggestions ---
-  const equipImprovements = [];
-  // equipData already declared above in Equipment Balance section
-  Object.entries(equipAgg).filter(([,d]) => d.equipped >= n * 0.1).forEach(([name, d]) => {
-    const total = d.wonWith + d.lostWith;
-    if (total < 3) return;
-    const wr = d.wonWith / total;
-    if (wr >= 0.95 && total >= 5) {
-      const eq = equipData[name] || {};
-      equipImprovements.push(`<b>${name}</b> (STR +${eq.str||0}): ${(wr*100).toFixed(0)}% win rate in ${total} fights. Heroes never lose with this item. Try: reduce STR by 1, or add a drawback (e.g., exhaust 1 skill on equip, can't use Skill Burn while equipped).`);
-    }
-    if (wr <= 0.3 && total >= 5) {
-      equipImprovements.push(`<b>${name}</b>: only ${(wr*100).toFixed(0)}% win rate despite being equipped. The item doesn't help enough. Try: increase STR by 1, or add a combat bonus effect.`);
-    }
-  });
-  if (equipImprovements.length > 0) {
-    html += `<div class="report-card need"><span class="tag need-tag">Equipment</span><b>Equipment Tweaks</b><ul style="margin:4px 0 0 16px;padding:0">`;
-    equipImprovements.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
-    html += `</ul></div>`;
-  }
-
-  // --- Enemy improvement suggestions ---
-  const enemyImprovements = [];
-  Object.entries(encAgg).filter(([,d]) => d.drawn >= n * 0.1).forEach(([name, d]) => {
-    const fights = d.won + d.lost;
-    if (fights < 4) return;
-    const lossRate = d.lost / fights;
-    if (lossRate <= 0.05 && fights >= 8) {
-      enemyImprovements.push(`<b>${name}</b>: heroes win ${((1-lossRate)*100).toFixed(0)}% of the time (${d.won}W/${d.lost}L). Too easy. Try: +1 STR, add a special ability, or make it a "group" enemy (counts as 2 fights).`);
-    } else if (lossRate >= 0.85 && fights >= 8) {
-      enemyImprovements.push(`<b>${name}</b>: heroes lose ${(lossRate*100).toFixed(0)}% of the time (${d.lost}L/${d.won}W). Too punishing. Try: -1 STR, add a flee condition, or give a reward on defeat to make the risk worth it.`);
-    }
-  });
-  if (enemyImprovements.length > 0) {
-    html += `<div class="report-card need"><span class="tag need-tag">Enemies</span><b>Enemy Tweaks</b><ul style="margin:4px 0 0 16px;padding:0">`;
-    enemyImprovements.forEach(s => { html += `<li style="margin:4px 0">${s}</li>`; });
-    html += `</ul></div>`;
-  }
-
-  const isPrepare = results[0] && results[0].tracker && results[0].tracker.prepareFirst;
-  if (winRate < 40) {
-    html += `<div class="report-card op"><span class="tag op-tag">Too Hard</span>Win rate ${winRate}% with all skills active. ${isPrepare ? 'Even with preparation, heroes struggle.' : ''} <b>Likely causes:</b> Hydra heads are too strong relative to hero STR, or heroes arrive depleted (check Hydra Arrival above). <b>Suggested fixes:</b> lower Hydra head STR by 1-2, or buff base hero STR by 1. Target: 55-75% win rate for a fun cooperative game.</div>`;
-  } else if (winRate > 85) {
-    html += `<div class="report-card weak"><span class="tag weak-tag">Too Easy</span>Win rate ${winRate}% with skills. ${isPrepare ? 'Preparation makes the game trivial.' : ''} Players win almost every game, which reduces tension. <b>Consider:</b> increase Hydra head STR by 1-2, or add more dangerous dungeon encounters. Target: 65-75% for prepared players, 55-65% for casual play.</div>`;
-  } else if (winRate > 75) {
-    html += `<div class="report-card insight"><span class="tag insight-tag">Comfortable</span>Win rate ${winRate}%. ${isPrepare ? 'Prepared players win consistently, which feels rewarding.' : ''} Players will feel strong and capable. Good for a casual cooperative experience. If you want more tension, nudge Hydra STR up by 1.</div>`;
-  } else if (winRate >= 55) {
-    html += `<div class="report-card insight"><span class="tag insight-tag">Sweet Spot</span>Win rate ${winRate}%. This is the sweet spot for cooperative games: players win more than they lose, but every victory feels earned. Losses are rare enough to not feel punishing, frequent enough to keep tension.</div>`;
-  } else {
-    html += `<div class="report-card insight"><span class="tag insight-tag">Challenging</span>Win rate ${winRate}%. On the harder side — players lose about half the time. Good if you want a "dark souls" feel, but casual groups may find it frustrating. ${isPrepare ? 'Even prepared players struggle, which suggests Hydra STR is high.' : 'Consider adding the Prepare First option to see if preparation helps.'}</div>`;
-  }
-
-  // Skill Burn summary
-  html += `<div class="report-card insight"><span class="tag insight-tag">Skill Burn</span>`;
-  const sbData = {};
-  results.forEach(r => { Object.entries(r.tracker.skills).forEach(([k,v]) => { if (k.includes('Skill Burn') && v.turnedFight > 0) { const hid = k.split('_')[0]; sbData[hid] = (sbData[hid]||0) + v.turnedFight; } }); });
-  if (Object.keys(sbData).length > 0) {
-    html += `Skill Burn (exhaust a skill to reroll YOUR die or ENEMY die) turned fights: `;
-    html += Object.entries(sbData).map(([hid,c]) => `<b style="color:var(--${hid})">${heroNames[hid]}</b>: ${c}x`).join(', ');
-    html += `.<br>The AI picks whichever reroll (own or enemy) gives the best chance to win. Skills you create should compete with "just rerolling" in value. If a skill isn't worth more than a reroll, players will always Skill Burn instead of activating it.`;
-  } else {
-    html += `No Skill Burns turned fights in this batch. Heroes won or lost decisively without needing rerolls.`;
-  }
-  html += `</div>`;
-
-  // Dodge talent saves (still relevant, it's a talent not a skill)
-  const dodgeSaves = results.reduce((s,r) => { const sk = r.tracker.skills; let c = 0; Object.entries(sk).forEach(([k,v]) => { if (k.includes('Dodge')) c += v.savedFromKO; }); return s+c; }, 0);
-  if (dodgeSaves > 0) {
-    html += `<div class="report-card insight"><span class="tag insight-tag">Dodge Talent</span>Eggo's Dodge talent (not a skill) prevented <b>${dodgeSaves}</b> KOs across ${n} games (${(dodgeSaves/n).toFixed(1)}/game). This is the strongest defensive ability in the game currently. Any KO-prevention skill you design for other heroes should be compared against this benchmark.</div>`;
-  }
-
-  // Warden Angel saves
-  const wardenSaves = results.reduce((s,r) => { const sk = r.tracker.skills; let c = 0; Object.entries(sk).forEach(([k,v]) => { if (k.includes('Warden Angel')) c += v.savedFromKO; }); return s+c; }, 0);
-  if (wardenSaves > 0) {
-    html += `<div class="report-card insight"><span class="tag insight-tag">Warden Angel</span>Warden Angel follower saved heroes from <b>${wardenSaves}</b> KOs. This follower acts like a free Relic. If it appears too often, it reduces the tension of combat and the value of Relics.</div>`;
-  }
-
-  html += `</div>`;
-
-  // === WIN CONDITION ANALYSIS ===
-  html += `<div class="report-section"><h3>What Winners Had vs Losers</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Average hero loadout at game end. Compare winners vs losers to see what you need to win.</p>`;
-
-  const winGames = results.filter(r => r.victory);
-  const loseGames = results.filter(r => !r.victory);
-
-  function avgHeroStat(games, statFn) {
-    if (games.length === 0) return 0;
-    return games.reduce((s, r) => s + r.heroes.reduce((s2, h) => s2 + statFn(h), 0) / 4, 0) / games.length;
-  }
-
-  const wcStats = [
-    { label: 'Total STR', win: avgHeroStat(winGames, h => h.totalStr), lose: avgHeroStat(loseGames, h => h.totalStr) },
-    { label: 'Equipment', win: avgHeroStat(winGames, h => h.equipCount || h.equipment.length), lose: avgHeroStat(loseGames, h => h.equipCount || h.equipment.length) },
-    { label: 'Followers', win: avgHeroStat(winGames, h => h.followerCount || h.followers.length), lose: avgHeroStat(loseGames, h => h.followerCount || h.followers.length) },
-    { label: 'Ready Skills', win: avgHeroStat(winGames, h => h.readySkills), lose: avgHeroStat(loseGames, h => h.readySkills) },
-    { label: 'Relics', win: avgHeroStat(winGames, h => h.relics), lose: avgHeroStat(loseGames, h => h.relics) },
-  ];
-
-  html += `<table style="width:100%;font-size:11px;border-collapse:collapse">`;
-  html += `<tr style="color:var(--dim);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:4px">Stat (avg per hero)</th><th style="text-align:center;padding:4px;color:var(--heal)">Winners</th><th style="text-align:center;padding:4px;color:var(--ko)">Losers</th><th style="text-align:center;padding:4px">Difference</th></tr>`;
-  wcStats.forEach(s => {
-    const diff = s.win - s.lose;
-    const diffColor = diff > 0.5 ? 'var(--heal)' : diff < -0.5 ? 'var(--ko)' : 'var(--dim)';
-    html += `<tr style="border-bottom:1px solid #1a1a2a"><td style="padding:4px">${s.label}</td><td style="text-align:center;padding:4px;color:var(--heal)">${s.win.toFixed(1)}</td><td style="text-align:center;padding:4px;color:var(--ko)">${s.lose.toFixed(1)}</td><td style="text-align:center;padding:4px;color:${diffColor}">${diff > 0 ? '+' : ''}${diff.toFixed(1)}</td></tr>`;
+  Object.entries(allSkills).sort((a,b)=>b[1].activated-a[1].activated).forEach(([key, s]) => {
+    const [heroId, ...nameParts] = key.split('_');
+    const skillName = nameParts.join('_');
+    const total = s.activated + s.burned;
+    const useRatio = total > 0 ? pct(s.activated, total) : '-';
+    const heroColor = `var(--${heroId})`;
+    html += `<tr><td style="color:${heroColor}">${heroNames[heroId]}: ${skillName}</td>`;
+    html += `<td style="text-align:center">${s.activated}</td>`;
+    html += `<td style="text-align:center">${s.burned}</td>`;
+    html += `<td style="text-align:center">${useRatio}%</td>`;
+    html += `<td style="text-align:center;font-size:9px">${s.activatedDungeon}/${s.activatedHydra}</td>`;
+    html += `<td style="text-align:center;font-size:9px">${s.burnedDungeon}/${s.burnedHydra}</td>`;
+    html += `<td style="text-align:center">${s.savedFromKO}</td>`;
+    html += `<td style="text-align:center">${s.turnedFight}</td></tr>`;
+    if (s.burned > 0 && total > 0 && s.burned / total > 0.75) flag('skill', 'medium', `${heroNames[heroId]}'s ${skillName}: burned ${pct(s.burned,total)}% of the time — effect may need rework`);
   });
   html += `</table>`;
 
-  const strDiff = wcStats[0].win - wcStats[0].lose;
-  const equipDiff = wcStats[1].win - wcStats[1].lose;
-  const skillDiff = wcStats[3].win - wcStats[3].lose;
-  let wcInsight = 'To win, heroes need on average: ';
-  wcInsight += `<b>${wcStats[0].win.toFixed(1)} total STR</b>, `;
-  wcInsight += `<b>${wcStats[1].win.toFixed(1)} equipment</b>, `;
-  wcInsight += `<b>${wcStats[3].win.toFixed(1)} ready skills</b>. `;
-  if (strDiff > 1) wcInsight += `STR is the biggest differentiator (${strDiff.toFixed(1)} higher in wins). Equipment and followers matter most. `;
-  if (skillDiff > 0.5) wcInsight += `Ready skills matter a lot — winners have ${skillDiff.toFixed(1)} more ready skills. Saving skills for Hydra is key. `;
-  html += `<div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Recipe for Victory</span>${wcInsight}</div>`;
-  html += `</div>`;
+  // 5c: Battlecry deep dive
+  const battlecryData = results.flatMap(r => r.tracker.battlecryDetails || []);
+  if (battlecryData.length > 0) {
+    const bcWins = battlecryData.filter(b => b.won);
+    html += `<div class="report-card" style="margin-top:8px;border-left:3px solid var(--juju)"><b>Battlecry Deep Dive</b> (${battlecryData.length} uses)`;
+    html += statRow('Won with worst-of-2', `${bcWins.length} (${pct(bcWins.length, battlecryData.length)}%)`);
+    const avgKept = fix1(battlecryData.reduce((s,b) => s+b.kept, 0) / battlecryData.length);
+    const avgBest = fix1(battlecryData.reduce((s,b) => s+b.bestRoll, 0) / battlecryData.length);
+    html += statRow('Avg kept (worst) roll', avgKept);
+    html += statRow('Avg best roll (would have kept normally)', avgBest);
+    html += `</div>`;
+  }
 
-  // === ROOM DISTRIBUTION ===
-  html += `<div class="report-section"><h3>Room Distribution</h3>`;
-  const totalWonder = results.reduce((s,r) => s + (r.roomsVisited ? r.roomsVisited.wonder : 0), 0);
-  const totalCommon = results.reduce((s,r) => s + (r.roomsVisited ? r.roomsVisited.common : 0), 0);
-  const totalDread = results.reduce((s,r) => s + (r.roomsVisited ? r.roomsVisited.dread : 0), 0);
-  const totalRooms = totalWonder + totalCommon + totalDread;
-  if (totalRooms > 0) {
-    const wPct = (totalWonder/totalRooms*100).toFixed(1);
-    const cPct = (totalCommon/totalRooms*100).toFixed(1);
-    const dPct = (totalDread/totalRooms*100).toFixed(1);
-    html += `<div class="report-card">`;
-    html += `<div style="display:flex;gap:16px;margin-bottom:6px">`;
-    html += `<span style="color:var(--wonder)">Wonder: <b>${wPct}%</b> (${(totalWonder/n).toFixed(1)}/game)</span>`;
-    html += `<span style="color:var(--mishap)">Common: <b>${cPct}%</b> (${(totalCommon/n).toFixed(1)}/game)</span>`;
-    html += `<span style="color:var(--misfortune)">Dread: <b>${dPct}%</b> (${(totalDread/n).toFixed(1)}/game)</span>`;
+  // Second Nature deep dive
+  const snData = results.flatMap(r => r.tracker.secondNatureDetails || []);
+  if (snData.length > 0) {
+    const snWins = snData.filter(s => s.won);
+    const snDiff = snData.filter(s => s.wasDifferenceMaker);
+    html += `<div class="report-card" style="border-left:3px solid var(--gigi)"><b>Second Nature Deep Dive</b> (${snData.length} uses)`;
+    html += statRow('Win rate when active', `${pct(snWins.length, snData.length)}%`);
+    html += statRow('+3 was the difference maker', `${snDiff.length} times (${pct(snDiff.length, snData.length)}%)`);
     html += `</div>`;
-    html += `<div style="display:flex;height:12px;border-radius:3px;overflow:hidden">`;
-    html += `<div style="width:${wPct}%;background:var(--wonder)" title="Wonder ${wPct}%"></div>`;
-    html += `<div style="width:${cPct}%;background:var(--mishap)" title="Common ${cPct}%"></div>`;
-    html += `<div style="width:${dPct}%;background:var(--misfortune)" title="Dread ${dPct}%"></div>`;
+  }
+
+  // Copycat deep dive
+  const ccData = results.flatMap(r => r.tracker.copycatDetails || []);
+  if (ccData.length > 0) {
+    const ccBySkill = {};
+    ccData.forEach(c => { if (!ccBySkill[c.copiedSkill]) ccBySkill[c.copiedSkill] = {count:0, wins:0}; ccBySkill[c.copiedSkill].count++; if(c.won) ccBySkill[c.copiedSkill].wins++; });
+    html += `<div class="report-card" style="border-left:3px solid var(--eggo)"><b>Copycat Deep Dive</b> (${ccData.length} uses)`;
+    Object.entries(ccBySkill).sort((a,b) => b[1].count - a[1].count).forEach(([skill, d]) => {
+      html += statRow(`→ ${skill}`, `${d.count}x (win ${pct(d.wins, d.count)}%)`);
+    });
     html += `</div>`;
-    let roomNote = '';
-    if (parseFloat(dPct) > 30) roomNote = 'High Dread % means more Misfortune encounters and Legendary Equipment. Heroes get stronger weapons but face tougher enemies. ';
-    if (parseFloat(wPct) > 35) roomNote += 'High Wonder % provides more followers, skill recharges, and support. Heroes arrive better prepared. ';
-    if (parseFloat(wPct) < 25) roomNote += 'Low Wonder % means fewer support cards. Heroes rely more on equipment and raw STR. ';
-    if (roomNote) html += `<div style="margin-top:6px;font-size:10px;color:var(--dim)">${roomNote}</div>`;
+  }
+
+  // Skill recharge sources
+  const rechargeSources = {};
+  results.forEach(r => { Object.entries(r.tracker.skillRechargeSources||{}).forEach(([src, cnt]) => { rechargeSources[src] = (rechargeSources[src]||0) + cnt; }); });
+  if (Object.keys(rechargeSources).length > 0) {
+    html += `<div class="report-card"><b>Skill Recharge Sources</b>`;
+    const totalRecharges = Object.values(rechargeSources).reduce((a,b) => a+b, 0);
+    Object.entries(rechargeSources).sort((a,b) => b[1]-a[1]).forEach(([src, cnt]) => {
+      html += statRow(src.replace(/_/g, ' '), `${cnt} (${pct(cnt, totalRecharges)}%)`);
+    });
     html += `</div>`;
   }
   html += `</div>`;
 
-  // === FOLLOWER IMPACT ===
-  html += `<div class="report-section"><h3>Follower Impact</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">How often each follower appears, who carries them, and their impact on combat.</p>`;
-  const followerAgg = {};
+  // ===================== SECTION 6: EQUIPMENT ANALYSIS =====================
+  html += `<div class="report-section"><h3>Equipment Analysis</h3>`;
+
+  // 6a: Equipment at combat
+  const equipAtCombat = [0,0,0];
+  allCombatLogs.forEach(c => { const eq = Math.min(c.equipCount||0, 2); equipAtCombat[eq]++; });
+  const totalCombatLogs = allCombatLogs.length;
+  html += `<div class="report-card"><b>Equipment at Combat</b>`;
+  html += statRow('0 items', `${pct(equipAtCombat[0], totalCombatLogs)}%`);
+  html += statRow('1 item', `${pct(equipAtCombat[1], totalCombatLogs)}%`);
+  html += statRow('2 items', `${pct(equipAtCombat[2], totalCombatLogs)}%`);
+  if (equipAtCombat[0] / totalCombatLogs > 0.3) flag('equipment', 'medium', `Heroes fight with 0 equipment ${pct(equipAtCombat[0], totalCombatLogs)}% of the time — need more equipment sources`);
+  html += `</div>`;
+
+  // 6c: Per equipment stats
+  const allEquip = {};
   results.forEach(r => {
-    if (r.tracker.followers) {
-      Object.entries(r.tracker.followers).forEach(([name, data]) => {
-        if (!followerAgg[name]) followerAgg[name] = { drawn:0, helpedWin:0, lost:0 };
-        Object.keys(data).forEach(k => { if (followerAgg[name][k] !== undefined) followerAgg[name][k] += data[k]; });
-      });
+    Object.entries(r.tracker.equipment).forEach(([name, data]) => {
+      if (!allEquip[name]) allEquip[name] = { equipped:0, wonWith:0, lostWith:0, discarded:0 };
+      Object.entries(data).forEach(([f,v]) => { if (typeof v === 'number') allEquip[name][f] = (allEquip[name][f]||0) + v; });
+    });
+  });
+
+  html += `<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:8px">`;
+  html += `<tr style="border-bottom:1px solid var(--border)"><th>Equipment</th><th>Equipped</th><th>Win Rate</th><th>Discarded</th></tr>`;
+  Object.entries(allEquip).sort((a,b) => b[1].equipped - a[1].equipped).forEach(([name, data]) => {
+    const total = (data.wonWith||0) + (data.lostWith||0);
+    const wr = total > 0 ? pct(data.wonWith, total) : '-';
+    html += `<tr><td>${name}</td><td style="text-align:center">${data.equipped||0}</td><td style="text-align:center">${wr}%</td><td style="text-align:center">${data.discarded||0}</td></tr>`;
+  });
+  html += `</table>`;
+
+  // 6d: Equipment combos at Hydra (from end state of winners)
+  const comboPairs = {};
+  wins.forEach(r => {
+    heroIds.forEach(id => {
+      const es = r.tracker.heroEndState[id];
+      if (es && es.equipNames && es.equipNames.length >= 2) {
+        const sorted = [...es.equipNames].sort();
+        for (let i = 0; i < sorted.length; i++) {
+          for (let j = i+1; j < sorted.length; j++) {
+            const pair = sorted[i] + ' + ' + sorted[j];
+            comboPairs[pair] = (comboPairs[pair]||0) + 1;
+          }
+        }
+      }
+    });
+  });
+  if (Object.keys(comboPairs).length > 0) {
+    html += `<div class="report-card" style="margin-top:8px"><b>Top Equipment Combos (Winners)</b>`;
+    Object.entries(comboPairs).sort((a,b) => b[1]-a[1]).slice(0, 10).forEach(([pair, count]) => {
+      html += statRow(pair, `${count}x`);
+    });
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  // ===================== SECTION 7: ENEMY DESIGN ANALYSIS =====================
+  html += `<div class="report-section"><h3>Enemy Design Analysis</h3>`;
+
+  // 7b: Decision enemies
+  const allDecisions = {};
+  results.forEach(r => { Object.entries(r.tracker.decisionEnemies||{}).forEach(([name, data]) => {
+    if (!allDecisions[name]) allDecisions[name] = {choiceA:0, choiceB:0};
+    allDecisions[name].choiceA += data.choiceA||0;
+    allDecisions[name].choiceB += data.choiceB||0;
+  }); });
+  if (Object.keys(allDecisions).length > 0) {
+    html += `<div class="report-card"><b>Decision Enemies</b>`;
+    Object.entries(allDecisions).forEach(([name, d]) => {
+      const total = d.choiceA + d.choiceB;
+      const labelA = name === 'Bully' ? 'Fled' : 'Paid/Avoided';
+      const labelB = 'Fought';
+      html += statRow(name, `${labelA}: ${d.choiceA} (${pct(d.choiceA,total)}%) | ${labelB}: ${d.choiceB} (${pct(d.choiceB,total)}%)`);
+      if (total > 20 && (d.choiceA / total > 0.95 || d.choiceB / total > 0.95)) flag('enemy', 'medium', `${name}: one option chosen ${Math.max(d.choiceA,d.choiceB)}/${total} times — no real decision`);
+    });
+    html += `</div>`;
+  }
+
+  // 7d: Enemy tier validation
+  const mishapEnemies = MISHAP_CARDS.filter(c => c.type === 'enemy');
+  const misfortuneEnemies = MISFORTUNE_CARDS.filter(c => c.type === 'enemy');
+
+  html += `<div class="report-card"><b>Tier Validation</b>`;
+  html += `<div style="font-size:9px;color:var(--dim);margin-bottom:4px">Mishap target: 75-95% hero win rate | Misfortune target: 35-70%</div>`;
+  const allEncounters = {};
+  results.forEach(r => { Object.entries(r.tracker.encounters).forEach(([name, data]) => {
+    if (!allEncounters[name]) allEncounters[name] = {drawn:0,won:0,lost:0,fled:0,avoided:0};
+    Object.entries(data).forEach(([f,v]) => { allEncounters[name][f] = (allEncounters[name][f]||0) + v; });
+  }); });
+
+  mishapEnemies.forEach(e => {
+    const d = allEncounters[e.name];
+    if (d && d.won + d.lost >= 20) {
+      const wr = d.won / (d.won + d.lost) * 100;
+      const ok = wr >= 75 && wr <= 95;
+      if (!ok) {
+        const tag = wr < 75 ? 'TOO HARD' : 'TOO EASY';
+        html += `<div style="font-size:10px;color:${wr<75?'var(--ko)':'var(--heal)'}">${e.name} (Mishap STR ${e.str}): ${wr.toFixed(0)}% — ${tag}</div>`;
+        flag('enemy', 'medium', `${e.name} (Mishap): ${wr.toFixed(0)}% hero win rate — ${tag}`);
+      }
     }
   });
-  const followerEndCount = {};
+  misfortuneEnemies.forEach(e => {
+    const d = allEncounters[e.name];
+    if (d && d.won + d.lost >= 20) {
+      const wr = d.won / (d.won + d.lost) * 100;
+      const ok = wr >= 35 && wr <= 70;
+      if (!ok) {
+        const tag = wr < 35 ? 'TOO HARD' : 'TOO EASY';
+        html += `<div style="font-size:10px;color:${wr<35?'var(--ko)':'var(--heal)'}">${e.name} (Misfortune STR ${e.str}): ${wr.toFixed(0)}% — ${tag}</div>`;
+        flag('enemy', 'medium', `${e.name} (Misfortune): ${wr.toFixed(0)}% hero win rate — ${tag}`);
+      }
+    }
+  });
+  html += `</div>`;
+
+  // 7e: Enemies never fought
+  const enemiesNeverFought = {};
+  results.forEach(r => { (r.tracker.enemiesAtGameEnd||[]).forEach(name => { enemiesNeverFought[name] = (enemiesNeverFought[name]||0) + 1; }); });
+  if (Object.keys(enemiesNeverFought).length > 0) {
+    html += `<div class="report-card"><b>Enemies Alive at Game End</b>`;
+    Object.entries(enemiesNeverFought).sort((a,b) => b[1]-a[1]).slice(0, 15).forEach(([name, count]) => {
+      html += statRow(name, `${count} games`);
+    });
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  // ===================== SECTION 8: GIL ECONOMY =====================
+  html += `<div class="report-section"><h3>Gil Economy</h3>`;
+  const gilGames = results.filter(r => r.heroes.some(h => (h.gilEarned||0) > 0));
+  if (gilGames.length > 0) {
+    html += `<div class="report-card">`;
+    heroIds.forEach(id => {
+      const earned = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gilEarned||0 : 0; });
+      const spentSkill = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gilSpentSkill||0 : 0; });
+      const spentEquip = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gilSpentEquip||0 : 0; });
+      const unspent = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gil||0 : 0; });
+      const unspentPct = earned > 0 ? pct(unspent, earned) : '-';
+      html += `<div style="margin-bottom:6px"><b style="color:var(--${id})">${heroNames[id]}</b>`;
+      html += statRow('Avg Earned / game', fix1(earned));
+      html += statRow('Avg Spent on Skills', fix1(spentSkill));
+      html += statRow('Avg Spent on Equipment', fix1(spentEquip));
+      html += statRow('Avg Unspent', `${fix1(unspent)} (${unspentPct}%)`);
+      if (earned > 0 && unspent / earned > 0.6) flag('gil', 'medium', `${heroNames[id]} leaves ${unspentPct}% of Gil unspent — Gil not useful enough or prices too high`);
+      html += `</div>`;
+    });
+    html += `</div>`;
+
+    // Gil visits
+    const totalVoluntary = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.voluntary : 0), 0);
+    const totalKOVisits = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.koRespawn : 0), 0);
+    html += `<div class="report-card"><b>Entrance Visits</b>`;
+    html += statRow('Voluntary (to spend Gil)', totalVoluntary);
+    html += statRow('KO Respawn', totalKOVisits);
+    if (totalVoluntary === 0 && totalKOVisits > 0) flag('gil', 'medium', 'No voluntary Gil spending visits — heroes only spend when KO respawning');
+    html += `</div>`;
+  } else {
+    html += `<div class="report-card" style="color:var(--dim)">Gil system not enabled in this batch.</div>`;
+  }
+  html += `</div>`;
+
+  // ===================== SECTION 9: GAME PACING =====================
+  html += `<div class="report-section"><h3>Game Pacing</h3>`;
+
+  // 9a: Milestone turns
+  const milestones = [
+    {label: 'First Equipment', fn: r => r.tracker.pacing.firstEquip || 0},
+    {label: 'First KO', fn: r => r.tracker.pacing.firstKO || 0},
+    {label: 'First Relic', fn: r => r.tracker.pacing.firstRelic || 0},
+    {label: 'Hydra Spawns', fn: r => r.tracker.pacing.hydraSpawn || 0},
+    {label: 'First Hero at Hydra', fn: r => r.tracker.pacing.hydraArrival || 0},
+    {label: 'Game Ends', fn: r => r.turn},
+  ];
+
+  html += `<div class="report-card"><b>Milestone Turns</b>`;
+  milestones.forEach(m => {
+    const vals = results.map(m.fn).filter(v => v > 0);
+    if (vals.length > 0) {
+      const mean = fix1(vals.reduce((a,b)=>a+b,0) / vals.length);
+      const sd = fix1(Math.sqrt(vals.reduce((s,v) => s + Math.pow(v - parseFloat(mean), 2), 0) / vals.length));
+      html += statRow(m.label, `Turn ${mean} (±${sd})`);
+    }
+  });
+  html += `</div>`;
+
+  // 9b: Phase durations
+  const phaseDurations = results.map(r => {
+    const hydraReveal = r.tracker.pacing.hydraSpawn || r.turn;
+    const hydraArrival = r.tracker.pacing.hydraArrival || hydraReveal;
+    return {
+      exploration: hydraReveal,
+      preparation: hydraArrival - hydraReveal,
+      boss: r.turn - hydraArrival,
+      total: r.turn
+    };
+  });
+  const avgExplore = fix1(avg(phaseDurations, p => p.exploration));
+  const avgPrep = fix1(avg(phaseDurations, p => p.preparation));
+  const avgBoss = fix1(avg(phaseDurations, p => p.boss));
+  const avgTotal = parseFloat(avgTurns);
+  html += `<div class="report-card"><b>Phase Duration</b>`;
+  html += statRow('Exploration', `${avgExplore} turns (${pct(parseFloat(avgExplore), avgTotal)}%)`);
+  html += statRow('Preparation', `${avgPrep} turns (${pct(parseFloat(avgPrep), avgTotal)}%)`);
+  html += statRow('Boss Fight', `${avgBoss} turns (${pct(parseFloat(avgBoss), avgTotal)}%)`);
+  const bossPct = parseFloat(pct(parseFloat(avgBoss), avgTotal));
+  if (bossPct < 20) flag('pacing', 'medium', `Boss phase is only ${bossPct}% of game — Hydra dies too fast or appears too late`);
+  if (bossPct > 40) flag('pacing', 'medium', `Boss phase is ${bossPct}% of game — Hydra fight may be too long`);
+  html += `</div>`;
+
+  // 9c: Turn activity
+  const emptyTurns = results.reduce((s,r) => s + (r.tracker.emptyTurns||0), 0);
+  const totalTurns = results.reduce((s,r) => s + r.turn, 0);
+  const emptyPct = pct(emptyTurns, totalTurns);
+  html += `<div class="report-card"><b>Turn Activity</b>`;
+  html += statRow('Total turns', totalTurns);
+  html += statRow('Empty turns (no event)', `${emptyTurns} (${emptyPct}%)`);
+  if (parseFloat(emptyPct) > 15) flag('pacing', 'medium', `${emptyPct}% empty turns — dungeon feels dead`);
+  html += `</div>`;
+  html += `</div>`;
+
+  // ===================== SECTION 10: HYDRA FIGHT DEEP DIVE =====================
+  html += `<div class="report-section"><h3>Hydra Fight Deep Dive</h3>`;
+
+  // 10a: Setup
+  const startCombos = {};
   results.forEach(r => {
-    r.heroes.forEach(h => {
-      (h.followerNames || h.followers || []).forEach(fname => {
-        const name = typeof fname === 'string' ? fname : fname.name;
-        if (!followerEndCount[name]) followerEndCount[name] = 0;
-        followerEndCount[name]++;
-      });
+    const key = [...(r.tracker.hydraStartingHeads||[])].sort().join(' + ');
+    if (key) startCombos[key] = (startCombos[key]||0) + 1;
+  });
+  html += `<div class="report-card"><b>Starting Head Combinations</b>`;
+  Object.entries(startCombos).sort((a,b) => b[1]-a[1]).slice(0, 5).forEach(([combo, count]) => {
+    const comboWins = results.filter(r => [...(r.tracker.hydraStartingHeads||[])].sort().join(' + ') === combo && r.victory).length;
+    const comboTotal = count;
+    html += statRow(combo, `${count}x (win ${pct(comboWins, comboTotal)}%)`);
+  });
+  html += `</div>`;
+
+  // 10b: Combat flow
+  const hydraAttacksPerWin = wins.length ? fix1(allHydraLogs.filter(c => wins.some(w => w === results[results.indexOf(w)])).length / wins.length) : '-';
+  const hydraKOs = results.reduce((s,r) => { let ko=0; Object.values(r.tracker.hydraHeads).forEach(h => ko += h.causedKO||0); return s+ko; }, 0);
+  html += `<div class="report-card"><b>Hydra Combat Flow</b>`;
+  html += statRow('Avg attacks per game', fix1(allHydraLogs.length / n));
+  html += statRow('Avg KOs during Hydra fight', fix1(hydraKOs / n));
+  html += `</div>`;
+
+  // 10c: Head kill order
+  const killOrderFirst = {}, killOrderLast = {};
+  wins.forEach(r => {
+    const ko = r.tracker.hydraHeadKillOrder || [];
+    if (ko.length > 0) { const f = ko[0].head; killOrderFirst[f] = (killOrderFirst[f]||0) + 1; }
+    if (ko.length > 0) { const l = ko[ko.length-1].head; killOrderLast[l] = (killOrderLast[l]||0) + 1; }
+  });
+  if (Object.keys(killOrderFirst).length > 0) {
+    html += `<div class="report-card"><b>Head Kill Order (Wins)</b>`;
+    html += `<div style="font-size:10px"><b>Killed First:</b> `;
+    Object.entries(killOrderFirst).sort((a,b) => b[1]-a[1]).forEach(([head, count]) => {
+      html += `${head} ${pct(count, wins.length)}% | `;
+    });
+    html += `</div><div style="font-size:10px"><b>Killed Last:</b> `;
+    Object.entries(killOrderLast).sort((a,b) => b[1]-a[1]).forEach(([head, count]) => {
+      html += `${head} ${pct(count, wins.length)}% | `;
+    });
+    html += `</div></div>`;
+  }
+
+  // 10d: Head growth
+  const growthSources = {};
+  results.forEach(r => { (r.tracker.hydraGrowthLog||[]).forEach(g => { growthSources[g.source] = (growthSources[g.source]||0) + 1; }); });
+  const totalGrowths = results.reduce((s,r) => s + (r.tracker.hydraGrowthLog||[]).length, 0);
+  html += `<div class="report-card"><b>Head Growth</b>`;
+  html += statRow('Avg heads grown / game', fix1(totalGrowths / n));
+  Object.entries(growthSources).sort((a,b) => b[1]-a[1]).forEach(([src, cnt]) => {
+    html += statRow(src.replace(/_/g, ' '), `${cnt} (${pct(cnt, totalGrowths)}%)`);
+  });
+  html += `</div>`;
+
+  // 10e: Overflow analysis
+  const overflowGames = losses.filter(r => r.defeatCause && r.defeatCause.cause === 'hydra_overflow');
+  if (overflowGames.length > 0) {
+    const avgHeadsDestroyedBefore = fix1(avg(overflowGames, r => (r.tracker.hydraHeadKillOrder||[]).length));
+    html += `<div class="report-card" style="border-left:3px solid var(--ko)"><b>Overflow Analysis</b> (${overflowGames.length} games)`;
+    html += statRow('Heads destroyed before overflow', avgHeadsDestroyedBefore);
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  // ===================== SECTION 11: TRAP ANALYSIS =====================
+  html += `<div class="report-section"><h3>Trap Analysis</h3>`;
+
+  const allTraps = {};
+  results.forEach(r => { Object.entries(r.tracker.traps||{}).forEach(([name, data]) => {
+    if (!allTraps[name]) allTraps[name] = {triggered:0, survived:0, ko:0};
+    Object.entries(data).forEach(([f,v]) => { allTraps[name][f] = (allTraps[name][f]||0) + v; });
+  }); });
+
+  const allTrapResources = {};
+  results.forEach(r => { Object.entries(r.tracker.trapResourcesLost||{}).forEach(([name, data]) => {
+    if (!allTrapResources[name]) allTrapResources[name] = {equipLost:0, followersLost:0, skillsExhausted:0};
+    Object.entries(data).forEach(([f,v]) => { allTrapResources[name][f] = (allTrapResources[name][f]||0) + v; });
+  }); });
+
+  html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+  html += `<tr style="border-bottom:1px solid var(--border)"><th>Trap</th><th>Triggered</th><th>KOs</th><th>Equip Lost</th><th>Followers Lost</th><th>Skills Exhausted</th><th>Flag</th></tr>`;
+
+  Object.entries(allTraps).sort((a,b) => b[1].triggered - a[1].triggered).forEach(([name, data]) => {
+    const res = allTrapResources[name] || {equipLost:0, followersLost:0, skillsExhausted:0};
+    const totalDamage = data.ko + res.equipLost + res.followersLost + res.skillsExhausted;
+    let trapFlag = '';
+    if (totalDamage === 0) { trapFlag = '<span style="color:var(--dim)">USELESS</span>'; flag('trap', 'low', `${name}: no impact in ${data.triggered} triggers`); }
+    else if (data.ko > data.triggered * 0.3) { trapFlag = '<span style="color:var(--ko)">LETHAL</span>'; }
+    else if (res.equipLost + res.followersLost > 0 && data.ko === 0) { trapFlag = '<span style="color:var(--mishap)">TAXING</span>'; }
+    html += `<tr><td>${name}</td><td style="text-align:center">${data.triggered}</td><td style="text-align:center">${data.ko}</td>`;
+    html += `<td style="text-align:center">${res.equipLost}</td><td style="text-align:center">${res.followersLost}</td><td style="text-align:center">${res.skillsExhausted}</td>`;
+    html += `<td style="text-align:center">${trapFlag}</td></tr>`;
+  });
+  html += `</table></div>`;
+
+  // ===================== SECTION 12: FOLLOWER/STALKER ANALYSIS =====================
+  html += `<div class="report-section"><h3>Follower & Stalker Analysis</h3>`;
+
+  // Followers at game end
+  const followersAtEnd = {};
+  results.forEach(r => {
+    heroIds.forEach(id => {
+      const es = r.tracker.heroEndState[id];
+      if (es) {
+        (es.followerNames||[]).forEach(fname => { followersAtEnd[fname] = (followersAtEnd[fname]||0) + 1; });
+      }
     });
   });
-  const allFollowerNames = new Set([...Object.keys(followerAgg), ...Object.keys(followerEndCount)]);
-  if (allFollowerNames.size > 0) {
+
+  const avgFollowersAtEnd = fix1(results.reduce((s,r) => {
+    return s + heroIds.reduce((ss,id) => ss + (r.tracker.heroEndState[id] ? r.tracker.heroEndState[id].followerCount||0 : 0), 0);
+  }, 0) / n / 4);
+
+  html += `<div class="report-card"><b>Followers</b>`;
+  html += statRow('Avg followers per hero at game end', avgFollowersAtEnd);
+
+  // Follower draw stats
+  const allFollowers = {};
+  results.forEach(r => { Object.entries(r.tracker.followers||{}).forEach(([name, data]) => {
+    if (!allFollowers[name]) allFollowers[name] = {drawn:0, helpedWin:0, lost:0};
+    Object.entries(data).forEach(([f,v]) => { allFollowers[name][f] = (allFollowers[name][f]||0) + v; });
+  }); });
+
+  html += `<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:6px">`;
+  html += `<tr style="border-bottom:1px solid var(--border)"><th>Follower</th><th>Drawn</th><th>Lost</th><th>Held at End</th></tr>`;
+  Object.entries(allFollowers).sort((a,b) => b[1].drawn - a[1].drawn).forEach(([name, data]) => {
+    html += `<tr><td>${name}</td><td style="text-align:center">${data.drawn}</td><td style="text-align:center">${data.lost}</td><td style="text-align:center">${followersAtEnd[name]||0}</td></tr>`;
+  });
+  html += `</table></div>`;
+
+  // Stalker stats
+  const allStalkers = {};
+  results.forEach(r => { Object.entries(r.tracker.stalkers||{}).forEach(([name, data]) => {
+    if (!allStalkers[name]) allStalkers[name] = {attached:0, turnsActive:0, causedKO:0, removed:0};
+    Object.entries(data).forEach(([f,v]) => { allStalkers[name][f] = (allStalkers[name][f]||0) + v; });
+  }); });
+
+  if (Object.keys(allStalkers).length > 0) {
+    html += `<div class="report-card"><b>Stalkers</b>`;
     html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
-    html += `<tr style="color:var(--dim);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:3px">Follower</th><th style="text-align:center;padding:3px">Drawn</th><th style="text-align:center;padding:3px">Helped Win</th><th style="text-align:center;padding:3px">Lost</th><th style="text-align:center;padding:3px">Held at End</th></tr>`;
-    [...allFollowerNames].sort().forEach(name => {
-      const d = followerAgg[name] || { drawn:0, helpedWin:0, lost:0 };
-      const endCount = followerEndCount[name] || 0;
-      html += `<tr style="border-bottom:1px solid #1a1a2a"><td style="padding:3px">${name}</td><td style="text-align:center;padding:3px">${d.drawn}</td><td style="text-align:center;padding:3px;color:${d.helpedWin>0?'var(--heal)':'var(--dim)'}">${d.helpedWin||'-'}</td><td style="text-align:center;padding:3px;color:${d.lost>0?'var(--ko)':'var(--dim)'}">${d.lost||'-'}</td><td style="text-align:center;padding:3px">${endCount}</td></tr>`;
+    html += `<tr style="border-bottom:1px solid var(--border)"><th>Stalker</th><th>Attached</th><th>KOs Caused</th><th>Removed</th></tr>`;
+    Object.entries(allStalkers).forEach(([name, data]) => {
+      html += `<tr><td>${name}</td><td style="text-align:center">${data.attached}</td><td style="text-align:center">${data.causedKO}</td><td style="text-align:center">${data.removed}</td></tr>`;
     });
-    html += `</table>`;
-    const avgFollowers = (results.reduce((s,r) => s + r.heroes.reduce((s2,h) => s2 + (h.followerCount || (h.followers||[]).length), 0), 0) / n / 4).toFixed(1);
-    html += `<div style="margin-top:6px;font-size:10px;color:var(--dim)">Average followers per hero at game end: <b>${avgFollowers}</b>. ${parseFloat(avgFollowers) < 0.3 ? 'Very few followers survive to end. They are either dying to KO/Stink Bomb or not being drawn.' : parseFloat(avgFollowers) > 1 ? 'Healthy follower count. Pack Leader and follower-dependent strategies are viable.' : 'Moderate follower presence.'}</div>`;
+    html += `</table></div>`;
   }
   html += `</div>`;
 
-  // === DEAD CARDS ===
-  html += `<div class="report-section"><h3>Dead Cards</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Cards that get drawn but have zero meaningful impact on the game. These are candidates for redesign or removal.</p>`;
-  let deadCardCount = 0;
-  // Dead enemies: 95%+ win rate AND avg margin > 4
-  Object.entries(encAgg).filter(([,d]) => d.drawn >= 5).forEach(([name, d]) => {
-    const fights = d.won + d.lost;
-    if (fights === 0) return;
-    const wr = d.won / fights * 100;
-    if (wr < 95) return;
-    // Check avg margin from overkills and close calls
-    const margins = [];
-    results.forEach(r => {
-      r.tracker.overkills.filter(cl => cl.enemy === name).forEach(cl => margins.push(cl.margin));
-      r.tracker.closeCalls.filter(cl => cl.enemy === name).forEach(cl => margins.push(cl.margin));
+  // ===================== SECTION 13: GAP ANALYSIS =====================
+  html += `<div class="report-section"><h3>Gap Analysis</h3>`;
+
+  // Auto-generated pacing gaps
+  if (parseFloat(emptyPct) > 15) flag('pacing', 'medium', `${emptyPct}% empty turns — dungeon needs more events`);
+
+  // Equipment gaps check
+  heroIds.forEach(id => {
+    const heroCLs = allCombatLogs.filter(c => c.heroId === id);
+    const noEquip = heroCLs.filter(c => (c.equipCount||0) === 0).length;
+    if (heroCLs.length > 0 && noEquip / heroCLs.length > 0.35) {
+      flag('equipment', 'medium', `${heroNames[id]} fights with 0 equipment ${pct(noEquip, heroCLs.length)}% — needs more equipment sources`);
+    }
+  });
+
+  // Skill gaps: any skill burned > 75%
+  Object.entries(allSkills).forEach(([key, s]) => {
+    const total = s.activated + s.burned;
+    if (total > 50 && s.burned / total > 0.75) {
+      const [heroId, ...nameParts] = key.split('_');
+      flag('skill', 'medium', `${heroNames[heroId]}'s ${nameParts.join('_')}: burned ${pct(s.burned, total)}% — skill effect rarely used`);
+    }
+  });
+
+  if (allFlags.length === 0) {
+    html += `<div class="report-card insight"><span class="tag insight-tag">OK</span>No significant balance issues detected.</div>`;
+  } else {
+    // Group by category
+    const byCategory = {};
+    allFlags.forEach(f => {
+      if (!byCategory[f.category]) byCategory[f.category] = [];
+      // Deduplicate
+      if (!byCategory[f.category].some(x => x.msg === f.msg)) byCategory[f.category].push(f);
     });
-    // If most wins are overkills, avg margin is high. Estimate from overkill ratio.
-    const overkillsForEnemy = results.reduce((s,r) => s + r.tracker.overkills.filter(cl => cl.enemy === name).length, 0);
-    const avgMargin = margins.length > 0 ? margins.reduce((s,v)=>s+v,0)/margins.length : (overkillsForEnemy > d.won * 0.5 ? 5 : 2);
-    if (avgMargin <= 4) return;
-    deadCardCount++;
-    html += `<div class="report-card weak"><span class="tag weak-tag">Dead Enemy</span><b>${name}</b> — ${wr.toFixed(0)}% hero win rate, avg margin +${avgMargin.toFixed(1)}. Heroes steamroll this enemy without spending any resources. It takes up a card slot but adds nothing to the experience.</div>`;
-  });
-  // Dead traps: 0 KOs AND 0 skill exhaustions across all games
-  Object.entries(trapAgg).filter(([,d]) => d.triggered >= 5).forEach(([name, d]) => {
-    if (d.ko > 0) return;
-    // Check if trap is in "useless" category from trapMeta
-    const meta = trapMeta[name];
-    if (!meta || meta.vibe !== 'useless') return;
-    deadCardCount++;
-    html += `<div class="report-card weak"><span class="tag weak-tag">Dead Trap</span><b>${name}</b> — ${d.triggered} triggers, 0 KOs, 0 meaningful setbacks. This trap creates no tension and no decisions.</div>`;
-  });
-  // Dead stalkers: attached but removed before causing any effect
-  const stalkerAgg = {};
-  results.forEach(r => {
-    Object.entries(r.tracker.stalkers).forEach(([name, data]) => {
-      if (!stalkerAgg[name]) stalkerAgg[name] = { attached:0, turnsActive:0, causedKO:0, removed:0 };
-      Object.keys(data).forEach(k => { if (stalkerAgg[name][k] !== undefined) stalkerAgg[name][k] += data[k]; });
+    Object.entries(byCategory).forEach(([cat, flags]) => {
+      html += `<div class="report-card ${flags[0].severity === 'high' ? 'op' : 'insight'}"><b>${cat.charAt(0).toUpperCase() + cat.slice(1)}</b>`;
+      flags.forEach(f => {
+        const color = f.severity === 'high' ? 'var(--ko)' : f.severity === 'medium' ? 'var(--mishap)' : 'var(--dim)';
+        html += `<div style="font-size:10px;color:${color};padding:1px 0">- ${f.msg}</div>`;
+      });
+      html += `</div>`;
     });
-  });
-  Object.entries(stalkerAgg).filter(([,d]) => d.attached >= 3).forEach(([name, d]) => {
-    if (d.causedKO > 0) return;
-    if (d.turnsActive > d.attached * 2) return; // it stuck around, just didn't kill
-    deadCardCount++;
-    html += `<div class="report-card weak"><span class="tag weak-tag">Dead Stalker</span><b>${name}</b> — attached ${d.attached}x but caused 0 KOs and lasted avg ${(d.turnsActive/Math.max(1,d.attached)).toFixed(1)} turns. Gets removed before it matters.</div>`;
-  });
-  if (deadCardCount === 0) {
-    html += `<div class="report-card insight"><span class="tag insight-tag">OK</span>No dead cards detected. All cards have some measurable impact on gameplay.</div>`;
-  } else {
-    html += `<div class="report-card insight" style="margin-top:6px"><span class="tag insight-tag">Summary</span>${deadCardCount} dead card${deadCardCount>1?'s':''} found. These cards waste player time without creating decisions or tension. Consider redesigning their effects or replacing them.</div>`;
-  }
-  html += `</div>`;
-
-  // === DIFFICULTY PRESETS ===
-  html += `<div class="report-section"><h3>Difficulty Presets</h3>`;
-  html += `<p style="color:var(--dim);font-size:10px;margin-bottom:8px">Suggested parameter combinations for different play experiences. These are starting points — run batches to fine-tune.</p>`;
-
-  html += `<div class="report-card" style="border-left:3px solid var(--heal)">`;
-  html += `<b style="color:var(--heal)">EASY MODE</b> — for families and casual groups`;
-  html += `<div style="font-size:10px;margin-top:4px;color:var(--dim)">Target: ~75-85% win rate. Heroes feel powerful, losses are rare.</div>`;
-  html += `<ul style="font-size:10px;margin:4px 0 0 16px;padding:0">`;
-  html += `<li>All Hydra heads: -2 STR</li>`;
-  html += `<li>Wonder rooms: 35%</li>`;
-  html += `<li>Dread rooms: 20%</li>`;
-  html += `<li>Skills: ON</li>`;
-  html += `<li>Gil system: ON (cost 2 for skill, 4 for equip)</li>`;
-  html += `</ul></div>`;
-
-  html += `<div class="report-card" style="border-left:3px solid var(--accent)">`;
-  html += `<b style="color:var(--accent)">NORMAL MODE</b> — balanced challenge`;
-  html += `<div style="font-size:10px;margin-top:4px;color:var(--dim)">Target: ~60-70% win rate. If you play well and prepare, you win. Bad luck or bad decisions cost you.</div>`;
-  html += `<ul style="font-size:10px;margin:4px 0 0 16px;padding:0">`;
-  html += `<li>All Hydra heads: default STR</li>`;
-  html += `<li>Wonder rooms: 30%</li>`;
-  html += `<li>Dread rooms: 25%</li>`;
-  html += `<li>Skills: ON</li>`;
-  html += `<li>Gil system: OFF (or ON with default costs)</li>`;
-  html += `</ul></div>`;
-
-  html += `<div class="report-card" style="border-left:3px solid var(--ko)">`;
-  html += `<b style="color:var(--ko)">HARD MODE</b> — for experienced players who want real tension`;
-  html += `<div style="font-size:10px;margin-top:4px;color:var(--dim)">Target: ~40-55% win rate. Every fight matters. Preparation is mandatory.</div>`;
-  html += `<ul style="font-size:10px;margin:4px 0 0 16px;padding:0">`;
-  html += `<li>All Hydra heads: +1 STR</li>`;
-  html += `<li>Wonder rooms: 25%</li>`;
-  html += `<li>Dread rooms: 30%</li>`;
-  html += `<li>Skills: ON</li>`;
-  html += `<li>Gil system: OFF</li>`;
-  html += `</ul></div>`;
-
-  html += `<div class="report-card insight"><span class="tag insight-tag">Current Game</span>`;
-  if (winRate > 80) {
-    html += `Your current settings play like <b>Easy Mode</b>. To reach Normal, try: increase Hydra heads STR by +1 or reduce Wonder rooms to 25%.`;
-  } else if (winRate > 65) {
-    html += `Your current settings play like <b>Normal Mode</b>. Good balance for most groups. Fine-tune Hydra STR +/-1 to adjust.`;
-  } else if (winRate > 45) {
-    html += `Your current settings play like <b>Hard Mode</b>. Experienced players will enjoy this. Casual groups may want Hydra heads -1 STR.`;
-  } else {
-    html += `Your current settings are <b>harder than Hard Mode</b>. Consider: reduce Hydra STR by 2, increase Wonder rooms to 35%, or add Gil system.`;
-  }
-  html += `</div></div>`;
-
-  html += `<div class="report-card insight"><span class="tag insight-tag">Preparation Tip</span>`;
-  const prepState = currentTweaks && currentTweaks.prepareFirst;
-  if (prepState) {
-    html += `This batch ran with <b>Prepare First ON</b> — heroes wait until equipped before entering Hydra. Run again with it OFF to compare unprepared win rate. The difference shows how much preparation matters.`;
-  } else {
-    html += `This batch ran <b>without preparation</b> — heroes rush to Hydra as soon as relics are collected. Run again with Prepare First ON to see how much preparation helps. If prepared win rate is 70%+ but unprepared is 40%, the game rewards smart play.`;
   }
   html += `</div>`;
 
@@ -4765,10 +4427,11 @@ function runSilentGame() {
 
     // Gil: spend at entrance
     gilSpendAtEntrance(hero);
+    hero._justRespawned = false;
 
     // Turn-start effects
     if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
-      if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero);
+      if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero, 'wizard_hat');
     }
     // Herbalist (Gigi): recharge any hero's skill including self (batch sim)
     if (hero.id === 'gigi' && shouldUseSkill(hero, 'Herbalist', { atHydra: G.heroesInHydraArea.has(hero.id) })) {
@@ -4780,7 +4443,7 @@ function runSilentGame() {
       })[0];
       if (neediest) {
         useSkill(hero, 'Herbalist');
-        rechargeOneSkill(neediest);
+        rechargeOneSkill(neediest, 'herbalist');
         trackSkill(hero.id, 'Herbalist', 'activated');
       }
     }
@@ -4851,6 +4514,24 @@ function runSilentGame() {
   G.heroes.forEach(h => {
     h.stalkers.forEach(s => trackStalker(s.name, 'turnsActive'));
   });
+
+  // Capture hero end state
+  G.heroes.forEach(h => {
+    G.tracker.heroEndState[h.id] = {
+      totalStr: totalStr(h),
+      equipCount: h.equipment.length,
+      equipNames: h.equipment.map(e => e.name),
+      followerCount: h.followers.length,
+      followerNames: h.followers.map(f => f.name),
+      readySkills: readySkillCount(h),
+      relics: h.heldRelics.length,
+      gil: h.gil || 0,
+      stalkerCount: h.stalkers.length,
+      ko: initHeroTracker(G.tracker, h.id).ko
+    };
+  });
+  // Enemies still alive at game end
+  G.tracker.enemiesAtGameEnd = (G.enemiesOnBoard || []).map(e => e.name || (e.card && e.card.name) || 'unknown');
 
   return {
     victory: G.victory,
@@ -4938,14 +4619,17 @@ function organizeReportTabs() {
 
   // Map section titles to tabs
   const tabMap = {
-    'tab-overview': ['Overview','Game Pacing','Hero Performance','Combat Tension','Defeat Analysis','What Winners Had','Hydra Heads','Hydra Combat Breakdown','Room Distribution','Difficulty Presets','Balance Improvements'],
-    'tab-encounters': ['Encounter Balance','Trap Analysis','Follower Impact','Dead Cards'],
-    'tab-equipment': ['Equipment Balance','Talent Analysis','Skill Analysis']
+    'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
+    'tab-heroes': ['Hero Performance','Hero × Enemy','Hero × Hydra'],
+    'tab-skills-equip': ['Skill Analysis','Equipment Analysis'],
+    'tab-enemies': ['Enemy Design','Trap Analysis','Follower'],
+    'tab-hydra-econ': ['Gil Economy','Hydra Fight']
   };
+  const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ'];
 
   // Create tab content containers
   const tabDivs = {};
-  Object.keys(tabMap).forEach(id => {
+  tabOrder.forEach(id => {
     const div = document.createElement('div');
     div.id = id;
     div.className = 'report-tab-content' + (id === 'tab-overview' ? ' active' : '');
@@ -4957,7 +4641,7 @@ function organizeReportTabs() {
   sections.forEach(section => {
     const h3 = section.querySelector('h3');
     if (!h3) return;
-    const title = h3.textContent.replace(/\s*\(.*\)/, '').trim(); // remove "(100 games)" etc
+    const title = h3.textContent.replace(/\s*\(.*\)/, '').trim();
     let placed = false;
     Object.entries(tabMap).forEach(([tabId, titles]) => {
       if (titles.some(t => title.startsWith(t))) {
@@ -4966,23 +4650,21 @@ function organizeReportTabs() {
       }
     });
     if (!placed) {
-      // Default to overview
       tabDivs['tab-overview'].appendChild(section);
     }
   });
 
-  // Insert tab divs after the tabs bar
-  Object.values(tabDivs).forEach(div => {
-    tabs.parentNode.insertBefore(div, tabs.nextSibling);
-  });
-  // Move tab-equipment to the end
-  tabs.parentNode.appendChild(tabDivs['tab-equipment']);
-  tabs.parentNode.appendChild(tabDivs['tab-encounters']);
-  // Reorder: overview first, encounters second, equipment third
+  // Insert tab divs in order after the tabs bar
   const parent = tabs.parentNode;
-  parent.insertBefore(tabDivs['tab-overview'], tabs.nextSibling);
-  parent.insertBefore(tabDivs['tab-encounters'], tabDivs['tab-overview'].nextSibling);
-  parent.insertBefore(tabDivs['tab-equipment'], tabDivs['tab-encounters'].nextSibling);
+  tabOrder.forEach(id => {
+    parent.insertBefore(tabDivs[id], tabs.nextSibling);
+  });
+  // Re-insert in correct order
+  let anchor = tabs.nextSibling;
+  tabOrder.forEach(id => {
+    parent.insertBefore(tabDivs[id], anchor);
+    anchor = tabDivs[id].nextSibling;
+  });
 }
 
 function switchReportTab(el, tabId) {
