@@ -735,3 +735,80 @@ The batch runner calls `initState()`, applies tweaks, then loops `runTurn()` unt
 - Overflow game-over behavior
 - Prepare-first flag
 - Gil system settings
+
+---
+
+## 14. Debug / Trace Mode
+
+The simulator includes a debug mode that captures structured logs of game execution, useful for verifying that mechanics work correctly and for spotting edge-case bugs.
+
+### Enabling Debug Mode
+
+A checkbox labeled "Debug / Trace" is available on the home screen. Toggling it on activates trace capture for both single runs and batch simulations.
+
+### Single Run Trace
+
+When debug mode is active and you run a single game, the simulator captures a turn-by-turn structured log. Each entry records:
+
+- The active hero and current turn number
+- Movement roll and resulting position
+- Tile exploration results (type, card drawn)
+- Combat details (hero STR, enemy STR, roll, outcome)
+- Skill activations and their effects
+- Follower/stalker triggers
+- Equipment usage
+- KO events and rescue attempts
+- Relic pickups and Hydra phase transitions
+
+The full trace can be downloaded as a JSON file via the **Download Trace** button that appears after the run completes.
+
+### Batch Debug
+
+When debug mode is active during a batch run, the simulator captures a condensed per-game summary rather than the full turn-by-turn log (which would be too large across hundreds or thousands of games). Each game summary includes:
+
+- Game index and outcome (victory/defeat)
+- Total turns played
+- Key aggregate stats (damage taken, enemies defeated, skills used)
+- Notable events (Hydra encounters, relic acquisitions, party wipes)
+
+The batch debug output can be downloaded as a JSON file via the **Download Batch Debug** button that appears after the batch completes.
+
+### Download Buttons
+
+Both trace modes surface a download button in the results panel:
+
+- **Download Trace** -- appears after a single debug run, exports the full turn-by-turn log
+- **Download Batch Debug** -- appears after a batch debug run, exports the array of per-game summaries
+
+Files are timestamped and saved as `.json` for easy parsing in external tools.
+
+---
+
+## Appendix: Unimplemented / Stub Card Effects
+
+The following card effects are defined in `data.js` but their mechanics are not fully simulated in `engine.js`. They are treated as basic cards (enemies fight at their STR with no special effect, followers/stalkers give STR bonus only).
+
+### Followers (effect defined but mechanic not triggered)
+- **Monster Hunter** (`skip_move_fight_enemy`): Skip movement to fight an enemy on the board
+- **Dungeon Guardian** (`block_next_misfortune`): Block the next Misfortune card drawn
+- **Oracle** (`peek_3_tiles`): Peek at the next 3 tiles in the deck
+- **Dungeon Master** (`choose_room_type`): Choose whether the next room is Wonder, Common, or Dread
+- **Castle Architect** (`move_2_extra`): +2 extra movement (beyond Spectral Horse)
+
+### Stalkers (effect defined but mechanic not triggered)
+- **Corrupted Squire** (`exhaust_per_equip`): Exhaust 1 Skill per equipped item at turn start
+- **Mutt** (`roll_1_discard_equip`): On movement roll of 1, discard 1 equipment
+- **Drunkard** (`stop_on_enemy`): Movement stops on tiles containing enemies
+
+### Equipment (effect defined but mechanic not triggered)
+- **Darksight Helm** (`peek_adjacent`): Peek at face-down adjacent tiles before choosing direction
+- **Stivali delle Sette Leghe** (`choose_stop`): Choose which tile to stop on during movement (not forced to final tile)
+
+### Enemies (effect defined but special mechanic simplified)
+- **Wind Elemental** (`move_to_revealed`): On defeat, hero may move to any revealed tile (logged but not acted on)
+- **Static Fog** (`block_room`): Blocks room resolution (not implemented -- treated as normal enemy)
+
+### Wonder Cards (effect exists but mechanic simplified)
+- **Good Genii** (`remove_enemy`): Remove 1 enemy from the board (not implemented -- would need enemiesOnBoard integration)
+
+These stubs do not significantly affect simulation accuracy for balance testing purposes, as they represent low-frequency events or minor tactical options. However, they should be implemented for full rulebook fidelity.
