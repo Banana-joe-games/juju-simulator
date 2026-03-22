@@ -148,7 +148,14 @@ function renderHexMap() {
   // Draw hero positions
   const heroPositions = {};
   G.heroes.forEach(h => {
-    if (h.pos !== 'hydra') {
+    if (h.pos === 'hydra') {
+      // Heroes at Hydra: show them on the Exit hex
+      if (G.exitHex) {
+        const key = hexKey(G.exitHex.q, G.exitHex.r);
+        if (!heroPositions[key]) heroPositions[key] = [];
+        heroPositions[key].push(h);
+      }
+    } else {
       const key = hexKey(h.pos.q, h.pos.r);
       if (!heroPositions[key]) heroPositions[key] = [];
       heroPositions[key].push(h);
