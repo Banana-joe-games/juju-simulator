@@ -742,6 +742,15 @@ function runTurn() {
     }
   }
 
+  // Corrupted Squire: exhaust 1 skill per equipment at turn start
+  if (hasStalker(hero, 'exhaust_per_equip')) {
+    const equipCount = hero.equipment.length;
+    for (let i = 0; i < equipCount; i++) {
+      exhaustOneSkill(hero, 'Corrupted Squire');
+    }
+    if (equipCount > 0) log(`  Corrupted Squire: exhaust ${equipCount} skill(s) for ${equipCount} equipment!`, 'misfortune');
+  }
+
   // === SKILL ACTIVATIONS (turn start) ===
 
   // Herbalist (Gigi): cross-turn — Gigi can recharge a skill at any time
@@ -982,12 +991,42 @@ function decideMovementIntent(hero, movePoints) {
 }
 
 function movePhase(hero) {
+  // Monster Hunter: skip movement to fight weakest board enemy
+  if (hero.followers.find(f => f.effect === 'skip_move_fight_enemy') && G.enemiesOnBoard.length > 0) {
+    const weakest = G.enemiesOnBoard.reduce((best, e) => {
+      const eStr = (e.card && e.card.str) || e.str || 0;
+      const bStr = best ? ((best.card && best.card.str) || best.str || 0) : Infinity;
+      return eStr < bStr ? e : best;
+    }, null);
+    if (weakest && totalStr(hero) >= ((weakest.card && weakest.card.str) || weakest.str || 0)) {
+      log(`  🏹 Monster Hunter: ${hero.name} hunts ${weakest.name} on the board!`, 'wonder');
+      const idx = G.enemiesOnBoard.indexOf(weakest);
+      G.enemiesOnBoard.splice(idx, 1);
+      const enemyCard = weakest.card ? {...weakest.card} : {name: weakest.name, str: weakest.str || 0};
+      const tier = (enemyCard.str || 0) >= 4 ? 'misfortune' : 'mishap';
+      combat(hero, enemyCard, tier);
+      return; // skip normal movement
+    }
+  }
+
   let roll = heroRollDie(hero);
   if (checkAssassin(hero, roll)) return;
 
   let isFlame = roll.isFlame || hero.giftedFlame;
   hero.giftedFlame = false;
   let moveVal = roll.val;
+
+  // Mutt: rolled 1 — discard 1 equipment
+  if (hasStalker(hero, 'roll_1_discard_equip') && roll.val === 1) {
+    const removable = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
+    if (removable.length > 0) {
+      removable.sort((a, b) => (a.str || 0) - (b.str || 0));
+      const removed = removable[0];
+      hero.equipment = hero.equipment.filter(e => e !== removed);
+      trackEquip(removed.name, 'discarded');
+      log(`  Mutt! Rolled 1 — ${removed.name} discarded!`, 'misfortune');
+    }
+  }
 
   // Baba Yaga: limit to 1
   if (hasStalker(hero, 'move_1_only')) {
@@ -1001,6 +1040,13 @@ function movePhase(hero) {
   if (hero.followers.find(f => f.effect === 'movement_+2')) {
     moveVal += 2;
     log(`  🐴 Spectral Horse: +2 movement (total ${moveVal})`, 'wonder');
+  }
+
+  // Castle Architect: extra movement from previous turn
+  if (hero._extraMovement) {
+    moveVal += hero._extraMovement;
+    log(`  🏰 Castle Architect: +${hero._extraMovement} extra movement!`, 'wonder');
+    hero._extraMovement = 0;
   }
 
   // Ninja Tabi: roll 2 dice for movement, keep best
@@ -1044,6 +1090,14 @@ function movePhase(hero) {
     }
   }
 
+  // Darksight Helm: peek at face-down adjacent tiles (AI already has map info, log the effect)
+  if (hero.equipment.find(e => e.effect === 'peek_adjacent')) {
+    const unexplored = G.hexMap.unexploredNeighbors(hero.pos.q, hero.pos.r);
+    if (unexplored.length > 0) {
+      log(`  👁 Darksight Helm: ${hero.name} peers into ${unexplored.length} unexplored passage(s)...`, 'legendary');
+    }
+  }
+
   // Move (hex-aware)
   const intent = decideMovementIntent(hero, moveVal);
   trace('movement', 'intent', {type: intent.type, reason: intent.reason || 'explore', direction: intent.dirIndex});
@@ -1062,6 +1116,7 @@ function movePhase(hero) {
     const dir = HEX_DIRS[intent.dirIndex];
     let stepsUsed = 0;
     let scanQ = currentQ, scanR = currentR;
+    const _stivaliVisited = []; // track tiles visited for Stivali delle Sette Leghe
 
     while (stepsUsed < moveVal) {
       const nextQ = scanQ + dir.q;
@@ -1086,6 +1141,17 @@ function movePhase(hero) {
           destTileType = 'dread';
           log('  ⚠ Dread Dungeon blocks the path! Movement stops.', 'misfortune');
           break;
+        }
+        // Drunkard: stop on explored tile if enemies present
+        if (hero.followers.find(f => f.effect === 'stop_on_enemy')) {
+          const hasEnemy = G.enemiesOnBoard.some(e => e.pos && e.pos.q === scanQ && e.pos.r === scanR);
+          if (hasEnemy) {
+            currentQ = scanQ;
+            currentR = scanR;
+            destTileType = existing.type;
+            log(`  Drunkard stops ${hero.name} at a tile with enemies!`, 'mishap');
+            break;
+          }
         }
         // Explored non-DD: pass through unless it's our last step
         if (stepsUsed >= moveVal) {
@@ -1113,6 +1179,7 @@ function movePhase(hero) {
       };
       G.hexMap.set(scanQ, scanR, tile);
       G.board.push({id: tile.roomId, type: tileType, enemies:[], equipment:[]});
+      _stivaliVisited.push({q: scanQ, r: scanR, type: tileType});
       currentQ = scanQ;
       currentR = scanR;
       destTileType = tileType;
@@ -1131,6 +1198,20 @@ function movePhase(hero) {
       if (G.hexMap.has(scanQ, scanR)) {
         const t = G.hexMap.get(currentQ, currentR);
         destTileType = t ? t.type : 'common';
+      }
+    }
+
+    // Stivali delle Sette Leghe: choose best tile along path to stop on
+    if (hero.equipment.find(e => e.effect === 'choose_stop') && _stivaliVisited.length > 1) {
+      // If final destination is Common or Dread, check if a Wonder was passed
+      if (destTileType !== 'wonder') {
+        const wonderStop = _stivaliVisited.find(t => t.type === 'wonder');
+        if (wonderStop) {
+          currentQ = wonderStop.q;
+          currentR = wonderStop.r;
+          destTileType = 'wonder';
+          log(`  👢 Stivali delle Sette Leghe: ${hero.name} chooses to stop at a Wonder Room!`, 'legendary');
+        }
       }
     }
   } else if (intent.type === 'return_entrance') {
@@ -1252,6 +1333,11 @@ function movePhase(hero) {
 }
 
 function resolveRoom(hero, roomType) {
+  if (hero._roomBlocked) {
+    hero._roomBlocked = false;
+    log(`    Room resolution skipped (Static Fog).`, 'system');
+    return;
+  }
   if (G.roomsVisited) G.roomsVisited[roomType]++;
   if (roomType === 'wonder') {
     drawWonder(hero);
@@ -1397,6 +1483,29 @@ function resolveWonderCard(hero, card) {
             drawLegendaryItem(hero);
           }
         }
+      } else if (card.effect === 'move_2_extra') {
+        hero._extraMovement = (hero._extraMovement || 0) + 2;
+        log(`    Castle Architect grants +2 movement next turn!`, 'wonder');
+      } else if (card.effect === 'peek_3_tiles') {
+        const peek = G.tileDeck.slice(-3).reverse();
+        log(`    Oracle reveals next tiles: ${peek.join(', ')}`, 'wonder');
+      } else if (card.effect === 'swap_rooms') {
+        const adjacent = G.hexMap.exploredNeighbors(hero.pos.q, hero.pos.r);
+        const dreadTiles = adjacent.map(n => G.hexMap.get(n.q, n.r)).filter(t => t && t.type === 'dread');
+        if (dreadTiles.length > 0) {
+          dreadTiles[0].type = 'wonder';
+          log(`    Dungeon Master: converted a Dread Dungeon to Wonder Room!`, 'wonder');
+        } else {
+          log(`    Dungeon Master: no Dread Dungeons nearby to convert.`, 'system');
+        }
+      } else if (card.effect === 'remove_enemy') {
+        if (G.enemiesOnBoard.length > 0) {
+          G.enemiesOnBoard.sort((a, b) => ((b.card && b.card.str) || b.str || 0) - ((a.card && a.card.str) || a.str || 0));
+          const removed = G.enemiesOnBoard.shift();
+          log(`    Good Genii removes ${removed.name} from the board!`, 'wonder');
+        } else {
+          log(`    Good Genii: no enemies on the board.`, 'system');
+        }
       } else if (card.effect === 'remove_stalker') {
         if (hero.stalkers.length > 0) {
           const removed = hero.stalkers.shift();
@@ -1421,7 +1530,32 @@ function resolveWonderCard(hero, card) {
 function resolveMishapCard(hero, card) {
   switch(card.type) {
     case 'encounter':
-      log(`    ${card.name}: minor encounter resolved.`, 'mishap');
+      if (card.effect === 'move_2_extra') {
+        hero._extraMovement = (hero._extraMovement || 0) + 2;
+        log(`    Castle Architect grants +2 movement next turn!`, 'wonder');
+      } else if (card.effect === 'peek_3_tiles') {
+        const peek = G.tileDeck.slice(-3).reverse();
+        log(`    Oracle reveals next tiles: ${peek.join(', ')}`, 'mishap');
+      } else if (card.effect === 'swap_rooms') {
+        const adjacent = G.hexMap.exploredNeighbors(hero.pos.q, hero.pos.r);
+        const dreadTiles = adjacent.map(n => G.hexMap.get(n.q, n.r)).filter(t => t && t.type === 'dread');
+        if (dreadTiles.length > 0) {
+          dreadTiles[0].type = 'wonder';
+          log(`    Dungeon Master: converted a Dread Dungeon to Wonder Room!`, 'wonder');
+        } else {
+          log(`    Dungeon Master: no Dread Dungeons nearby to convert.`, 'system');
+        }
+      } else if (card.effect === 'remove_enemy') {
+        if (G.enemiesOnBoard.length > 0) {
+          G.enemiesOnBoard.sort((a, b) => ((b.card && b.card.str) || b.str || 0) - ((a.card && a.card.str) || a.str || 0));
+          const removed = G.enemiesOnBoard.shift();
+          log(`    Good Genii removes ${removed.name} from the board!`, 'mishap');
+        } else {
+          log(`    Good Genii: no enemies on the board.`, 'system');
+        }
+      } else {
+        log(`    ${card.name}: minor encounter resolved.`, 'mishap');
+      }
       break;
     case 'follower':
       if (G._tweaks && !G._tweaks.followersEnabled) { log(`    ${card.name} passes by...`, 'system'); break; }
@@ -1596,6 +1730,12 @@ function resolveTrap(hero, card) {
     case 'go_back': {
       hero.pos = {q:0, r:0};
       log(`    Trap Door! Back to start.`, 'misfortune');
+      break;
+    }
+    case 'block_room': {
+      log(`    Static Fog fills the room! Nothing can be resolved here.`, 'misfortune');
+      // Room resolution is blocked — no further cards drawn this turn
+      hero._roomBlocked = true;
       break;
     }
     default:

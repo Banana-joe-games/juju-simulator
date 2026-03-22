@@ -1360,6 +1360,13 @@ function runSilentGame() {
     if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
       if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero, 'wizard_hat');
     }
+    // Corrupted Squire: exhaust 1 skill per equipment at turn start
+    if (hasStalker(hero, 'exhaust_per_equip')) {
+      const equipCount = hero.equipment.length;
+      for (let i = 0; i < equipCount; i++) {
+        exhaustOneSkill(hero, 'Corrupted Squire');
+      }
+    }
     // Herbalist (Gigi): cross-turn — fires at start of EVERY hero's turn, not just Gigi's
     const gigiForHerb = G.heroes.find(h => h.id === 'gigi');
     if (gigiForHerb && isSkillReady(gigiForHerb, 'Herbalist') && shouldUseSkill(gigiForHerb, 'Herbalist', { atHydra: G.heroesInHydraArea.has('gigi') })) {
