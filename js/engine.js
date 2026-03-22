@@ -2533,7 +2533,11 @@ function awakenEffect(hero) {
         .filter(Boolean);
       if (explored.length > 0) {
         explored.sort((a, b) => hexDistance(0, 0, b.q, b.r) - hexDistance(0, 0, a.q, a.r));
-        G.exitHex = { q: explored[0].q, r: explored[0].r };
+        const chosen = explored[0];
+        G.exitHex = { q: chosen.q, r: chosen.r };
+        // Mark existing tile as exit type
+        const existingTile = G.hexMap.get(chosen.q, chosen.r);
+        if (existingTile) existingTile.type = 'exit';
       }
     }
     log(`  🚪 The EXIT has been placed!`, 'hydra');
