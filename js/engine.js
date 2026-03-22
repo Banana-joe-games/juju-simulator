@@ -794,7 +794,7 @@ function runTurn() {
       const neediest = candidates.sort((a,b) => b.skillStates.filter(s => s === 'exhausted').length - a.skillStates.filter(s => s === 'exhausted').length)[0];
       if (neediest) {
         rechargeOneSkill(neediest, 'herbalist');
-        G.tracker.copycatDetails.push({ copiedSkill: 'Herbalist', won: null, context: 'dungeon' });
+        G.tracker.copycatDetails.push({ copiedSkill: 'Herbalist', won: true, context: 'dungeon' });
         log(`  🎭 Copycat → Herbalist: ${hero.name} recharges a skill for ${neediest.name}!`, 'flame');
       }
     }
@@ -2011,14 +2011,18 @@ function combat(hero, enemyCard, tier) {
       useSkill(eggoForCopy, 'Copycat');
       enemyStr -= 2;
       trackSkill('eggo', 'Copycat', 'activated');
-      G.tracker.copycatDetails.push({ copiedSkill: 'Siphon', won: null, context: 'dungeon' });
+      { const ccEntry = { copiedSkill: 'Siphon', won: false, context: 'dungeon' };
+      G.tracker.copycatDetails.push(ccEntry);
+      hero._lastCopycatEntry = ccEntry; }
       const who = hero.id === 'eggo' ? '' : ` (helping ${hero.name})`;
       log(`  🎭 Copycat → Siphon${who}: Enemy -2 STR (now ${enemyStr})`, 'flame');
     } else if (gigiH && isSkillReady(gigiH, 'Pack Leader') && hero.followers.length >= 2) {
       useSkill(eggoForCopy, 'Copycat');
       packLeaderBonus = hero.followers.length;
       trackSkill('eggo', 'Copycat', 'activated');
-      G.tracker.copycatDetails.push({ copiedSkill: 'Pack Leader', won: null, context: 'dungeon' });
+      { const ccEntry = { copiedSkill: 'Pack Leader', won: false, context: 'dungeon' };
+      G.tracker.copycatDetails.push(ccEntry);
+      hero._lastCopycatEntry = ccEntry; }
       log(`  🎭 Copycat → Pack Leader: +${packLeaderBonus} STR`, 'flame');
     }
   }
@@ -2162,6 +2166,12 @@ function combat(hero, enemyCard, tier) {
   trace('combat', 'result', {hero: hero.id, enemy: enemyCard.name, won: true, margin: _lfr.margin || 0, gilEarned: 0});
   log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
 
+  // Update Copycat win tracking after fight resolves
+  if (hero._lastCopycatEntry) {
+    hero._lastCopycatEntry.won = true;
+    hero._lastCopycatEntry = null;
+  }
+
   // === ON-WIN EFFECTS ===
   // Recover FROGman equipment
   if (frogmanSwallowed) {
@@ -2210,6 +2220,10 @@ function combat(hero, enemyCard, tier) {
       rechargeOneSkill(h, 'battlecry');
       rechargeOneSkill(h, 'battlecry');
     });
+    if (hero._lastBattlecryEntry) {
+      hero._lastBattlecryEntry.won = true;
+      hero._lastBattlecryEntry = null;
+    }
     log(`    ⚔ Battlecry victory! All heroes recharge 2 skills!`, 'flame');
   }
 
@@ -2322,11 +2336,14 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero);
     heroRoll = r1.val <= r2.val ? r1 : r2;
     // Track Battlecry details
-    G.tracker.battlecryDetails.push({
+    const bcEntry = {
       roll1: r1.val, roll2: r2.val, kept: heroRoll.val,
       bestRoll: Math.max(r1.val, r2.val),
-      isFlame1: r1.isFlame, isFlame2: r2.isFlame
-    });
+      isFlame1: r1.isFlame, isFlame2: r2.isFlame,
+      won: false  // updated after fight resolves
+    };
+    G.tracker.battlecryDetails.push(bcEntry);
+    hero._lastBattlecryEntry = bcEntry;
     log(`    Battlecry: rolled [${r1.val}, ${r2.val}] keeps worst ${heroRoll.val}${heroRoll.isFlame ? ' 🔥' : ''}`, 'flame');
   } else if (hasTripleAxe) {
     const r1 = heroRollDie(hero), r2 = heroRollDie(hero), r3 = heroRollDie(hero);
@@ -2683,7 +2700,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
       useSkill(hero, 'Copycat');
       trackSkill(hero.id, 'Copycat', 'activated');
       trackSkill(hero.id, 'Copycat', 'savedFromKO');
-      G.tracker.copycatDetails.push({ copiedSkill: 'Shield Wall', won: null, context: 'dungeon' });
+      G.tracker.copycatDetails.push({ copiedSkill: 'Shield Wall', won: true, context: 'dungeon' });
       log(`  🎭 Copycat: ${hero.name} copies Shield Wall from Juju! KO prevented!`, 'flame');
       return;
     }
@@ -3387,7 +3404,9 @@ function hydraAttack(hero) {
       useSkill(hero, 'Copycat');
       siphonSkillDrain += 2;
       trackSkill(hero.id, 'Copycat', 'activated');
-      G.tracker.copycatDetails.push({ copiedSkill: 'Siphon', won: null, context: 'hydra' });
+      { const ccEntry = { copiedSkill: 'Siphon', won: false, context: 'hydra' };
+      G.tracker.copycatDetails.push(ccEntry);
+      hero._lastCopycatEntry = ccEntry; }
       log(`    🎭 Copycat copies Siphon! Head -2 STR (total drain: -${siphonSkillDrain})`, 'flame');
     }
   }
@@ -3399,7 +3418,9 @@ function hydraAttack(hero) {
         useSkill(eggo, 'Copycat');
         siphonSkillDrain += 2;
         trackSkill('eggo', 'Copycat', 'activated');
-        G.tracker.copycatDetails.push({ copiedSkill: 'Siphon', won: null, context: 'hydra' });
+        { const ccEntry = { copiedSkill: 'Siphon', won: false, context: 'hydra' };
+        G.tracker.copycatDetails.push(ccEntry);
+        hero._lastCopycatEntry = ccEntry; }
         log(`    🎭 Copycat: Eggo copies Siphon to help ${hero.name}! Head -2 STR (total drain: -${siphonSkillDrain})`, 'flame');
       }
     }
@@ -3503,6 +3524,11 @@ function hydraAttack(hero) {
     G.hydraDestroyedCount++;
     G.hydraMaxHeads--;  // Hydra permanently loses a head slot
     trackHydraHead(head.name, 'destroyed');
+    // Update Copycat win tracking after hydra fight resolves
+    if (hero._lastCopycatEntry) {
+      hero._lastCopycatEntry.won = true;
+      hero._lastCopycatEntry = null;
+    }
     G.tracker.hydraHeadKillOrder.push({ head: head.name, turn: G.turn, killedBy: hero.id });
     initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
     log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max ${G.hydraMaxHeads})`, 'victory');
@@ -3636,7 +3662,7 @@ function hydraAttack(hero) {
         useSkill(hero, 'Copycat');
         trackSkill(hero.id, 'Copycat', 'activated');
         trackSkill(hero.id, 'Copycat', 'savedFromKO');
-        G.tracker.copycatDetails.push({ copiedSkill: 'Shield Wall', won: null, context: 'hydra' });
+        G.tracker.copycatDetails.push({ copiedSkill: 'Shield Wall', won: true, context: 'hydra' });
         log(`    🎭 Copycat: copies Shield Wall! KO prevented!`, 'flame');
         hydraKOPrevented = true;
       }
@@ -3656,6 +3682,10 @@ function hydraAttack(hero) {
   // Battlecry bonus: if Juju won with it, all heroes recharge 2
   if (rallyingBlowActive && heroTotal >= effectiveHeadStr) {
     G.heroes.forEach(h => { rechargeOneSkill(h, 'battlecry'); rechargeOneSkill(h, 'battlecry'); });
+    if (hero._lastBattlecryEntry) {
+      hero._lastBattlecryEntry.won = true;
+      hero._lastBattlecryEntry = null;
+    }
     log(`    ⚔ Battlecry victory! All heroes recharge 2 Skills`, 'wonder');
   }
 
@@ -3854,17 +3884,21 @@ function monsterMovementPhase() {
 
 // ========== TURN MANAGEMENT ==========
 function nextHero() {
+  // Hydra empty check: runs after EVERY hero's turn (not just at round end)
+  if (G.hydraActive && G.exitRevealed) {
+    const anyoneAtHydra = G.heroes.some(h => G.heroesInHydraArea.has(h.id));
+    if (!anyoneAtHydra) {
+      log(`  🐉 Hydra Area empty! Head grows!`, 'misfortune');
+      growHydraHead('hydra_area_empty');
+    }
+  }
+
   G.currentHero = (G.currentHero + 1) % 4;
   if (G.currentHero === 0) {
     G.round++;
     G.crownUsedThisRound = false;
     monsterMovementPhase();
     if (G.hydraActive) {
-      const anyoneAtHydra = G.heroes.some(h => G.heroesInHydraArea.has(h.id));
-      if (!anyoneAtHydra && G.exitRevealed) {
-        log(`  🐉 Hydra Area empty! Head grows!`, 'misfortune');
-        growHydraHead('hydra_area_empty');
-      }
       G.heroes.forEach(h => {
         if (!G.heroesInHydraArea.has(h.id) && !h.runningToHydra) {
           if (G.relicsCollected >= 4) {
