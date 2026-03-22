@@ -263,6 +263,7 @@ function freshTracker() {
     followerTimeline: {},
     emptyTurns: 0,
     hydraArrivals: [],
+    enemySideEffects: {},
   };
 }
 
@@ -346,6 +347,12 @@ function trackStalker(name, field) {
 function trackTalent(heroId, field) {
   if (!G.tracker.talents[heroId]) G.tracker.talents[heroId] = { triggered:0, blocked:0, combatImpact:0, movementImpact:0 };
   G.tracker.talents[heroId][field]++;
+}
+
+function trackEnemySideEffect(name, effect) {
+  if (!G.tracker.enemySideEffects[name]) G.tracker.enemySideEffects[name] = { skillsExhausted:0, equipLost:0, followersLost:0, strDebuff:0, teleported:0, triggers:0 };
+  G.tracker.enemySideEffects[name][effect]++;
+  G.tracker.enemySideEffects[name].triggers++;
 }
 
 function trackHydraHead(name, field) {
@@ -459,6 +466,7 @@ function heroRollDie(hero) {
 function checkAssassin(hero, roll) {
   if (roll.val === 1 && hasStalker(hero, 'roll_1_ko')) {
     log(`    💀 Assassin strikes! Rolled 1 — instant KO!`, 'ko');
+    trackStalker('Assassin', 'causedKO');
     applyKO(hero);
     return true;
   }
@@ -741,6 +749,9 @@ function runTurn() {
       log(`  🎩 Wizard Hat: rolled ${r} — no recharge`, 'system');
     }
   }
+
+  // Track stalker turnsActive for all stalkers on this hero
+  hero.stalkers.forEach(s => trackStalker(s.name, 'turnsActive'));
 
   // Corrupted Squire: exhaust 1 skill per equipment at turn start
   if (hasStalker(hero, 'exhaust_per_equip')) {
@@ -1142,14 +1153,18 @@ function movePhase(hero) {
           log('  ⚠ Dread Dungeon blocks the path! Movement stops.', 'misfortune');
           break;
         }
-        // Drunkard: stop on explored tile if enemies present
+        // Drunkard: stop on explored tile if enemies present or Common Passage
         if (hero.followers.find(f => f.effect === 'stop_on_enemy')) {
           const hasEnemy = G.enemiesOnBoard.some(e => e.pos && e.pos.q === scanQ && e.pos.r === scanR);
-          if (hasEnemy) {
+          if (hasEnemy || existing.type === 'common') {
             currentQ = scanQ;
             currentR = scanR;
             destTileType = existing.type;
-            log(`  Drunkard stops ${hero.name} at a tile with enemies!`, 'mishap');
+            if (hasEnemy) {
+              log(`  Drunkard stops ${hero.name} at a tile with enemies!`, 'mishap');
+            } else {
+              log(`  Drunkard stumbles into a Common Passage! ${hero.name} stops here.`, 'mishap');
+            }
             break;
           }
         }
@@ -1381,7 +1396,7 @@ function drawWonder(hero) {
 function drawMishap(hero) {
   if (G.mishapDeck.length === 0) { G.mishapDeck = shuffle([...Array(MISHAP_CARDS.length).keys()]); }
   const idx = G.mishapDeck.pop();
-  const card = MISHAP_CARDS[idx];
+  const card = {...MISHAP_CARDS[idx]};
   log(`  ⚡ Mishap: ${card.name} (${card.type})`, 'mishap');
   resolveMishapCard(hero, card);
 }
@@ -1389,7 +1404,7 @@ function drawMishap(hero) {
 function drawMisfortune(hero) {
   if (G.misfortuneDeck.length === 0) { G.misfortuneDeck = shuffle([...Array(MISFORTUNE_CARDS.length).keys()]); }
   const idx = G.misfortuneDeck.pop();
-  const card = MISFORTUNE_CARDS[idx];
+  const card = {...MISFORTUNE_CARDS[idx]};
   log(`  ☠ Misfortune: ${card.name} (${card.type})`, 'misfortune');
   resolveMisfortuneCard(hero, card);
 }
@@ -1424,10 +1439,10 @@ function drawDread(hero) {
     // Draw 2 misfortune cards and resolve only the lesser one
     if (G.misfortuneDeck.length === 0) { G.misfortuneDeck = shuffle([...Array(MISFORTUNE_CARDS.length).keys()]); }
     const idx1 = G.misfortuneDeck.pop();
-    const card1 = MISFORTUNE_CARDS[idx1];
+    const card1 = {...MISFORTUNE_CARDS[idx1]};
     if (G.misfortuneDeck.length === 0) { G.misfortuneDeck = shuffle([...Array(MISFORTUNE_CARDS.length).keys()]); }
     const idx2 = G.misfortuneDeck.pop();
-    const card2 = MISFORTUNE_CARDS[idx2];
+    const card2 = {...MISFORTUNE_CARDS[idx2]};
     // Rank danger: enemy > stalker > trap; for enemies, higher STR = more dangerous
     function misfortuneDanger(c) {
       if (c.type === 'enemy') return 100 + (c.str || 0);
@@ -1566,10 +1581,13 @@ function resolveMishapCard(hero, card) {
       break;
     case 'stalker':
       hero.stalkers.push({name: card.name, effect: card.effect});
+      trackStalker(card.name, 'attached');
       log(`    ⚠ ${card.name} latches onto ${hero.name}!`, 'misfortune');
       // Old Hag: discard all other followers
       if (card.effect === 'discard_followers') {
+        const followerCount = hero.followers.length;
         removeFollowers(hero);
+        if (followerCount > 0) trackEnemySideEffect('Old Hag', 'followersLost');
         log(`    Old Hag: all other followers discarded!`, 'misfortune');
       }
       break;
@@ -1586,6 +1604,7 @@ function resolveMisfortuneCard(hero, card) {
   switch(card.type) {
     case 'stalker':
       hero.stalkers.push({name: card.name, effect: card.effect});
+      trackStalker(card.name, 'attached');
       log(`    ⚠ ${card.name} curses ${hero.name}!`, 'misfortune');
       break;
     case 'trap':
@@ -1625,8 +1644,10 @@ function resolveTrap(hero, card) {
         exhaustOneSkill(hero, "Skill Burn (reroll)");
         trackTrapResource('Giant Web', 'skillsExhausted');
         log(`    ${hero.name} escapes the web!`, 'mishap');
+        trackTrap(card.name, 'survived');
       } else {
         log(`    No skills to exhaust — KO!`, 'ko');
+        trackTrap(card.name, 'ko');
         applyKO(hero);
       }
       break;
@@ -1637,9 +1658,11 @@ function resolveTrap(hero, card) {
       log(`    Spike Trap roll: ${r.val}`, 'combat');
       if (r.val <= 3) {
         log(`    Impaled! KO!`, 'ko');
+        trackTrap(card.name, 'ko');
         applyKO(hero);
       } else {
         log(`    ${hero.name} avoids the spikes.`, 'wonder');
+        trackTrap(card.name, 'survived');
       }
       break;
     }
@@ -1650,8 +1673,10 @@ function resolveTrap(hero, card) {
         checkCursedArmour(hero);
         for (let _t = 0; _t < exhaustedByTribute; _t++) trackTrapResource('The Tribute', 'skillsExhausted');
         log(`    ${hero.name} pays The Tribute. All skills exhausted.`, 'misfortune');
+        trackTrap(card.name, 'survived');
       } else {
         log(`    No skills to pay — KO!`, 'ko');
+        trackTrap(card.name, 'ko');
         applyKO(hero);
       }
       break;
@@ -1659,9 +1684,11 @@ function resolveTrap(hero, card) {
     case 'fewer_2_skills_ko': {
       if (readySkillCount(hero) < 2) {
         log(`    Guillotine! Not enough ready skills — KO!`, 'ko');
+        trackTrap(card.name, 'ko');
         applyKO(hero);
       } else {
         log(`    ${hero.name} has enough skills to survive.`, 'wonder');
+        trackTrap(card.name, 'survived');
       }
       break;
     }
@@ -1675,8 +1702,10 @@ function resolveTrap(hero, card) {
       log(`    ${hero.name} rolls ${pRoll.val} + STR ${totalStr(hero)} = ${pTotal}`, 'combat');
       if (pTotal >= enemyTotal) {
         log(`    Defeated your reflection!`, 'wonder');
+        trackTrap(card.name, 'survived');
       } else {
         log(`    Your reflection wins — KO!`, 'ko');
+        trackTrap(card.name, 'ko');
         applyKO(hero);
       }
       break;
@@ -1821,11 +1850,37 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
-  // Mad Berserker: can redirect to another hero or fight yourself (AI: always fight)
+  // Mad Berserker: can redirect to another hero or fight yourself
   if (enemyCard.effect === 'fight_or_redirect') {
     if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
-    G.tracker.decisionEnemies[enemyCard.name].choiceB++; // fought self
-    log(`    Mad Berserker charges! ${hero.name} fights it head-on!`, 'combat');
+
+    // AI decision: redirect if another hero on same/adjacent tile is stronger
+    const otherHeroes = G.heroes.filter(h => h.id !== hero.id && h.pos !== 'hydra' && !h.ko);
+    const heroStr = totalStr(hero);
+
+    // Find a stronger ally nearby (same or adjacent hex)
+    let redirectTarget = null;
+    for (const other of otherHeroes) {
+      if (other.pos.q !== undefined && hero.pos.q !== undefined) {
+        const dist = hexDistance(hero.pos.q, hero.pos.r, other.pos.q, other.pos.r);
+        if (dist <= 1 && totalStr(other) > heroStr + 2) {
+          redirectTarget = other;
+          break;
+        }
+      }
+    }
+
+    if (redirectTarget) {
+      // Step aside and redirect to stronger ally
+      G.tracker.decisionEnemies[enemyCard.name].choiceA++;
+      log(`    Mad Berserker: ${hero.name} steps aside! ${redirectTarget.name} fights instead!`, 'combat');
+      combat(redirectTarget, enemyCard, tier);
+      return; // original hero's combat is done
+    } else {
+      // No better target, fight yourself
+      G.tracker.decisionEnemies[enemyCard.name].choiceB++;
+      log(`    Mad Berserker charges! ${hero.name} fights it head-on!`, 'combat');
+    }
   }
 
   // The Sphinx: guess a number 1-6; if enemy rolls it, auto-win
@@ -1863,6 +1918,7 @@ function combat(hero, enemyCard, tier) {
       removable.sort((a, b) => (a.str || 0) - (b.str || 0));
       const removed = removable[0];
       hero.equipment = hero.equipment.filter(e => e !== removed);
+      trackEnemySideEffect('Bandit', 'equipLost');
       log(`    ${hero.name} pays off the Bandit with ${removed.name}!`, 'mishap');
       trackEncounter(enemyCard.name, 'avoided');
       if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
@@ -1882,13 +1938,14 @@ function combat(hero, enemyCard, tier) {
   // === PRE-COMBAT EFFECTS ===
   if (!spellMirrored && enemyCard.effect === 'exhaust_1_skill') {
     exhaustOneSkill(hero, "Snakerogue pre-combat");
+    trackEnemySideEffect('Snakerogue', 'skillsExhausted');
     log(`    Snakerogue exhausts a skill before combat!`, 'misfortune');
   }
 
   if (!spellMirrored && enemyCard.effect === 'aoe_skill_drain') {
     G.heroes.forEach(h => {
       const r = heroRollDie(h);
-      if (r.val <= 2) { exhaustOneSkill(h, "Stormcaller AoE"); log(`    Stormcaller: ${h.name} loses a skill!`, 'misfortune'); }
+      if (r.val <= 2) { exhaustOneSkill(h, "Stormcaller AoE"); trackEnemySideEffect('Stormcaller', 'skillsExhausted'); log(`    Stormcaller: ${h.name} loses a skill!`, 'misfortune'); }
     });
   }
 
@@ -1898,9 +1955,12 @@ function combat(hero, enemyCard, tier) {
     if (readySkillCount(hero) >= 2) {
       exhaustOneSkill(hero, "Mana Leech drain");
       exhaustOneSkill(hero, "Mana Leech drain");
+      trackEnemySideEffect('Mana Leech', 'skillsExhausted');
+      trackEnemySideEffect('Mana Leech', 'skillsExhausted');
       log(`    Mana Leech: ${hero.name} exhausts 2 skills!`, 'misfortune');
     } else {
       manaLeechPenalty = -2;
+      trackEnemySideEffect('Mana Leech', 'strDebuff');
       log(`    Mana Leech: ${hero.name} fights at -2 STR!`, 'misfortune');
     }
   }
@@ -1912,6 +1972,7 @@ function combat(hero, enemyCard, tier) {
     if (removable.length > 0) {
       frogmanSwallowed = removable[removable.length - 1];
       hero.equipment = hero.equipment.filter(e => e !== frogmanSwallowed);
+      trackEnemySideEffect('FROGman', 'equipLost');
       log(`    FROGman swallows ${frogmanSwallowed.name}!`, 'misfortune');
     }
   }
@@ -2129,6 +2190,7 @@ function combat(hero, enemyCard, tier) {
     });
     if (converted > 0) {
       log(`    Stone Golem's death curse! ${converted} adjacent tile${converted > 1 ? 's become' : ' becomes'} Dread Dungeon${converted > 1 ? 's' : ''}!`, 'misfortune');
+      trackEnemySideEffect('Stone Golem', 'otherEffects');
     }
     if (!G.tracker.enemyEffectImpact[enemyCard.name]) G.tracker.enemyEffectImpact[enemyCard.name] = { triggered:0, impactful:0 };
     G.tracker.enemyEffectImpact[enemyCard.name].triggered++;
@@ -2158,6 +2220,7 @@ function combat(hero, enemyCard, tier) {
       removable.sort((a, b) => (a.str || 0) - (b.str || 0));
       const removed = removable[0];
       hero.equipment = hero.equipment.filter(e => e !== removed);
+      trackEnemySideEffect('Thiefling Rats', 'equipLost');
       log(`    Thiefling Rats stole ${removed.name}!`, 'misfortune');
     }
   }
@@ -2677,12 +2740,14 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
   // Dragon: +1 STR on loss
   if (enemyCard.effect === 'gains_str_on_loss') {
     enemyCard.str = (enemyCard.str || 5) + 1;
+    trackEnemySideEffect('Dragon', 'otherEffects');
     log(`    Dragon grows stronger! Now STR ${enemyCard.str}`, 'misfortune');
   }
 
   // Hound: follows hero on loss
   if (enemyCard.effect === 'follows_on_loss') {
     hero.houndFollowing = {...enemyCard};
+    trackEnemySideEffect('Hound', 'otherEffects');
     log(`    🐕 The Hound will follow ${hero.name} to the next destination!`, 'misfortune');
     return; // Hound doesn't KO, just follows
   }
@@ -2950,6 +3015,7 @@ function applyKO(hero) {
   hero._lastKOEnemy = null;
   const lostFollowerNames = hero.followers.map(f => f.name);
   removeFollowers(hero);
+  hero.stalkers.forEach(s => trackStalker(s.name, 'removed'));
   hero.stalkers = [];
   hero._justRespawned = true;
   hero.pos = {q:0, r:0};

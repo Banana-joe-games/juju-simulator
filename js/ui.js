@@ -684,25 +684,27 @@ function generateReport(results) {
   }); });
 
   mishapEnemies.forEach(e => {
+    const baseStr = e._originalStr || e.str;
     const d = allEncounters[e.name];
     if (d && d.won + d.lost >= 20) {
       const wr = d.won / (d.won + d.lost) * 100;
       const ok = wr >= 75 && wr <= 95;
       if (!ok) {
         const tag = wr < 75 ? 'TOO HARD' : 'TOO EASY';
-        html += `<div style="font-size:10px;color:${wr<75?'var(--ko)':'var(--heal)'}">${e.name} (Mishap STR ${e.str}): ${wr.toFixed(0)}% — ${tag}</div>`;
+        html += `<div style="font-size:10px;color:${wr<75?'var(--ko)':'var(--heal)'}">${e.name} (Mishap STR ${baseStr}): ${wr.toFixed(0)}% — ${tag}</div>`;
         flag('enemy', 'medium', `${e.name} (Mishap): ${wr.toFixed(0)}% hero win rate — ${tag}`);
       }
     }
   });
   misfortuneEnemies.forEach(e => {
+    const baseStr = e._originalStr || e.str;
     const d = allEncounters[e.name];
     if (d && d.won + d.lost >= 20) {
       const wr = d.won / (d.won + d.lost) * 100;
       const ok = wr >= 35 && wr <= 70;
       if (!ok) {
         const tag = wr < 35 ? 'TOO HARD' : 'TOO EASY';
-        html += `<div style="font-size:10px;color:${wr<35?'var(--ko)':'var(--heal)'}">${e.name} (Misfortune STR ${e.str}): ${wr.toFixed(0)}% — ${tag}</div>`;
+        html += `<div style="font-size:10px;color:${wr<35?'var(--ko)':'var(--heal)'}">${e.name} (Misfortune STR ${baseStr}): ${wr.toFixed(0)}% — ${tag}</div>`;
         flag('enemy', 'medium', `${e.name} (Misfortune): ${wr.toFixed(0)}% hero win rate — ${tag}`);
       }
     }
@@ -718,6 +720,32 @@ function generateReport(results) {
       html += statRow(name, `${count} games`);
     });
     html += `</div>`;
+  }
+  html += `</div>`;
+
+  // ===================== ENEMY SIDE EFFECTS =====================
+  html += `<div class="report-section"><h3>Enemy Side Effects</h3>`;
+  const allSideEffects = {};
+  results.forEach(r => {
+    Object.entries(r.tracker.enemySideEffects || {}).forEach(([name, data]) => {
+      if (!allSideEffects[name]) allSideEffects[name] = { skillsExhausted:0, equipLost:0, followersLost:0, strDebuff:0, teleported:0, triggers:0 };
+      Object.entries(data).forEach(([k, v]) => { allSideEffects[name][k] = (allSideEffects[name][k]||0) + v; });
+    });
+  });
+  if (Object.keys(allSideEffects).length > 0) {
+    html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+    html += `<tr style="border-bottom:1px solid var(--border)"><th>Enemy</th><th>Triggers</th><th>Skills Exhausted</th><th>Equip Lost</th><th>Followers Lost</th><th>STR Debuff</th><th>Other</th></tr>`;
+    Object.entries(allSideEffects).sort((a,b) => b[1].triggers - a[1].triggers).forEach(([name, data]) => {
+      html += `<tr><td>${name}</td><td style="text-align:center">${data.triggers}</td>`;
+      html += `<td style="text-align:center">${data.skillsExhausted}</td>`;
+      html += `<td style="text-align:center">${data.equipLost}</td>`;
+      html += `<td style="text-align:center">${data.followersLost}</td>`;
+      html += `<td style="text-align:center">${data.strDebuff}</td>`;
+      html += `<td style="text-align:center">${data.teleported + (data.otherEffects||0)}</td></tr>`;
+    });
+    html += `</table>`;
+  } else {
+    html += `<div class="report-card"><span style="color:var(--dim)">No enemy side effects recorded</span></div>`;
   }
   html += `</div>`;
 
@@ -1356,6 +1384,9 @@ function runSilentGame() {
     gilSpendAtEntrance(hero);
     hero._justRespawned = false;
 
+    // Track stalker turnsActive for all stalkers on this hero
+    hero.stalkers.forEach(s => trackStalker(s.name, 'turnsActive'));
+
     // Turn-start effects
     if (hero.equipment.find(e => e.effect === 'turn_start_recharge')) {
       if (Math.floor(Math.random() * 6) + 1 >= 4) rechargeOneSkill(hero, 'wizard_hat');
@@ -1723,7 +1754,7 @@ function organizeReportTabs() {
     'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
     'tab-heroes': ['Hero Performance','Hero × Enemy','Hero × Hydra'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis'],
-    'tab-enemies': ['Enemy Design','Trap Analysis','Follower'],
+    'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower'],
     'tab-hydra-econ': ['Gil Economy','Hydra Fight'],
     'tab-analysis': ['Textual Analysis']
   };
