@@ -1828,6 +1828,32 @@ function combat(hero, enemyCard, tier) {
     log(`    Fishguard STR: ${enemyStr} (+2 per relic, party has ${totalRelics})`, 'combat');
   }
 
+  // === TAUNT INTERCEPT: Juju protects weaker allies ===
+  if (hero.id !== 'juju') {
+    const juju = G.heroes.find(h => h.id === 'juju');
+    if (juju && isSkillReady(juju, 'Taunt') && !juju.ko) {
+      const atHydra = G.heroesInHydraArea && G.heroesInHydraArea.has(hero.id);
+      let canIntervene = false;
+      if (atHydra && G.heroesInHydraArea.has('juju')) {
+        canIntervene = true;
+      } else if (hero.pos && hero.pos.q !== undefined && juju.pos && juju.pos.q !== undefined && juju.pos !== 'hydra') {
+        canIntervene = hexDistance(hero.pos.q, hero.pos.r, juju.pos.q, juju.pos.r) <= 1;
+      }
+      if (canIntervene) {
+        const heroStr = totalStr(hero);
+        const jujuStr = totalStr(juju);
+        // Juju intervenes if hero is significantly weaker
+        if (jujuStr > heroStr + 2 && heroStr < enemyStr + 2) {
+          useSkill(juju, 'Taunt');
+          trackSkill('juju', 'Taunt', 'activated');
+          log(`  ⚔ Juju uses Taunt to protect ${hero.name}! Taking over the fight.`, 'flame');
+          combat(juju, enemyCard, tier);
+          return;
+        }
+      }
+    }
+  }
+
   // === PRE-COMBAT AVOIDANCE ===
   // Bully: flee if hero total STR > Bully base
   if (enemyCard.effect === 'flee_or_str6') {
@@ -2579,6 +2605,65 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
       }
       trace('skill', 'burn', {hero: hero.id, skill: 'Skill Burn', rerollType: 'enemy', oldRoll: oldEnemyTotal, newRoll: enemyTotal, outcomeChanged: heroTotal >= enemyTotal + beatMargin});
       log(`    ⟲ Skill Burn! Rerolled ENEMY die: ${enemyCard.name} ${oldEnemyTotal} → ${enemyTotal}`, 'flame');
+    }
+  }
+
+  // === CROSS-HERO SKILL BURN: allies can burn a skill to reroll the losing hero's die ===
+  // One reroll per die total (from any source: Dog, own Skill Burn, or ally burn).
+  const heroBurnedOwn = (heroTotal < enemyTotal + beatMargin) ? false : true; // if hero won after own burn, skip
+  if (heroTotal < enemyTotal + beatMargin && !dogUsed) {
+    const atHydra = G.heroesInHydraArea && G.heroesInHydraArea.has(hero.id);
+    const allies = G.heroes.filter(a => {
+      if (a.id === hero.id) return false;
+      if (readySkillCount(a) === 0) return false;
+      if (a.ko) return false;
+      if (atHydra) {
+        return G.heroesInHydraArea.has(a.id);
+      } else {
+        if (!a.pos || a.pos === 'hydra') return false;
+        if (!hero.pos || hero.pos.q === undefined || a.pos.q === undefined) return false;
+        return hexDistance(hero.pos.q, hero.pos.r, a.pos.q, a.pos.r) <= 1;
+      }
+    });
+
+    if (allies.length > 0) {
+      allies.sort((a, b) => readySkillCount(b) - readySkillCount(a));
+      const helper = allies[0];
+      const margin = (enemyTotal + beatMargin) - heroTotal;
+      const fightImportant = atHydra || (enemyCard.str || 0) >= 3 || hero.equipment.length >= 2;
+      const helperCanAfford = readySkillCount(helper) >= 2;
+
+      if (fightImportant && (helperCanAfford || atHydra)) {
+        const allyReroll = heroRollDie(hero);
+        let allyRerollVal = allyReroll.val;
+        let allyRerollFlame = allyReroll.isFlame;
+        if (enemyCard.effect === 'flame_counts_0' && allyRerollFlame) { allyRerollVal = 0; allyRerollFlame = false; }
+        if (enemyCard.effect === 'only_flame_hits' && !allyRerollFlame) { allyRerollVal = 0; }
+        if (enemyCard.effect === 'only_even_hits' && allyRerollVal % 2 !== 0) { allyRerollVal = 0; }
+        if (enemyCard.effect === 'only_3plus_hits' && allyRerollVal > 0 && allyRerollVal < 3) { allyRerollVal = 0; }
+        const allyNewBonus = (hero.id === 'juju' && allyRerollFlame && !hero.talentUsedThisTurn) ? 2 : (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0);
+        const allyTotal = allyRerollVal + heroStrValue + (combatBonus - (hero.id === 'juju' && isFlame && hero.talentUsedThisTurn ? 2 : 0)) + allyNewBonus
+          + doomhammerBonus + firebaneBonus + demonSwordBonus + warlordBonus + mummyPenalty + manaLeechPenalty + parrotBonus + blobPenalty
+          + (packLeaderBonus || 0) + (fireballBonus || 0);
+
+        if (allyTotal > heroTotal) {
+          exhaustOneSkill(helper, `Skill Burn for ${hero.name}`);
+          G.stats.skillBurns++;
+          initHeroTracker(G.tracker, helper.id).skillsBurned++;
+          const oldHeroTotal = heroTotal;
+          heroRoll = { val: allyRerollVal, isFlame: allyRerollFlame };
+          G._lastHeroRollVal = allyRerollVal;
+          isFlame = allyRerollFlame;
+          heroTotal = allyTotal;
+          if (hero.id === 'eggo' && allyRerollFlame && !hasStalker(hero, 'no_flame_effect')) hero.dodgeActive = true;
+          if (hero.id === 'eggo' && !allyRerollFlame) hero.dodgeActive = false;
+          if (oldHeroTotal < enemyTotal + beatMargin && heroTotal >= enemyTotal + beatMargin) {
+            trackSkill(helper.id, 'Skill Burn (ally)', 'turnedFight');
+          }
+          trace('skill', 'burn', {hero: helper.id, skill: 'Skill Burn (ally)', rerollType: 'hero', target: hero.id, oldRoll: heroRoll.val, newRoll: allyRerollVal, outcomeChanged: heroTotal >= enemyTotal + beatMargin});
+          log(`    ⟲ ${helper.name} burns a skill to reroll ${hero.name}'s die: ${allyRerollVal}${allyRerollFlame ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
+        }
+      }
     }
   }
 
@@ -3614,6 +3699,44 @@ function hydraAttack(hero) {
       if (hero.id === 'eggo' && newFlameA) hero.dodgeActive = true;
       if (hero.id === 'eggo' && !newFlameA) hero.dodgeActive = false;
       log(`    ⟲ Skill Burn! Rerolled: ${rerollH.val}${newFlameA ? ' 🔥' : ''} = ${heroTotal} vs ${effectiveHeadStr}`, 'flame');
+    }
+  }
+
+  // === CROSS-HERO SKILL BURN AT HYDRA: allies in Hydra Area can burn for each other ===
+  if (heroTotal < effectiveHeadStr) {
+    const hydraAllies = G.heroes.filter(a => {
+      if (a.id === hero.id) return false;
+      if (readySkillCount(a) === 0) return false;
+      if (a.ko) return false;
+      return G.heroesInHydraArea.has(a.id);
+    });
+
+    if (hydraAllies.length > 0) {
+      hydraAllies.sort((a, b) => readySkillCount(b) - readySkillCount(a));
+      const helper = hydraAllies[0];
+      const helperCanAfford = readySkillCount(helper) >= 2;
+
+      if (helperCanAfford || (effectiveHeadStr - heroTotal) >= 2) {
+        const allyRerollH = heroRollDie(hero);
+        const allyNewFlame = (allyRerollH.isFlame) && !broodAlive;
+        const allyNewBonus = (hero.id === 'juju' && allyNewFlame && !hero.talentUsedThisTurn) ? 2 : combatBonus;
+        const allyTotalH = allyRerollH.val + totalStr(hero) + allyNewBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty;
+
+        if (allyTotalH > heroTotal) {
+          exhaustOneSkill(helper, `Skill Burn for ${hero.name}`);
+          G.stats.skillBurns++;
+          initHeroTracker(G.tracker, helper.id).skillsBurned++;
+          heroTotal = allyTotalH;
+          isFlame = allyNewFlame;
+          if (hero.id === 'eggo' && allyNewFlame) hero.dodgeActive = true;
+          if (hero.id === 'eggo' && !allyNewFlame) hero.dodgeActive = false;
+          if (heroTotal >= effectiveHeadStr) {
+            trackSkill(helper.id, 'Skill Burn (ally)', 'turnedFight');
+          }
+          trace('skill', 'burn', {hero: helper.id, skill: 'Skill Burn (ally)', rerollType: 'hero', target: hero.id, oldTotal: heroTotal, newRoll: allyRerollH.val});
+          log(`    ⟲ ${helper.name} burns a skill to reroll ${hero.name}'s die: ${allyRerollH.val}${allyNewFlame ? ' 🔥' : ''} = ${heroTotal} vs ${effectiveHeadStr}`, 'flame');
+        }
+      }
     }
   }
 
