@@ -876,27 +876,14 @@ function runTurn() {
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
 
-  // Ogre stuck check: hero skips turn if pinned (but in solo, hero refights each turn)
+  // Ogre stuck: hero must refight the Ogre every turn until they win
   if (hero.stuckAtOgre) {
-    const activeHeroCount = G.heroes.length;
-    if (activeHeroCount <= 1) {
-      // Solo mode: hero must fight the Ogre again each turn
-      log(`  ${hero.name} is pinned by the Ogre — must fight again!`, 'ko');
-      const ogre = hero.stuckAtOgre;
-      hero.stuckAtOgre = null;
-      combat(hero, ogre, 'misfortune');
-      if (G.gameOver) return;
-      if (!hero.stuckAtOgre) {
-        // Won the fight or got KO'd (applyKO resets position)
-        nextHero();
-        return;
-      }
-      // Still stuck (lost again, stuckAtOgre was re-set by handleCombatLoss)
-      nextHero();
-      return;
-    }
-    log(`  ${hero.name} is pinned by the Ogre — skips turn!`, 'ko');
-    trace('turn_skip', 'ogre_stuck', {hero: hero.id, stuckSince: hero.stuckAtOgreTurn});
+    log(`  ${hero.name} is pinned by the Ogre — must fight again!`, 'ko');
+    const ogre = hero.stuckAtOgre;
+    hero.stuckAtOgre = null;  // clear before combat; handleCombatLoss will re-set if hero loses again
+    combat(hero, ogre, 'misfortune');
+    if (G.gameOver) return;
+    // Whether won (stuckAtOgre stays null) or lost (re-set by handleCombatLoss), turn ends
     nextHero();
     return;
   }
@@ -3343,32 +3330,25 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     return; // Hound doesn't KO, just follows
   }
 
-  // Ogre: no respawn in multiplayer (stuck until rescued), normal KO in solo
+  // Ogre: KO but respawn on same tile, must refight next turn
   if (enemyCard.effect === 'no_respawn_on_loss') {
-    if (G.heroes.length > 1) {
-      // Multiplayer: pin hero on tile, skip turns until rescued
-      G.stats.ko++;
-      if (!heroHasRelicFromOwner(hero, 'eggo')) {
-        hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
-      } else {
-        log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
-        G.tracker.relicEffects.cloak.safekeepCount++;
-      }
-      removeFollowers(hero);
-      hero.stuckAtOgre = {...enemyCard};
-      hero.stuckAtOgreTurn = G.turn;
-      trackEnemySideEffect('Ogre', 'otherEffects');
-      log(`    Ogre pins ${hero.name}! Stuck on tile — cannot act until another hero defeats the Ogre.`, 'ko');
-      return;
-    }
-    // Solo: Ogre causes normal KO (respawn at Shelter). Ogre stays on tile as board enemy.
+    G.stats.ko++;
     trackEnemySideEffect('Ogre', 'otherEffects');
-    log(`    Ogre defeats ${hero.name}! (Solo: normal KO, Ogre stays on tile)`, 'ko');
-    // Place Ogre on board so hero must fight it later if passing through
-    if (hero.pos && hero.pos.q !== undefined) {
-      G.enemiesOnBoard.push({ card: {...enemyCard}, pos: {q: hero.pos.q, r: hero.pos.r}, tier: 'misfortune' });
+    // Drop equipment (unless Shadow Cloak)
+    if (!heroHasRelicFromOwner(hero, 'eggo')) {
+      hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
+    } else {
+      log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+      G.tracker.relicEffects.cloak.safekeepCount++;
     }
-    // Fall through to normal KO below
+    removeFollowers(hero);
+    // Hero stays on this tile with the Ogre — must refight next turn
+    hero.stuckAtOgre = {...enemyCard};
+    hero.stuckAtOgreTurn = G.turn;
+    initHeroTracker(G.tracker, hero.id).ko++;
+    if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
+    log(`    Ogre pins ${hero.name}! KO'd but stays on tile — must fight again next turn.`, 'ko');
+    return;
   }
 
   // Post-Awakening: enemy persists on the board after defeating a hero
