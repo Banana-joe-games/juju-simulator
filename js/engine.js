@@ -3202,6 +3202,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     const echoEnemyTotal = echoEnemyRoll.val + (enemyCard.str || 0);
     if (echoTotal >= echoEnemyTotal) {
       log(`    Astral Echo hits! (${echoTotal} vs ${echoEnemyTotal}) — enemy defeated even as ${hero.name} falls!`, 'wonder');
+      trackSkill(hero.id, 'Astral Echo', 'turnedFight');
       trackEncounter(enemyCard.name, 'won');
       initHeroTracker(G.tracker, hero.id).enemiesKilled++;
       bpReward(hero, enemyCard.str || 0);
@@ -4391,6 +4392,7 @@ function hydraAttack(hero) {
       const echoTotal = echoRoll.val + totalStr(hero);
       if (echoTotal >= effectiveHeadStr) {
         log(`    Astral Echo hits! (${echoTotal} vs ${effectiveHeadStr}) — ${head.name} is silenced as ${hero.name} falls!`, 'wonder');
+        trackSkill(hero.id, 'Astral Echo', 'turnedFight');
         head.destroyed = true;
         recalcHydraStr();
         const recycling = G._tweaks && G._tweaks.hydraRecycling;
