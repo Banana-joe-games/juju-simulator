@@ -580,6 +580,100 @@ function generateReport(results) {
   });
   html += `</div>`;
 
+  // ===================== TALENT ACTIVATIONS =====================
+  html += `<div class="report-section"><h3>Talent Activations</h3>`;
+  // Juju
+  {
+    const jt = { triggered:0, combatsWithFlame:0, winsWithFlame:0, combatsWithoutFlame:0, winsWithoutFlame:0 };
+    results.forEach(r => { const d = r.tracker.talentDetails && r.tracker.talentDetails.juju; if (d) { Object.keys(jt).forEach(k => jt[k] += (d[k]||0)); }});
+    const wrFlame = jt.combatsWithFlame ? pct(jt.winsWithFlame, jt.combatsWithFlame) : '-';
+    const wrNoFlame = jt.combatsWithoutFlame ? pct(jt.winsWithoutFlame, jt.combatsWithoutFlame) : '-';
+    html += `<div class="report-card" style="border-left:3px solid var(--juju)"><b style="color:var(--juju)">Juju — Unwavering Power (+2 STR)</b>`;
+    html += statRow('Triggered', `${jt.triggered} (${fix1(jt.triggered/n)}/game)`);
+    html += statRow('Combats with Flame +2', jt.combatsWithFlame);
+    html += statRow('Win Rate with Flame', `${wrFlame}%`);
+    html += statRow('Combats without Flame', jt.combatsWithoutFlame);
+    html += statRow('Win Rate without Flame', `${wrNoFlame}%`);
+    html += `</div>`;
+  }
+  // Gigi
+  {
+    const gt = { triggered:0, giftTargets:{}, giftUsedFor:{combat:0,movement:0,awakening:0} };
+    results.forEach(r => { const d = r.tracker.talentDetails && r.tracker.talentDetails.gigi; if (d) { gt.triggered += (d.triggered||0); Object.entries(d.giftTargets||{}).forEach(([k,v]) => { gt.giftTargets[k] = (gt.giftTargets[k]||0) + v; }); Object.keys(gt.giftUsedFor).forEach(k => gt.giftUsedFor[k] += (d.giftUsedFor && d.giftUsedFor[k])||0); }});
+    html += `<div class="report-card" style="border-left:3px solid var(--gigi)"><b style="color:var(--gigi)">Gigi — Nature's Gift</b>`;
+    html += statRow('Triggered', `${gt.triggered} (${fix1(gt.triggered/n)}/game)`);
+    const targetEntries = Object.entries(gt.giftTargets).sort((a,b) => b[1]-a[1]);
+    targetEntries.forEach(([id, count]) => html += statRow(`Gifted to ${heroNames[id]||id}`, `${count} (${pct(count, gt.triggered)}%)`));
+    html += statRow('Context: Combat', gt.giftUsedFor.combat);
+    html += statRow('Context: Movement', gt.giftUsedFor.movement);
+    html += statRow('Context: Awakening', gt.giftUsedFor.awakening);
+    html += `</div>`;
+  }
+  // Lulu
+  {
+    const lt = { triggered:0 };
+    results.forEach(r => { const d = r.tracker.talentDetails && r.tracker.talentDetails.lulu; if (d) lt.triggered += (d.triggered||0); });
+    const luluRecharges = results.reduce((s,r) => s + ((r.tracker.skillRechargeSources && r.tracker.skillRechargeSources['talent_lulu'])||0), 0);
+    html += `<div class="report-card" style="border-left:3px solid var(--lulu)"><b style="color:var(--lulu)">Lulu — Arcane Recharge</b>`;
+    html += statRow('Triggered', `${lt.triggered} (${fix1(lt.triggered/n)}/game)`);
+    html += statRow('Total Skill Recharges', luluRecharges);
+    html += `</div>`;
+  }
+  // Eggo
+  {
+    const et = { triggered:0, koPrevented:0 };
+    results.forEach(r => { const d = r.tracker.talentDetails && r.tracker.talentDetails.eggo; if (d) { et.triggered += (d.triggered||0); et.koPrevented += (d.koPrevented||0); }});
+    html += `<div class="report-card" style="border-left:3px solid var(--eggo)"><b style="color:var(--eggo)">Eggo — Dodge</b>`;
+    html += statRow('Triggered', `${et.triggered} (${fix1(et.triggered/n)}/game)`);
+    html += statRow('KOs Prevented', `${et.koPrevented} (${fix1(et.koPrevented/n)}/game)`);
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  // ===================== RELIC EFFECTS =====================
+  html += `<div class="report-section"><h3>Relic Effects</h3>`;
+  {
+    const cr = { bodyguardCount:0, protected:{}, outcomes:{won:0,lost:0} };
+    const am = { pactPrevented:0, bonusDraws:0 };
+    const gr = { failsafeCount:0, doubleRechargeCount:0 };
+    const cl = { safekeepCount:0, thirdSlotUsed:0 };
+    results.forEach(r => {
+      const re = r.tracker.relicEffects;
+      if (!re) return;
+      cr.bodyguardCount += (re.crown && re.crown.bodyguardCount)||0;
+      if (re.crown && re.crown.protected) Object.entries(re.crown.protected).forEach(([k,v]) => cr.protected[k] = (cr.protected[k]||0)+v);
+      if (re.crown && re.crown.outcomes) { cr.outcomes.won += re.crown.outcomes.won||0; cr.outcomes.lost += re.crown.outcomes.lost||0; }
+      am.pactPrevented += (re.amulet && re.amulet.pactPrevented)||0;
+      am.bonusDraws += (re.amulet && re.amulet.bonusDraws)||0;
+      gr.failsafeCount += (re.grimoire && re.grimoire.failsafeCount)||0;
+      gr.doubleRechargeCount += (re.grimoire && re.grimoire.doubleRechargeCount)||0;
+      cl.safekeepCount += (re.cloak && re.cloak.safekeepCount)||0;
+      cl.thirdSlotUsed += (re.cloak && re.cloak.thirdSlotUsed)||0;
+    });
+    html += `<div class="report-card"><b>Crown of Courage (Bodyguard)</b>`;
+    html += statRow('Activations', `${cr.bodyguardCount} (${fix1(cr.bodyguardCount/n)}/game)`);
+    const protEntries = Object.entries(cr.protected).sort((a,b) => b[1]-a[1]);
+    protEntries.forEach(([id, count]) => html += statRow(`Protected ${heroNames[id]||id}`, count));
+    html += statRow('Outcomes', `Won ${cr.outcomes.won} / Lost ${cr.outcomes.lost}`);
+    html += `</div>`;
+
+    html += `<div class="report-card"><b>Forest Amulet (Pact)</b>`;
+    html += statRow('Follower Loss Prevented', `${am.pactPrevented} (${fix1(am.pactPrevented/n)}/game)`);
+    html += statRow('Bonus Draws', `${am.bonusDraws} (${fix1(am.bonusDraws/n)}/game)`);
+    html += `</div>`;
+
+    html += `<div class="report-card"><b>Ancestral Grimoire</b>`;
+    html += statRow('Failsafe Recharges (0 skills)', `${gr.failsafeCount} (${fix1(gr.failsafeCount/n)}/game)`);
+    html += statRow('Double Recharges (Lulu talent)', `${gr.doubleRechargeCount} (${fix1(gr.doubleRechargeCount/n)}/game)`);
+    html += `</div>`;
+
+    html += `<div class="report-card"><b>Shadow Cloak</b>`;
+    html += statRow('Safekeep (kept equip on KO)', `${cl.safekeepCount} (${fix1(cl.safekeepCount/n)}/game)`);
+    html += statRow('3rd Slot Used', `${cl.thirdSlotUsed} (${fix1(cl.thirdSlotUsed/n)}/game)`);
+    html += `</div>`;
+  }
+  html += `</div>`;
+
   // ===================== SECTION 5: SKILL ANALYSIS =====================
   html += `<div class="report-section"><h3>Skill Analysis</h3>`;
 
@@ -1826,7 +1920,7 @@ function organizeReportTabs() {
   // Map section titles to tabs
   const tabMap = {
     'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
-    'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra'],
+    'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower'],
     'tab-hydra-econ': ['Gil Economy','Hydra Fight'],

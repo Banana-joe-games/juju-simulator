@@ -91,6 +91,8 @@ function resetTweaks() {
   document.getElementById('tw_hydraRecycling').checked = false;
   document.getElementById('tw_hydraStartingHeads').value = 2; document.getElementById('tw_hydraStartingHeads_v').textContent = '2';
 
+  if (document.getElementById('tw_battlecryRecharge')) document.getElementById('tw_battlecryRecharge').value = 2;
+  if (document.getElementById('tw_battlecryRecharge_v')) document.getElementById('tw_battlecryRecharge_v').textContent = '2';
   document.getElementById('tw_gilEnabled').checked = false;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
   document.getElementById('tw_gilRechargeSkill').value = 2; document.getElementById('tw_gilRechargeSkill_v').textContent = '2';
@@ -163,7 +165,8 @@ function readTweaks() {
     debugMode: document.getElementById('tw_debugMode').checked,
     hydraKOGrowth: document.getElementById('tw_hydraKOGrowth') ? document.getElementById('tw_hydraKOGrowth').checked : true,
     hydraStartingHeads: parseInt(document.getElementById('tw_hydraStartingHeads').value) || 2,
-    hydraRecycling: document.getElementById('tw_hydraRecycling') ? document.getElementById('tw_hydraRecycling').checked : false
+    hydraRecycling: document.getElementById('tw_hydraRecycling') ? document.getElementById('tw_hydraRecycling').checked : false,
+    battlecryRecharge: parseInt(document.getElementById('tw_battlecryRecharge') ? document.getElementById('tw_battlecryRecharge').value : 2)
   };
 }
 
@@ -197,6 +200,7 @@ function getTweaksDiff(tweaks) {
 
   if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||2) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||4) + ' Gil)');
   if (tweaks.hydraKOGrowth === false) diffs.push('Hydra KO Growth: OFF (KO at Hydra does not grow heads)');
+  if (tweaks.battlecryRecharge !== 2) diffs.push('Battlecry recharges: ' + tweaks.battlecryRecharge + ' (default 2)');
   if (tweaks.hydraRecycling) diffs.push('Hydra Recycling: ON (heads return to pool, victory = all 6 down)');
   if (tweaks.hydraStartingHeads && tweaks.hydraStartingHeads !== 2) diffs.push('Hydra Starting Heads: ' + tweaks.hydraStartingHeads);
   return diffs;
@@ -274,6 +278,19 @@ function freshTracker() {
     emptyTurns: 0,
     hydraArrivals: [],
     enemySideEffects: {},
+    crownBodyguard: [],  // {turn, protector, protected, enemy, won}
+    talentDetails: {
+      juju: { triggered: 0, combatsWithFlame: 0, winsWithFlame: 0, combatsWithoutFlame: 0, winsWithoutFlame: 0 },
+      gigi: { triggered: 0, giftTargets: {}, giftUsedFor: { combat: 0, movement: 0, awakening: 0 } },
+      lulu: { triggered: 0 },
+      eggo: { triggered: 0, koPrevented: 0, dodgeActive: 0, dodgeNotActive: 0, koWithDodge: 0, koWithoutDodge: 0, flameSkilledBurnedAway: 0 }
+    },
+    relicEffects: {
+      crown: { bodyguardCount: 0, protected: {}, outcomes: { won: 0, lost: 0 } },
+      amulet: { pactPrevented: 0, bonusDraws: 0 },
+      grimoire: { failsafeCount: 0, doubleRechargeCount: 0 },
+      cloak: { safekeepCount: 0, thirdSlotUsed: 0 }
+    },
   };
 }
 
@@ -577,6 +594,10 @@ function equipItem(hero, item) {
   hero.equipment.push(item);
   trackEquip(item.name, 'equipped');
   if (G.tracker.pacing.firstEquip === 0) G.tracker.pacing.firstEquip = G.turn;
+  // Track Shadow Cloak 3rd slot usage
+  if (hero.id === 'eggo' && hero.equipment.length >= 3 && heroHasRelicFromOwner(hero, 'eggo')) {
+    G.tracker.relicEffects.cloak.thirdSlotUsed++;
+  }
   log(`    ${hero.name} equips ${item.name} (${item.type}, STR ${item.str >= 0 ? '+' : ''}${item.str})`, 'legendary');
 }
 
@@ -670,6 +691,7 @@ function removeFollowers(hero) {
   // Forest Amulet base passive: followers cannot be discarded by any effect
   if (heroHasRelicFromOwner(hero, 'gigi')) {
     log(`    🌿 Forest Amulet: ${hero.name}'s followers are protected!`, 'legendary');
+    G.tracker.relicEffects.amulet.pactPrevented++;
     return;
   }
   // Track lost followers
@@ -687,6 +709,7 @@ function forestAmuletBonusDraw(hero) {
   if (G.wonderDeck.length === 0) return;
   const idx = G.wonderDeck.pop();
   const card = WONDER_CARDS[idx];
+  G.tracker.relicEffects.amulet.bonusDraws++;
   if (card && card.type === 'follower') {
     hero.followers.push({name: card.name, str: card.str || 0, effect: card.effect});
     trackFollower(card.name, 'drawn');
@@ -740,6 +763,7 @@ function runTurn() {
   if (heroHasRelicFromOwner(hero, 'lulu') && readySkillCount(hero) === 0 && hero.skillStates.length > 0) {
     rechargeOneSkill(hero, 'grimoire_failsafe');
     trace('turn_start', 'grimoire_failsafe', {hero: hero.id, recharged: 'skill'});
+    G.tracker.relicEffects.grimoire.failsafeCount++;
     log(`  📖 Ancestral Grimoire: ${hero.name} starts with 0 ready skills — recharges 1!`, 'legendary');
   }
 
@@ -2250,17 +2274,15 @@ function combat(hero, enemyCard, tier) {
 
   // Daredevil has no on-win draw effect (auto-win is handled in singleFight)
 
-  // Battlecry (Juju): all heroes recharge 2 skills on win
+  // Battlecry (Juju): all heroes recharge skills on win
   if (rallyingBlowActive) {
-    G.heroes.forEach(h => {
-      rechargeOneSkill(h, 'battlecry');
-      rechargeOneSkill(h, 'battlecry');
-    });
+    const bcRecharge = (G._tweaks && G._tweaks.battlecryRecharge) || 2;
+    G.heroes.forEach(h => { for (let i = 0; i < bcRecharge; i++) rechargeOneSkill(h, 'battlecry'); });
     if (hero._lastBattlecryEntry) {
       hero._lastBattlecryEntry.won = true;
       hero._lastBattlecryEntry = null;
     }
-    log(`    ⚔ Battlecry victory! All heroes recharge 2 skills!`, 'flame');
+    log(`    ⚔ Battlecry victory! All heroes recharge ${bcRecharge} skills!`, 'flame');
   }
 
   // Thiefling Rats: discard 1 equipment on defeat
@@ -2701,6 +2723,11 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   }
 
   // === RESOLUTION ===
+  // Track Juju flame combat stats
+  if (hero.id === 'juju') {
+    if (isFlame && hero.talentUsedThisTurn) G.tracker.talentDetails.juju.combatsWithFlame++;
+    else G.tracker.talentDetails.juju.combatsWithoutFlame++;
+  }
   trace('combat', 'rolls', {
     heroRoll: heroRoll.val, heroIsFlame: isFlame,
     enemyRoll: enemyRollResult ? enemyRollResult.val : 0, enemyIsFlame: enemyRollResult ? enemyRollResult.isFlame : false,
@@ -2709,6 +2736,10 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   if (heroTotal >= enemyTotal + beatMargin) {
     const margin = heroTotal - (enemyTotal + beatMargin);
     initHeroTracker(G.tracker, hero.id).damageDealt += margin;
+    if (hero.id === 'juju') {
+      if (isFlame && hero.talentUsedThisTurn) G.tracker.talentDetails.juju.winsWithFlame++;
+      else G.tracker.talentDetails.juju.winsWithoutFlame++;
+    }
     if (margin <= 1) G.tracker.closeCalls.push({ hero: hero.name, enemy: enemyCard.name, margin, heroTotal, enemyTotal: enemyTotal + beatMargin });
     if (margin >= 5) G.tracker.overkills.push({ hero: hero.name, enemy: enemyCard.name, margin });
     // Track equipment that helped win
@@ -2795,7 +2826,14 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
         const savedPos = crownHolder.pos;
         crownHolder.pos = {...hero.pos};
         combat(crownHolder, {...enemyCard}, tier);
-        if (!crownHolder.ko) crownHolder.pos = savedPos;
+        const crownWon = !crownHolder.ko;
+        if (crownWon) crownHolder.pos = savedPos;
+        G.tracker.crownBodyguard.push({ turn: G.turn, protector: crownHolder.id, protected: hero.id, enemy: enemyCard.name, won: crownWon });
+        G.tracker.relicEffects.crown.bodyguardCount++;
+        if (!G.tracker.relicEffects.crown.protected[hero.id]) G.tracker.relicEffects.crown.protected[hero.id] = 0;
+        G.tracker.relicEffects.crown.protected[hero.id]++;
+        if (crownWon) G.tracker.relicEffects.crown.outcomes.won++;
+        else G.tracker.relicEffects.crown.outcomes.lost++;
         return;
       }
     }
@@ -2849,6 +2887,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     log(`    🔥 DODGE! ${hero.name} avoids KO!`, 'flame');
     trackSkill(hero.id, 'Dodge (Talent)', 'activated');
     trackSkill(hero.id, 'Dodge (Talent)', 'savedFromKO');
+    G.tracker.talentDetails.eggo.koPrevented++;
     return;
   }
 
@@ -2898,6 +2937,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
       hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
     } else {
       log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+      G.tracker.relicEffects.cloak.safekeepCount++;
     }
     removeFollowers(hero);
     log(`    Ogre pins ${hero.name}! No respawn — stuck until rescued.`, 'ko');
@@ -3098,6 +3138,7 @@ function applyKO(hero) {
     const hasShadowCloak = heroHasRelicFromOwner(hero, 'eggo');
     if (hasShadowCloak) {
       log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+      G.tracker.relicEffects.cloak.safekeepCount++;
     } else {
       const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
       const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
@@ -3140,6 +3181,7 @@ function applyKO(hero) {
   let droppedEquip = 'nothing';
   if (hasShadowCloakDungeon) {
     log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+    G.tracker.relicEffects.cloak.safekeepCount++;
   } else {
     const parasiteSword = hero.equipment.find(e => e.effect === 'cannot_remove_blocks_talent');
     const droppedItems = hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent');
@@ -3187,6 +3229,7 @@ function triggerTalent(hero, context) {
   if (context === 'movement') trackTalent(hero.id, 'movementImpact');
   switch(hero.id) {
     case 'juju':
+      G.tracker.talentDetails.juju.triggered++;
       if (context === 'combat') {
         trace('skill', 'talent', {hero: hero.id, talent: 'Unwavering Power', effect: '+2 combat total', blocked: false});
         log(`    🔥 Unwavering Power! +2 to combat total`, 'flame');
@@ -3228,20 +3271,29 @@ function triggerTalent(hero, context) {
         // else target stays as self (gigi)
       }
       target.giftedFlame = true;
+      G.tracker.talentDetails.gigi.triggered++;
+      if (!G.tracker.talentDetails.gigi.giftTargets[target.id]) G.tracker.talentDetails.gigi.giftTargets[target.id] = 0;
+      G.tracker.talentDetails.gigi.giftTargets[target.id]++;
+      if (context === 'combat') G.tracker.talentDetails.gigi.giftUsedFor.combat++;
+      else if (context === 'movement') G.tracker.talentDetails.gigi.giftUsedFor.movement++;
+      else G.tracker.talentDetails.gigi.giftUsedFor.awakening++;
       log(`    🔥 Nature's Gift! ${hero.name} gifts Flame to ${target.name}'s next turn`, 'flame');
       break;
     }
     case 'lulu':
+      G.tracker.talentDetails.lulu.triggered++;
       rechargeOneSkill(hero, 'talent_lulu');
       // Ancestral Grimoire owner (Lulu): recharge 2 instead of 1
       if (heroHasRelicFromOwner(hero, 'lulu')) {
         rechargeOneSkill(hero, 'talent_lulu_grimoire');
+        G.tracker.relicEffects.grimoire.doubleRechargeCount++;
         log(`    🔥 Arcane Recharge! ${hero.name} recharges 2 skills (Grimoire bonus)`, 'flame');
       } else {
         log(`    🔥 Arcane Recharge! ${hero.name} recharges a skill`, 'flame');
       }
       break;
     case 'eggo':
+      G.tracker.talentDetails.eggo.triggered++;
       hero.dodgeActive = true;
       log(`    🔥 Dodge active! ${hero.name} cannot be KO'd this turn`, 'flame');
       break;
@@ -3401,11 +3453,18 @@ function spawnHydra() {
 
   G.hydraActive = true;
   recalcHydraStr();
-  G.tracker.hydraStartingHeads = G.hydraHeads.map(h => h.name);
-  G.hydraHeads.forEach(h => {
+  const faceUpHeads = G.hydraHeads.filter(h => !h.destroyed);
+  G.tracker.hydraStartingHeads = faceUpHeads.map(h => h.name);
+  faceUpHeads.forEach(h => {
     trackHydraHead(h.name, 'spawned');
     log(`    Head: ${h.name} (STR ${h.effectiveStr}) — ${h.skill}`, 'hydra');
   });
+  if (recycling) {
+    const faceDownHeads = G.hydraHeads.filter(h => h.destroyed);
+    faceDownHeads.forEach(h => {
+      log(`    Head: ${h.name} (face-down, STR ${h.effectiveStr})`, 'system');
+    });
+  }
   // Snapshot hero state at awakening
   G.tracker.heroStateAtAwakening = {};
   G.heroes.forEach(h => {
@@ -3910,6 +3969,7 @@ function hydraAttack(hero) {
     // Dodge
     if (hero.dodgeActive) {
       log(`    🔥 DODGE! ${hero.name} avoids consequences!`, 'flame');
+      G.tracker.talentDetails.eggo.koPrevented++;
       return;
     }
 
@@ -3981,14 +4041,15 @@ function hydraAttack(hero) {
     }
   }
 
-  // Battlecry bonus: if Juju won with it, all heroes recharge 2
+  // Battlecry bonus: if Juju won with it, all heroes recharge skills
   if (rallyingBlowActive && heroTotal >= effectiveHeadStr) {
-    G.heroes.forEach(h => { rechargeOneSkill(h, 'battlecry'); rechargeOneSkill(h, 'battlecry'); });
+    const bcRecharge = (G._tweaks && G._tweaks.battlecryRecharge) || 2;
+    G.heroes.forEach(h => { for (let i = 0; i < bcRecharge; i++) rechargeOneSkill(h, 'battlecry'); });
     if (hero._lastBattlecryEntry) {
       hero._lastBattlecryEntry.won = true;
       hero._lastBattlecryEntry = null;
     }
-    log(`    ⚔ Battlecry victory! All heroes recharge 2 Skills`, 'wonder');
+    log(`    ⚔ Battlecry victory! All heroes recharge ${bcRecharge} Skills`, 'wonder');
   }
 
   // === TAUNT (Juju): extra Hydra attack ===
