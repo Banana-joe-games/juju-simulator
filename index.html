@@ -411,8 +411,8 @@ input[type=range] {
     <div class="tweak-row"><label>All Heads STR</label><input type="range" id="tw_hydraGlobal" min="-4" max="4" value="0" oninput="twVal(this); applyHydraGlobal(this.value)"><span class="tweak-val" id="tw_hydraGlobal_v">0</span></div>
     <div id="tw_hydraList" class="tweak-hydra-list"></div>
     <h4>Enemies</h4>
-    <div class="tweak-row"><label>Mishap enemy STR</label><input type="range" id="tw_mishapEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_mishapEnemy_v">0</span></div>
-    <div class="tweak-row"><label>Misfortune enemy STR</label><input type="range" id="tw_misfortuneEnemy" min="-2" max="2" value="0" oninput="twVal(this)"><span class="tweak-val" id="tw_misfortuneEnemy_v">0</span></div>
+    <div class="tweak-row"><label>Mishap enemy STR</label><input type="range" id="tw_mishapEnemy" min="-4" max="4" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_mishapEnemy_v">2</span></div>
+    <div class="tweak-row"><label>Misfortune enemy STR</label><input type="range" id="tw_misfortuneEnemy" min="-4" max="4" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_misfortuneEnemy_v">2</span></div>
     <h4>Room Distribution (36 tiles)</h4>
     <div class="tweak-row"><label>Wonder</label><input type="range" id="tw_wonderCount" min="0" max="36" value="12" oninput="twVal(this); clampRooms('wonder')"><span class="tweak-val" id="tw_wonderCount_v">12</span></div>
     <div class="tweak-row"><label>Dread</label><input type="range" id="tw_dreadCount" min="0" max="36" value="12" oninput="twVal(this); clampRooms('dread')"><span class="tweak-val" id="tw_dreadCount_v">12</span></div>
@@ -423,13 +423,13 @@ input[type=range] {
     <div class="tweak-toggle"><input type="checkbox" id="tw_followers" checked><label for="tw_followers">Followers</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_overflow" checked><label for="tw_overflow">Hydra Overflow = Game Over</label></div>
     <div class="tweak-toggle"><input type="checkbox" id="tw_hydraKOGrowth" checked><label for="tw_hydraKOGrowth">Hydra KO Growth (OFF = KO at Hydra doesn't grow heads)</label></div>
-    <div class="tweak-toggle"><input type="checkbox" id="tw_hydraRecycling"><label for="tw_hydraRecycling">Hydra Recycling (heads return to pool when cut, victory = all 6 down)</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_hydraRecycling" checked><label for="tw_hydraRecycling">Hydra Recycling (heads return to pool when cut, victory = all 6 down)</label></div>
 
     <h4>Debug</h4>
-    <div class="tweak-toggle"><input type="checkbox" id="tw_debugMode"><label for="tw_debugMode">Debug Trace (structured game log for verification)</label></div>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_debugMode" checked><label for="tw_debugMode">Debug Trace (structured game log for verification)</label></div>
     <h4>Bravery Points</h4>
-    <div class="tweak-toggle"><input type="checkbox" id="tw_bpEnabled"><label for="tw_bpEnabled">Enable Bravery Points (earn from combat, skills, exploring)</label></div>
-    <div id="tw_gilSettings" style="display:none">
+    <div class="tweak-toggle"><input type="checkbox" id="tw_bpEnabled" checked><label for="tw_bpEnabled">Enable Bravery Points (earn from combat, skills, exploring)</label></div>
+    <div id="tw_gilSettings">
       <div class="tweak-row"><label>BP per enemy STR point</label><input type="range" id="tw_gilPerStr" min="1" max="3" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_gilPerStr_v">1</span></div>
       <div class="tweak-row"><label>Cost: Recharge 1 Skill</label><input type="range" id="tw_gilRechargeSkill" min="1" max="8" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_gilRechargeSkill_v">3</span></div>
       <div class="tweak-row"><label>Cost: Buy Legendary Equip</label><input type="range" id="tw_gilBuyEquip" min="3" max="12" value="6" oninput="twVal(this)"><span class="tweak-val" id="tw_gilBuyEquip_v">6</span></div>

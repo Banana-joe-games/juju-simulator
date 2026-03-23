@@ -90,8 +90,8 @@ function resetTweaks() {
   document.getElementById('tw_gigi').value = 2; document.getElementById('tw_gigi_v').textContent = '2';
   document.getElementById('tw_lulu').value = 1; document.getElementById('tw_lulu_v').textContent = '1';
   document.getElementById('tw_eggo').value = 2; document.getElementById('tw_eggo_v').textContent = '2';
-  document.getElementById('tw_mishapEnemy').value = 0; document.getElementById('tw_mishapEnemy_v').textContent = '0';
-  document.getElementById('tw_misfortuneEnemy').value = 0; document.getElementById('tw_misfortuneEnemy_v').textContent = '0';
+  document.getElementById('tw_mishapEnemy').value = 2; document.getElementById('tw_mishapEnemy_v').textContent = '2';
+  document.getElementById('tw_misfortuneEnemy').value = 2; document.getElementById('tw_misfortuneEnemy_v').textContent = '2';
   document.getElementById('tw_wonderCount').value = 12; document.getElementById('tw_wonderCount_v').textContent = '12';
   document.getElementById('tw_dreadCount').value = 12; document.getElementById('tw_dreadCount_v').textContent = '12';
   if (document.getElementById('tw_commonCount_v')) document.getElementById('tw_commonCount_v').textContent = '12';
@@ -99,7 +99,7 @@ function resetTweaks() {
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
   document.getElementById('tw_hydraKOGrowth').checked = true;
-  document.getElementById('tw_hydraRecycling').checked = false;
+  document.getElementById('tw_hydraRecycling').checked = true;
   document.getElementById('tw_hydraStartingHeads').value = 2; document.getElementById('tw_hydraStartingHeads_v').textContent = '2';
 
   if (document.getElementById('tw_battlecryRecharge')) document.getElementById('tw_battlecryRecharge').value = 2;
@@ -107,13 +107,13 @@ function resetTweaks() {
   ['juju','gigi','lulu','eggo'].forEach(id => {
     if (document.getElementById('tw_hero_' + id)) document.getElementById('tw_hero_' + id).checked = true;
   });
-  document.getElementById('tw_bpEnabled').checked = false;
+  document.getElementById('tw_bpEnabled').checked = true;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
   document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
   document.getElementById('tw_gilBuyEquip').value = 6; document.getElementById('tw_gilBuyEquip_v').textContent = '6';
   if (document.getElementById('tw_bpPurifyCost')) { document.getElementById('tw_bpPurifyCost').value = 4; document.getElementById('tw_bpPurifyCost_v').textContent = '4'; }
-  document.getElementById('tw_gilSettings').style.display = 'none';
-  document.getElementById('tw_debugMode').checked = false;
+  document.getElementById('tw_gilSettings').style.display = 'block';
+  document.getElementById('tw_debugMode').checked = true;
   // Reset per-equipment
   LEGENDARY_EQUIPMENT.forEach(function(e, i) {
     var cb = document.getElementById('tw_eq_' + i + '_on');
