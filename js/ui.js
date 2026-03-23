@@ -677,6 +677,56 @@ function generateReport(results) {
     html += statRow('3rd Slot Used', `${cl.thirdSlotUsed} (${fix1(cl.thirdSlotUsed/n)}/game)`);
     html += `</div>`;
   }
+
+  // Relic Spend Breakdown
+  const relicSpends = results.flatMap(r => r.tracker.relicSpendLog || []);
+  if (relicSpends.length > 0) {
+    const dungeonSpends = relicSpends.filter(s => s.phase === 'dungeon');
+    const hydraSpends = relicSpends.filter(s => s.phase === 'hydra');
+    html += `<div class="report-card"><b>Relic Spend Breakdown</b> (${relicSpends.length} total)`;
+    html += statRow('Dungeon', `${dungeonSpends.length} (${pct(dungeonSpends.length, relicSpends.length)}%)`);
+    html += statRow('Hydra', `${hydraSpends.length} (${pct(hydraSpends.length, relicSpends.length)}%)`);
+    if (dungeonSpends.length > 0) html += statRow('Avg dungeon spend turn', fix1(dungeonSpends.reduce((s,d) => s + d.turn, 0) / dungeonSpends.length));
+    if (hydraSpends.length > 0) html += statRow('Avg Hydra spend turn', fix1(hydraSpends.reduce((s,d) => s + d.turn, 0) / hydraSpends.length));
+    html += `</div>`;
+
+    // Per hero
+    html += `<div class="report-card"><b>Relic Spends Per Hero</b>`;
+    heroIds.forEach(id => {
+      const heroS = relicSpends.filter(s => s.heroId === id);
+      if (heroS.length > 0) {
+        const hd = heroS.filter(s => s.phase === 'dungeon').length;
+        const hh = heroS.filter(s => s.phase === 'hydra').length;
+        html += statRow(`${heroNames[id]}`, `${heroS.length} (${hd}D/${hh}H)`);
+      }
+    });
+    html += `</div>`;
+
+    // Enemies/heads consuming most relics
+    const enemyRelicCost = {};
+    relicSpends.forEach(s => { const e = s.enemy || 'unknown'; enemyRelicCost[e] = (enemyRelicCost[e]||0) + 1; });
+    html += `<div class="report-card"><b>Biggest Relic Consumers</b>`;
+    Object.entries(enemyRelicCost).sort((a,b) => b[1]-a[1]).slice(0, 10).forEach(([enemy, count]) => {
+      html += statRow(enemy, `${count} relics`);
+    });
+    html += `</div>`;
+
+    // Relics at Hydra entry
+    const arrivals = results.flatMap(r => r.tracker.hydraArrivals || []);
+    if (arrivals.length > 0) {
+      html += `<div class="report-card"><b>Relics at First Hydra Entry</b>`;
+      heroIds.forEach(id => {
+        const firstArrivals = [];
+        results.forEach(r => {
+          const ha = (r.tracker.hydraArrivals || []).find(a => a.heroId === id);
+          if (ha) firstArrivals.push(ha.partyRelics || 0);
+        });
+        if (firstArrivals.length > 0) html += statRow(heroNames[id], fix1(firstArrivals.reduce((a,b)=>a+b,0)/firstArrivals.length) + ' avg party relics');
+      });
+      html += `</div>`;
+    }
+  }
+
   html += `</div>`;
 
   // ===================== SECTION 5: SKILL ANALYSIS =====================

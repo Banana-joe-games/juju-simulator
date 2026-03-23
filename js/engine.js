@@ -330,6 +330,7 @@ function freshTracker() {
     // C: Shelter return trips
     shelterReturnTrips: [],  // {heroId, koTurn, returnTurn, turnsAway, headsGrown, bpSpent:{recharge:0,equip:0,purify:0}}
     shelterRespawnDetails: [],  // {heroId, bpAtRespawn, bpSpentBreakdown:{recharge:0,equip:0,purify:0}, skillsRechargedNames:[], skillsReadyAtLeave, skillsReadyAtArrival, combatsEnRoute, turn}
+    relicSpendLog: [],  // {heroId, donorId, relicName, phase, enemy, turn, relicsRemaining}
     // D: Overload deep dive
     overloadUses: [],  // {heroId, skillsExhausted, won, turn}
     // E: Reality Warp usage
@@ -3381,6 +3382,7 @@ function applyKO(hero) {
       const who = donor.id === hero.id ? hero.name : `${donor.name} (for ${hero.name})`;
       log(`    💎 ${relic.name} spent by ${who}! Survives Hydra KO. (party: ${partyRelicTotal()} relics left)`, 'hydra');
       initHeroTracker(G.tracker, donor.id).relicsSpent++;
+      G.tracker.relicSpendLog.push({ heroId: hero.id, donorId: donor.id, relicName: relic.name, phase: 'hydra', enemy: hero._lastKOEnemy ? (typeof hero._lastKOEnemy === 'string' ? hero._lastKOEnemy : hero._lastKOEnemy.name || 'unknown') : 'unknown', turn: G.turn, relicsRemaining: partyRelicTotal() });
     } else {
       log(`  💀 ${hero.name} falls at the Hydra — NO RELICS — GAME OVER!`, 'defeat');
       G.gameOver = true;
@@ -3444,6 +3446,7 @@ function applyKO(hero) {
     const { donor, relic } = spendPartyRelic('dungeon_save');
     const who = donor.id === hero.id ? hero.name : `${donor.name} (for ${hero.name})`;
     log(`    💎 ${relic.name} spent by ${who}! KO prevented. (party: ${partyRelicTotal()} relics left)`, 'hydra');
+    G.tracker.relicSpendLog.push({ heroId: hero.id, donorId: donor.id, relicName: relic.name, phase: 'dungeon', enemy: hero._lastKOEnemy ? (hero._lastKOEnemy.name || hero._lastKOEnemy) : 'unknown', turn: G.turn, relicsRemaining: partyRelicTotal() });
     return;
   }
 
@@ -3928,6 +3931,7 @@ function hydraAttack(hero) {
   }
 
   if (checkAssassin(hero, heroRoll)) {
+    hero._lastKOEnemy = head ? head.name : 'Assassin';
     applyKO(hero);
     if (G.gameOver) return;
     growHydraHead('hero_ko');
@@ -3961,6 +3965,7 @@ function hydraAttack(hero) {
     const doomRoll = Math.floor(Math.random() * 6) + 1;
     if (doomRoll <= 2) {
       log(`    Doomhammer curse! Rolled ${doomRoll} — KO!`, 'ko');
+      hero._lastKOEnemy = head ? head.name : 'Doomhammer';
       applyKO(hero);
       if (G.gameOver) return;
       growHydraHead('hero_ko');
@@ -4449,6 +4454,7 @@ function hydraAttack(hero) {
     } else {
       log(`    ${hero.name} is KO'd at the Hydra!`, 'ko');
       trackHydraHead(head.name, 'causedKO');
+      hero._lastKOEnemy = head.name;
       applyKO(hero);
       if (G.gameOver) return;
       growHydraHead('hero_ko');
