@@ -329,6 +329,7 @@ function freshTracker() {
     hydraAttackSnapshots: [],  // {heroId, readySkills, equipCount, head, skillsUsed:[], totalStr, won}
     // C: Shelter return trips
     shelterReturnTrips: [],  // {heroId, koTurn, returnTurn, turnsAway, headsGrown, bpSpent:{recharge:0,equip:0,purify:0}}
+    returnTurnBreakdown: [],  // Array of {heroId, koTurn, arrivalTurn, totalTurns, turns: [{turn, distToHydra, distAfter, atShelter, readySkills, equipCount, activity, foughtEnemy}]}
     shelterRespawnDetails: [],  // {heroId, bpAtRespawn, bpSpentBreakdown:{recharge:0,equip:0,purify:0}, skillsRechargedNames:[], skillsReadyAtLeave, skillsReadyAtArrival, combatsEnRoute, turn}
     relicSpendLog: [],  // {heroId, donorId, relicName, phase, enemy, turn, relicsRemaining}
     bpEquipOutcomes: [],  // {heroId, equipName, purchaseTurn, lostTurn, heldAtHydra, heldAtEnd}
@@ -1029,7 +1030,31 @@ function runTurn() {
   }
 
   if (hero.runningToHydra) {
+    // Per-turn tracking for return trip breakdown
+    if (hero._hydraKOTurn && hero._returnTurnLog) {
+      const distToHydra = G.exitHex && hero.pos && hero.pos.q !== undefined ?
+        hexDistance(hero.pos.q, hero.pos.r, G.exitHex.q, G.exitHex.r) : -1;
+      hero._returnTurnLog.push({
+        turn: G.turn,
+        distToHydra: distToHydra,
+        atShelter: isAtShelter(hero),
+        readySkills: readySkillCount(hero),
+        equipCount: hero.equipment.length,
+        _prevCombats: hero._combatsEnRoute || 0
+      });
+    }
     runToHydra(hero);
+    // Update last turn log entry with what happened
+    if (hero.runningToHydra && hero._returnTurnLog && hero._returnTurnLog.length > 0) {
+      const lastEntry = hero._returnTurnLog[hero._returnTurnLog.length - 1];
+      const newDist = G.exitHex && hero.pos && hero.pos.q !== undefined ?
+        hexDistance(hero.pos.q, hero.pos.r, G.exitHex.q, G.exitHex.r) : -1;
+      lastEntry.distAfter = newDist;
+      lastEntry.activity = lastEntry.atShelter ? 'shelter_bp' :
+        (lastEntry.distToHydra === newDist ? 'stuck_dd' :
+        (newDist === 0 ? 'arrived' : 'moving'));
+      lastEntry.foughtEnemy = (hero._combatsEnRoute || 0) > (lastEntry._prevCombats || 0);
+    }
   } else if (G.hydraActive && G.heroesInHydraArea.has(hero.id)) {
     hydraAttack(hero);
   } else {
@@ -3487,6 +3512,7 @@ function applyKO(hero) {
     G.heroesInHydraArea.delete(hero.id);
     // C+G: Record KO turn and heads for shelter return trip tracking
     hero._hydraKOTurn = G.turn;
+    hero._returnTurnLog = [];
     hero._headsAtKO = G.hydraHeads.filter(h => !h.destroyed).length;
     hero._bpSpentSinceKO = 0;
     hero._bpSpentEquipSinceKO = 0;
@@ -4730,6 +4756,17 @@ function runToHydra(hero) {
         turnsAway: G.turn - hero._hydraKOTurn,
         turn: hero._hydraKOTurn
       });
+      // Save per-turn return breakdown
+      if (hero._returnTurnLog && hero._returnTurnLog.length > 0) {
+        G.tracker.returnTurnBreakdown.push({
+          heroId: hero.id,
+          koTurn: hero._hydraKOTurn,
+          arrivalTurn: G.turn,
+          totalTurns: hero._returnTurnLog.length,
+          turns: hero._returnTurnLog
+        });
+      }
+      hero._returnTurnLog = null;
       hero._hydraKOTurn = null;
     }
     if (G.tracker.pacing.hydraArrival === 0) G.tracker.pacing.hydraArrival = G.turn;

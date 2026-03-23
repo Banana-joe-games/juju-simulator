@@ -1349,6 +1349,60 @@ function generateReport(results) {
     html += `</div>`;
   }
 
+  // ===================== SHELTER RETURN BREAKDOWN =====================
+  html += `<div class="report-section"><h3>Shelter Return Breakdown</h3>`;
+
+  const allReturns = results.flatMap(r => r.tracker.returnTurnBreakdown || []);
+  if (allReturns.length > 0) {
+    const avgTrip = fix1(allReturns.reduce((s, r) => s + r.totalTurns, 0) / allReturns.length);
+    html += `<div class="report-card"><b>Return Trip Analysis</b> (${allReturns.length} trips)`;
+    html += statRow('Avg turns per return trip', avgTrip);
+
+    const turnActivities = {};
+    allReturns.forEach(trip => {
+      trip.turns.forEach((t, i) => {
+        if (!turnActivities[i]) turnActivities[i] = { shelter: 0, moving: 0, stuck: 0, fighting: 0, arrived: 0, total: 0 };
+        turnActivities[i].total++;
+        if (t.activity === 'shelter_bp') turnActivities[i].shelter++;
+        else if (t.activity === 'stuck_dd') turnActivities[i].stuck++;
+        else if (t.activity === 'arrived') turnActivities[i].arrived++;
+        else turnActivities[i].moving++;
+        if (t.foughtEnemy) turnActivities[i].fighting++;
+      });
+    });
+
+    html += `<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:6px">`;
+    html += `<tr style="border-bottom:1px solid var(--border)"><th>Turn #</th><th>At Shelter</th><th>Moving</th><th>Stuck (DD)</th><th>Fighting Enemy</th><th>Arrived</th></tr>`;
+
+    Object.entries(turnActivities).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).slice(0, 8).forEach(([turnNum, data]) => {
+      const t = data.total;
+      html += `<tr>`;
+      html += `<td style="text-align:center">Turn ${parseInt(turnNum) + 1}</td>`;
+      html += `<td style="text-align:center">${pct(data.shelter, t)}%</td>`;
+      html += `<td style="text-align:center">${pct(data.moving, t)}%</td>`;
+      html += `<td style="text-align:center">${pct(data.stuck, t)}%</td>`;
+      html += `<td style="text-align:center">${pct(data.fighting, t)}%</td>`;
+      html += `<td style="text-align:center">${pct(data.arrived, t)}%</td>`;
+      html += `</tr>`;
+    });
+    html += `</table>`;
+
+    html += `<div style="font-size:10px;margin-top:6px;color:var(--dim)">Avg distance to Hydra: `;
+    Object.entries(turnActivities).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).slice(0, 6).forEach(([turnNum, data]) => {
+      const avgDist = allReturns.reduce((s, trip) => {
+        const t = trip.turns[parseInt(turnNum)];
+        return s + (t ? t.distToHydra || 0 : 0);
+      }, 0) / data.total;
+      html += `T${parseInt(turnNum)+1}: ${fix1(avgDist)} | `;
+    });
+    html += `</div>`;
+
+    html += `</div>`;
+  } else {
+    html += `<div class="report-card" style="color:var(--dim)">No Hydra KO return trips recorded.</div>`;
+  }
+  html += `</div>`;
+
   // ===================== SECTION 11: TRAP ANALYSIS =====================
   html += `<div class="report-section"><h3>Trap Analysis</h3>`;
 
@@ -2481,7 +2535,7 @@ function organizeReportTabs() {
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Arcane Familiar'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement','Cost of Victory','Cascading Impact'],
-    'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail','Shelter Respawn','Shelter Purchase'],
+    'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail','Shelter Respawn','Shelter Purchase','Shelter Return'],
     'tab-analysis': ['Textual Analysis']
   };
   const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ','tab-analysis'];
