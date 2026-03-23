@@ -1165,6 +1165,12 @@ function generateReport(results) {
     html += statRow('Self-target', `${selfWarps} (${pct(selfWarps, warps.length)}%)`);
     html += statRow('Ally-target', `${warps.length - selfWarps}`);
     html += statRow('Avg distance saved', `${avgDist} tiles`);
+    // Purpose breakdown
+    const purposes = {};
+    warps.forEach(w => { const p = w.purpose || 'unknown'; purposes[p] = (purposes[p]||0) + 1; });
+    Object.entries(purposes).sort((a,b) => b[1]-a[1]).forEach(([p, count]) => {
+      html += statRow(p.replace(/_/g, ' '), `${count} (${pct(count, warps.length)}%)`);
+    });
     html += `</div>`;
   }
 

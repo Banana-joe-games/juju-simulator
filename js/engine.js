@@ -1384,21 +1384,60 @@ function movePhase(hero) {
   const typeIcon = destTileType === 'wonder' ? '✦ Wonder' : destTileType === 'dread' ? '☠ Dread Dungeon' : '· Common Passage';
   log(`${hero.name} lands on ${typeIcon} (tile #${G.tilesPlaced})`, destTileType === 'wonder' ? 'wonder' : destTileType === 'dread' ? 'misfortune' : 'mishap');
 
-  // Reality Warp (Lulu): skip dangerous rooms — strategic decision
-  if (destTileType !== 'wonder' && hero.id === 'lulu' && shouldUseSkill(hero, 'Reality Warp', { atHydra: false })) {
-    if (destTileType === 'dread' || (destTileType === 'common' && totalStr(hero) < 4)) {
+  // Reality Warp (Lulu): teleport self or ally to any revealed tile
+  // Use cases: escape danger, rush to Hydra, reach Shelter for BP, reach Relic Room
+  if (hero.id === 'lulu' && isSkillReady(hero, 'Reality Warp')) {
+    let warpTarget = null;
+    let warpDest = null;
+    let warpPurpose = '';
+    let warpDistSaved = 0;
+
+    // Priority 1: Warp self to Hydra if Hydra active and not there yet
+    if (G.hydraActive && G.exitHex && !G.heroesInHydraArea.has(hero.id) && hero.runningToHydra) {
+      const distToHydra = hexDistance(hero.pos.q, hero.pos.r, G.exitHex.q, G.exitHex.r);
+      if (distToHydra > 1) {
+        warpTarget = hero; warpDest = G.exitHex; warpPurpose = 'rush_hydra'; warpDistSaved = distToHydra;
+      }
+    }
+    // Priority 2: Warp ally to Hydra if they're far and running
+    if (!warpTarget && G.hydraActive && G.exitHex) {
+      const allyRunning = G.heroes.find(h => h.id !== hero.id && h.runningToHydra && !G.heroesInHydraArea.has(h.id));
+      if (allyRunning) {
+        const distAlly = hexDistance(allyRunning.pos.q, allyRunning.pos.r, G.exitHex.q, G.exitHex.r);
+        if (distAlly > 2) { warpTarget = allyRunning; warpDest = G.exitHex; warpPurpose = 'ally_to_hydra'; warpDistSaved = distAlly; }
+      }
+    }
+    // Priority 3: Escape dangerous room (dread or tough common)
+    if (!warpTarget && (destTileType === 'dread' || (destTileType === 'common' && totalStr(hero) < 4))) {
+      // Warp to Shelter if BP to spend, else to a Wonder tile
+      if (bpEnabled() && hero.bp >= ((G._tweaks && G._tweaks.bpRechargeSkillCost) || 4) && hero.skillStates.some(s => s === 'exhausted')) {
+        warpTarget = hero; warpDest = {q:0, r:0}; warpPurpose = 'escape_to_shelter';
+        warpDistSaved = hexDistance(hero.pos.q, hero.pos.r, 0, 0);
+      } else {
+        warpTarget = hero; warpDest = hero.pos; warpPurpose = 'escape_danger'; warpDistSaved = 0;
+      }
+    }
+
+    if (warpTarget && shouldUseSkill(hero, 'Reality Warp', { atHydra: false })) {
       useSkill(hero, 'Reality Warp');
       trackSkill(hero.id, 'Reality Warp', 'activated');
-      // E: Reality Warp usage
+      // Actually teleport if destination is different from current
+      if (warpDest && warpTarget && (warpDest.q !== warpTarget.pos.q || warpDest.r !== warpTarget.pos.r)) {
+        warpTarget.pos = { q: warpDest.q, r: warpDest.r };
+        if (G.exitHex && warpDest.q === G.exitHex.q && warpDest.r === G.exitHex.r) {
+          G.heroesInHydraArea.add(warpTarget.id);
+          warpTarget.runningToHydra = false;
+        }
+        if (warpDest.q === 0 && warpDest.r === 0) {
+          bpSpendAtShelter(warpTarget);
+        }
+      }
       G.tracker.realityWarpUses.push({
-        heroId: hero.id,
-        targetId: hero.id,
-        selfTarget: true,
-        distanceSaved: 0,  // warping away from danger, not distance-based
-        turn: G.turn
+        heroId: hero.id, targetId: warpTarget.id, selfTarget: hero.id === warpTarget.id,
+        distanceSaved: warpDistSaved, purpose: warpPurpose, turn: G.turn
       });
-      log(`  🌀 Reality Warp: ${hero.name} warps to a safe room!`, 'wonder');
-      return;
+      log(`  🌀 Reality Warp: ${hero.name} warps ${warpTarget.id === hero.id ? 'self' : warpTarget.name} (${warpPurpose}, ${warpDistSaved} tiles saved)!`, 'wonder');
+      if (warpPurpose === 'escape_danger' || warpPurpose === 'escape_to_shelter') return;  // skip room resolution
     }
   }
 
