@@ -1083,6 +1083,93 @@ function generateReport(results) {
   }
   html += `</div>`;
 
+  // ===================== HYDRA COMBAT DETAIL (new trackers A-G) =====================
+  html += `<div class="report-section"><h3>Hydra Combat Detail</h3>`;
+
+  // B: Attack snapshots - averages per hero per head
+  const snapshots = results.flatMap(r => r.tracker.hydraAttackSnapshots || []);
+  if (snapshots.length > 0) {
+    html += `<div class="report-card"><b>Avg STR at Hydra Attack</b>`;
+    const byHeroHead = {};
+    snapshots.forEach(s => {
+      const key = s.heroId + '|' + s.head;
+      if (!byHeroHead[key]) byHeroHead[key] = { attacks: 0, wins: 0, totalStr: 0, readySkills: 0 };
+      byHeroHead[key].attacks++;
+      if (s.won) byHeroHead[key].wins++;
+      byHeroHead[key].totalStr += s.totalStr;
+      byHeroHead[key].readySkills += s.readySkills;
+    });
+    html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+    html += `<tr><th>Hero</th><th>Head</th><th>Attacks</th><th>Win%</th><th>Avg STR</th><th>Avg Skills</th></tr>`;
+    Object.entries(byHeroHead).sort((a,b) => b[1].attacks - a[1].attacks).forEach(([key, d]) => {
+      const [hid, head] = key.split('|');
+      html += `<tr><td style="color:var(--${hid})">${heroNames[hid]||hid}</td><td>${head}</td><td>${d.attacks}</td><td>${pct(d.wins,d.attacks)}%</td><td>${fix1(d.totalStr/d.attacks)}</td><td>${fix1(d.readySkills/d.attacks)}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+
+  // C: Shelter return trips
+  const trips = results.flatMap(r => r.tracker.shelterReturnTrips || []);
+  if (trips.length > 0) {
+    html += `<div class="report-card"><b>Shelter Return Trips</b> (${trips.length} total)`;
+    const avgTurns = fix1(trips.reduce((s,t) => s + t.turnsAway, 0) / trips.length);
+    const avgHeadsGrown = fix1(trips.reduce((s,t) => s + t.headsGrown, 0) / trips.length);
+    html += statRow('Avg turns away', avgTurns);
+    html += statRow('Avg heads grown while away', avgHeadsGrown);
+    heroIds.forEach(id => {
+      const ht = trips.filter(t => t.heroId === id);
+      if (ht.length > 0) html += statRow(heroNames[id], `${ht.length} trips, avg ${fix1(ht.reduce((s,t)=>s+t.turnsAway,0)/ht.length)} turns`);
+    });
+    html += `</div>`;
+  }
+
+  // G: Distance at KO
+  const koDist = results.flatMap(r => r.tracker.hydraKODistance || []);
+  if (koDist.length > 0) {
+    html += `<div class="report-card"><b>Hydra KO Distance</b>`;
+    const avgBfs = fix1(koDist.reduce((s,d) => s + d.bfsDistance, 0) / koDist.length);
+    const avgReturn = fix1(koDist.reduce((s,d) => s + d.turnsToReturn, 0) / koDist.length);
+    html += statRow('Avg BFS distance Shelter\u2192Hydra', avgBfs);
+    html += statRow('Avg turns to return', avgReturn);
+    html += `</div>`;
+  }
+
+  // F: Siphon impact
+  const siphon = results.flatMap(r => r.tracker.siphonImpact || []);
+  if (siphon.length > 0) {
+    const siphonWins = siphon.filter(s => s.won).length;
+    const wouldntWinWithout = siphon.filter(s => s.won && !s.wouldWinWithout).length;
+    html += `<div class="report-card"><b>Siphon Difference Maker</b> (${siphon.length} uses)`;
+    html += statRow('Win rate with Siphon', pct(siphonWins, siphon.length) + '%');
+    html += statRow('Wins that needed Siphon', `${wouldntWinWithout} (${pct(wouldntWinWithout, siphon.length)}%)`);
+    html += `</div>`;
+  }
+
+  // D: Overload
+  const overloads = results.flatMap(r => r.tracker.overloadUses || []);
+  if (overloads.length > 0) {
+    const olWins = overloads.filter(o => o.won).length;
+    const avgExhausted = fix1(overloads.reduce((s,o) => s + o.skillsExhausted, 0) / overloads.length);
+    html += `<div class="report-card"><b>Overload Deep Dive</b> (${overloads.length} uses)`;
+    html += statRow('Win rate', pct(olWins, overloads.length) + '%');
+    html += statRow('Avg skills exhausted', avgExhausted);
+    html += `</div>`;
+  }
+
+  // E: Reality Warp
+  const warps = results.flatMap(r => r.tracker.realityWarpUses || []);
+  if (warps.length > 0) {
+    const selfWarps = warps.filter(w => w.selfTarget).length;
+    const avgDist = fix1(warps.reduce((s,w) => s + (w.distanceSaved||0), 0) / warps.length);
+    html += `<div class="report-card"><b>Reality Warp Usage</b> (${warps.length} uses)`;
+    html += statRow('Self-target', `${selfWarps} (${pct(selfWarps, warps.length)}%)`);
+    html += statRow('Ally-target', `${warps.length - selfWarps}`);
+    html += statRow('Avg distance saved', `${avgDist} tiles`);
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+
   // ===================== SECTION 11: TRAP ANALYSIS =====================
   html += `<div class="report-section"><h3>Trap Analysis</h3>`;
 
@@ -2119,7 +2206,7 @@ function organizeReportTabs() {
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Arcane Familiar'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement'],
-    'tab-hydra-econ': ['BP Economy','Hydra Fight'],
+    'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail'],
     'tab-analysis': ['Textual Analysis']
   };
   const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ','tab-analysis'];

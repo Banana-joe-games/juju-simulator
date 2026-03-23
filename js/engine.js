@@ -323,6 +323,20 @@ function freshTracker() {
     },
     spellMirrorDetails: { total: 0, cancelled: {}, atHydra: 0, atDungeon: 0 },
     enemyCrossHeroHelp: {},  // { enemyName: count }
+    // A: Hydra turn-by-turn flow (last 10 turns of lost games)
+    hydraLastTurns: [],  // {turn, heroId, head, won, headsUp, headsGrown, growSource, heroPosition}
+    // B: Skill state at Hydra attack
+    hydraAttackSnapshots: [],  // {heroId, readySkills, equipCount, head, skillsUsed:[], totalStr, won}
+    // C: Shelter return trips
+    shelterReturnTrips: [],  // {heroId, koTurn, returnTurn, turnsAway, headsGrown, bpSpent:{recharge:0,equip:0,purify:0}}
+    // D: Overload deep dive
+    overloadUses: [],  // {heroId, skillsExhausted, won, turn}
+    // E: Reality Warp usage
+    realityWarpUses: [],  // {heroId, targetId, purpose, distanceSaved, turn}
+    // F: Siphon difference maker
+    siphonImpact: [],  // {heroId, enemy, heroTotal, enemyTotal, siphonActive, won, wouldWinWithout}
+    // G: Distance to Hydra at KO
+    hydraKODistance: [],  // {heroId, bfsDistance, turnsToReturn, turn}
   };
 }
 
@@ -1375,6 +1389,14 @@ function movePhase(hero) {
     if (destTileType === 'dread' || (destTileType === 'common' && totalStr(hero) < 4)) {
       useSkill(hero, 'Reality Warp');
       trackSkill(hero.id, 'Reality Warp', 'activated');
+      // E: Reality Warp usage
+      G.tracker.realityWarpUses.push({
+        heroId: hero.id,
+        targetId: hero.id,
+        selfTarget: true,
+        distanceSaved: 0,  // warping away from danger, not distance-based
+        turn: G.turn
+      });
       log(`  🌀 Reality Warp: ${hero.name} warps to a safe room!`, 'wonder');
       return;
     }
@@ -2144,10 +2166,12 @@ function combat(hero, enemyCard, tier) {
   }
 
   // === SKILL: Siphon (Lulu) — -2 STR to ANY enemy in combat ===
+  let _siphonActiveDungeon = false;
   const luluForSiphon = G.heroes.find(h => h.id === 'lulu');
   if (luluForSiphon && shouldUseSkill(luluForSiphon, 'Siphon', skillCtx)) {
     useSkill(luluForSiphon, 'Siphon');
     enemyStr -= 2;
+    _siphonActiveDungeon = true;
     trackSkill('lulu', 'Siphon', 'activated');
     if (hero.id !== 'lulu' && G.tracker.enemyCrossHeroHelp) {
       G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
@@ -2216,6 +2240,10 @@ function combat(hero, enemyCard, tier) {
       }
       fireballBonus = othersToExhaust * 2;
       trackSkill(hero.id, 'Overload', 'activated');
+      // D: Overload deep dive
+      const _overloadEntry = { heroId: hero.id, skillsExhausted: othersToExhaust, won: false, turn: G.turn };
+      G.tracker.overloadUses.push(_overloadEntry);
+      hero._lastOverloadEntry = _overloadEntry;
       log(`    ⚡ Overload! Exhausted ${othersToExhaust} skills for +${fireballBonus} STR!`, 'flame');
     }
   }
@@ -2305,7 +2333,7 @@ function combat(hero, enemyCard, tier) {
     if (fightRound > 0) log(`    Slayer: Round ${fightRound + 1}!`, 'combat');
 
     const result = singleFight(hero, enemyCard, tier, enemyStr,
-      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, daredevilActive, daredevilAutoWin, daredevilWorstRoll, rallyingBlowActive, spellMirrored, secondNatureBonus });
+      { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, daredevilActive, daredevilAutoWin, daredevilWorstRoll, rallyingBlowActive, spellMirrored, secondNatureBonus, _siphonActiveDungeon });
 
     if (result === 'win') {
       totalWins++;
@@ -2433,7 +2461,7 @@ function combat(hero, enemyCard, tier) {
 }
 
 function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
-  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, daredevilActive, daredevilAutoWin, daredevilWorstRoll, rallyingBlowActive, spellMirrored, secondNatureBonus } = bonuses;
+  const { doomhammerBonus, firebaneBonus, demonSwordBonus, warlordBonus, manaLeechPenalty, frogmanSwallowed, packLeaderBonus, fireballBonus, daredevilActive, daredevilAutoWin, daredevilWorstRoll, rallyingBlowActive, spellMirrored, secondNatureBonus, _siphonActiveDungeon } = bonuses;
 
   // === ENEMY ROLL ===
   let enemyTotal;
@@ -2875,6 +2903,16 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     if (secondNatureBonus > 0) {
       G.tracker.secondNatureDetails.push({ won: true, wasDifferenceMaker: margin < secondNatureBonus });
     }
+    // D: Update Overload won field on dungeon win
+    if (hero._lastOverloadEntry) { hero._lastOverloadEntry.won = true; hero._lastOverloadEntry = null; }
+    // F: Siphon difference maker (dungeon win)
+    if (_siphonActiveDungeon) {
+      G.tracker.siphonImpact.push({
+        heroId: hero.id, enemy: enemyCard.name, heroTotal, enemyTotal,
+        siphonActive: true, won: true,
+        wouldWinWithout: heroTotal >= (enemyTotal + 2)  // enemy would have been 2 higher without Siphon
+      });
+    }
     return 'win';
   } else {
     const margin = (enemyTotal + beatMargin) - heroTotal;
@@ -2920,6 +2958,14 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     }
 
     hero.equipment.forEach(e => trackEquip(e.name, 'lostWith'));
+    // F: Siphon difference maker (dungeon loss)
+    if (_siphonActiveDungeon) {
+      G.tracker.siphonImpact.push({
+        heroId: hero.id, enemy: enemyCard.name, heroTotal, enemyTotal,
+        siphonActive: true, won: false,
+        wouldWinWithout: heroTotal >= (enemyTotal + 2)
+      });
+    }
     // Skill gap tracking
     if (margin <= 2) {
       ht.neededButDidntHave.push({ enemy: enemyCard.name, margin, context: 'Close loss by ' + margin, type: 'close_loss' });
@@ -3280,6 +3326,16 @@ function applyKO(hero) {
     hero.pos = {q:0, r:0};
     hero.runningToHydra = true;
     G.heroesInHydraArea.delete(hero.id);
+    // C+G: Record KO turn and heads for shelter return trip tracking
+    hero._hydraKOTurn = G.turn;
+    hero._headsAtKO = G.hydraHeads.filter(h => !h.destroyed).length;
+    hero._bpSpentSinceKO = 0;
+    hero._bpSpentEquipSinceKO = 0;
+    // G: Compute BFS distance from shelter to Hydra exit
+    if (G.exitHex && G.hexMap) {
+      const path = G.hexMap.findPath(0, 0, G.exitHex.q, G.exitHex.r);
+      hero._hydraKOBfsDistance = path ? path.length - 1 : hexDistance(0, 0, G.exitHex.q, G.exitHex.r);
+    }
     trace('ko', 'applied', {hero: hero.id, cause: 'hydra', relicUsed: totalRelics > 0, shieldWall: false, dodge: false, equipmentDropped: hasShadowCloak ? [] : hero.equipment.filter(e => e.effect !== 'cannot_remove_blocks_talent').map(e => e.name), followersLost: hero.followers.map(f => f.name)});
     log(`    ${hero.name} KO'd at Hydra! Respawned. Must run back.`, 'ko');
     // Ensure another hero is sent if nobody else is at Hydra
@@ -3913,6 +3969,10 @@ function hydraAttack(hero) {
       }
       skillBonus += othersToExhaust * 2;
       trackSkill(hero.id, 'Overload', 'activated');
+      // D: Overload deep dive (hydra)
+      const _overloadEntryH = { heroId: hero.id, skillsExhausted: othersToExhaust, won: false, turn: G.turn };
+      G.tracker.overloadUses.push(_overloadEntryH);
+      hero._lastOverloadEntry = _overloadEntryH;
       log(`    ⚡ Overload! Exhausted ${othersToExhaust} skills for +${othersToExhaust * 2} STR!`, 'flame');
     }
   }
@@ -3956,6 +4016,16 @@ function hydraAttack(hero) {
 
   let heroTotal = heroRoll.val + totalStr(hero) + combatBonus + doomhammerBonus + firebaneBonus + siphonBonus + mawPenalty + skillBonus + secondNatureBonus;
   const effectiveHeadStr = head.effectiveStr - siphonDrain - siphonSkillDrain;
+
+  // B: Skill state snapshot at Hydra attack (BEFORE resolution)
+  G.tracker.hydraAttackSnapshots.push({
+    heroId: hero.id,
+    readySkills: readySkillCount(hero),
+    equipCount: hero.equipment.length,
+    head: head.name,
+    totalStr: totalStr(hero),
+    won: false  // update after resolution
+  });
 
   log(`    ${hero.name} rolls ${heroRoll.val}${isFlame ? ' 🔥' : ''} + STR ${totalStr(hero)} + bonuses = ${heroTotal} vs ${effectiveHeadStr}`, 'combat');
 
@@ -4047,6 +4117,26 @@ function hydraAttack(hero) {
   trace('hydra', 'attack', {hero: hero.id, head: head.name, headStr: effectiveHeadStr, heroTotal: heroTotal, won: heroTotal >= effectiveHeadStr, headDestroyed: heroTotal >= effectiveHeadStr, daredevilAutoWin: false});
 
   if (heroTotal >= effectiveHeadStr) {
+    // B: Update snapshot won field
+    if (G.tracker.hydraAttackSnapshots.length > 0) {
+      G.tracker.hydraAttackSnapshots[G.tracker.hydraAttackSnapshots.length - 1].won = true;
+    }
+    // D: Update Overload won field on hydra win
+    if (hero._lastOverloadEntry) { hero._lastOverloadEntry.won = true; hero._lastOverloadEntry = null; }
+    // F: Siphon difference maker (hydra win)
+    if (siphonSkillDrain > 0) {
+      G.tracker.siphonImpact.push({
+        heroId: hero.id, enemy: head.name, heroTotal, enemyTotal: effectiveHeadStr,
+        siphonActive: true, won: true,
+        wouldWinWithout: heroTotal >= (effectiveHeadStr + siphonSkillDrain)
+      });
+    }
+    // A: Hydra turn-by-turn flow
+    G.tracker.hydraLastTurns.push({
+      turn: G.turn, heroId: hero.id, head: head.name, won: true,
+      headsUp: G.hydraHeads.filter(h => !h.destroyed).length,
+      heroPosition: G.heroesInHydraArea.has(hero.id) ? 'hydra' : (hero.runningToHydra ? 'running' : 'shelter')
+    });
     head.destroyed = true;
     G.hydraDestroyedCount++;
     const recyclingMode = G._tweaks && G._tweaks.hydraRecycling;
@@ -4151,6 +4241,20 @@ function hydraAttack(hero) {
       trace('game', 'end', {victory: true, turn: G.turn, cause: 'all_heads_destroyed'});
     }
   } else {
+    // A: Hydra turn-by-turn flow (loss)
+    G.tracker.hydraLastTurns.push({
+      turn: G.turn, heroId: hero.id, head: head.name, won: false,
+      headsUp: G.hydraHeads.filter(h => !h.destroyed).length,
+      heroPosition: G.heroesInHydraArea.has(hero.id) ? 'hydra' : (hero.runningToHydra ? 'running' : 'shelter')
+    });
+    // F: Siphon difference maker (hydra loss)
+    if (siphonSkillDrain > 0) {
+      G.tracker.siphonImpact.push({
+        heroId: hero.id, enemy: head.name, heroTotal, enemyTotal: effectiveHeadStr,
+        siphonActive: true, won: false,
+        wouldWinWithout: heroTotal >= (effectiveHeadStr + siphonSkillDrain)
+      });
+    }
     log(`  ✗ Attack fails! ${heroTotal} < ${effectiveHeadStr}`, 'ko');
 
     // Dodge
@@ -4361,6 +4465,25 @@ function runToHydra(hero) {
     hero.runningToHydra = false;
     hero.pos = 'hydra';
     G.heroesInHydraArea.add(hero.id);
+    // C: Shelter return trip tracking
+    if (hero._hydraKOTurn) {
+      G.tracker.shelterReturnTrips.push({
+        heroId: hero.id,
+        koTurn: hero._hydraKOTurn,
+        returnTurn: G.turn,
+        turnsAway: G.turn - hero._hydraKOTurn,
+        headsGrown: G.hydraHeads.filter(h => !h.destroyed).length - (hero._headsAtKO || 0),
+        bpSpent: { recharge: hero._bpSpentSinceKO || 0, equip: hero._bpSpentEquipSinceKO || 0 }
+      });
+      // G: Distance to Hydra at KO
+      G.tracker.hydraKODistance.push({
+        heroId: hero.id,
+        bfsDistance: hero._hydraKOBfsDistance || 0,
+        turnsToReturn: G.turn - hero._hydraKOTurn,
+        turn: hero._hydraKOTurn
+      });
+      hero._hydraKOTurn = null;
+    }
     if (G.tracker.pacing.hydraArrival === 0) G.tracker.pacing.hydraArrival = G.turn;
     // Track arrival state
     if (!G.tracker.hydraArrivals) G.tracker.hydraArrivals = [];
