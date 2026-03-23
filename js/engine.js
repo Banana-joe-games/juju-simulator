@@ -3343,21 +3343,32 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     return; // Hound doesn't KO, just follows
   }
 
-  // Ogre: no respawn, stay on tile, skip turns until rescued
+  // Ogre: no respawn in multiplayer (stuck until rescued), normal KO in solo
   if (enemyCard.effect === 'no_respawn_on_loss') {
-    G.stats.ko++;
-    if (!heroHasRelicFromOwner(hero, 'eggo')) {
-      hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
-    } else {
-      log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
-      G.tracker.relicEffects.cloak.safekeepCount++;
+    if (G.heroes.length > 1) {
+      // Multiplayer: pin hero on tile, skip turns until rescued
+      G.stats.ko++;
+      if (!heroHasRelicFromOwner(hero, 'eggo')) {
+        hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
+      } else {
+        log(`    🕶 Shadow Cloak: ${hero.name} keeps all equipment!`, 'legendary');
+        G.tracker.relicEffects.cloak.safekeepCount++;
+      }
+      removeFollowers(hero);
+      hero.stuckAtOgre = {...enemyCard};
+      hero.stuckAtOgreTurn = G.turn;
+      trackEnemySideEffect('Ogre', 'otherEffects');
+      log(`    Ogre pins ${hero.name}! Stuck on tile — cannot act until another hero defeats the Ogre.`, 'ko');
+      return;
     }
-    removeFollowers(hero);
-    hero.stuckAtOgre = {...enemyCard};  // hero is stuck until rescued
-    hero.stuckAtOgreTurn = G.turn;
+    // Solo: Ogre causes normal KO (respawn at Shelter). Ogre stays on tile as board enemy.
     trackEnemySideEffect('Ogre', 'otherEffects');
-    log(`    Ogre pins ${hero.name}! Stuck on tile — cannot act until another hero defeats the Ogre.`, 'ko');
-    return;
+    log(`    Ogre defeats ${hero.name}! (Solo: normal KO, Ogre stays on tile)`, 'ko');
+    // Place Ogre on board so hero must fight it later if passing through
+    if (hero.pos && hero.pos.q !== undefined) {
+      G.enemiesOnBoard.push({ card: {...enemyCard}, pos: {q: hero.pos.q, r: hero.pos.r}, tier: 'misfortune' });
+    }
+    // Fall through to normal KO below
   }
 
   // Post-Awakening: enemy persists on the board after defeating a hero
