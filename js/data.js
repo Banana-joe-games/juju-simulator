@@ -21,7 +21,8 @@ const HEROES = [
     skills:[
       {name:'Siphon',kind:'Combat',effect:'Give -2 STR to an enemy.'},
       {name:'Reality Warp',kind:'Utility',effect:'Move yourself or any ally to any revealed tile.'},
-      {name:'Overload',kind:'Combat',effect:'Exhaust all remaining Ready Skills. Gain +2 STR for each.'}
+      {name:'Overload',kind:'Combat',effect:'Exhaust all remaining Ready Skills. Gain +2 STR for each.'},
+      {name:'Astral Echo',kind:'Reactive',effect:'When KO\'d in combat, make a free attack before KO consequences apply.'}
     ]},
   { id:'eggo', name:'Eggo', title:'The Rogue', str:2, flameFaces:[1,2,3], color:'var(--eggo)',
     talent:'Dodge', talentDesc:'Cannot be KO this turn',

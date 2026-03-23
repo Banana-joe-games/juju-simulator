@@ -755,6 +755,18 @@ function bpSpendAtShelter(hero) {
     drawLegendaryItem(hero);
     log(`  ⭐ Spent ${equipCost} BP → bought Legendary Equipment! (${hero.bp} BP left)`, 'legendary');
   }
+  // Priority: recharge Reality Warp if running to Hydra
+  if (hero.runningToHydra && G.exitHex) {
+    const rwIdx = hero.skills.findIndex(s => s.name === 'Reality Warp');
+    if (rwIdx >= 0 && hero.skillStates[rwIdx] === 'exhausted' && hero.bp >= rechargeCost) {
+      hero.bp -= rechargeCost;
+      hero.bpSpentSkill += rechargeCost;
+      hero.skillStates[rwIdx] = 'ready';
+      if (hero._bpSpentDetailSinceKO) { hero._bpSpentDetailSinceKO.recharge += rechargeCost; hero._skillsRechargedSinceKO.push('Reality Warp'); }
+      if (G.tracker) { if (!G.tracker.skillRechargeSources['bp']) G.tracker.skillRechargeSources['bp'] = 0; G.tracker.skillRechargeSources['bp']++; }
+      log(`  ⭐ Priority: recharged Reality Warp for Hydra rush! (${hero.bp} BP left)`, 'legendary');
+    }
+  }
   // Recharge skills if affordable and have exhausted ones
   while (hero.bp >= rechargeCost && exhaustedSkills > 0 && hero.skillStates.some(s => s === 'exhausted')) {
     // Track which skill will be recharged
@@ -3179,6 +3191,25 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     G.enemiesOnBoard.push({ card: {...enemyCard}, pos: { q: hero.pos.q, r: hero.pos.r }, name: enemyCard.name, tier: tier });
   }
 
+  // Astral Echo: free attack before KO
+  if (isSkillReady(hero, 'Astral Echo')) {
+    useSkill(hero, 'Astral Echo');
+    trackSkill(hero.id, 'Astral Echo', 'activated');
+    log(`  ✨ Astral Echo! ${hero.name} strikes back before falling!`, 'flame');
+    const echoRoll = heroRollDie(hero);
+    const echoTotal = echoRoll.val + totalStr(hero);
+    const echoEnemyRoll = rollDie();
+    const echoEnemyTotal = echoEnemyRoll.val + (enemyCard.str || 0);
+    if (echoTotal >= echoEnemyTotal) {
+      log(`    Astral Echo hits! (${echoTotal} vs ${echoEnemyTotal}) — enemy defeated even as ${hero.name} falls!`, 'wonder');
+      trackEncounter(enemyCard.name, 'won');
+      initHeroTracker(G.tracker, hero.id).enemiesKilled++;
+      bpReward(hero, enemyCard.str || 0);
+    } else {
+      log(`    Astral Echo misses. (${echoTotal} vs ${echoEnemyTotal})`, 'ko');
+    }
+  }
+
   hero._lastKOEnemy = enemyCard;  // Store which enemy caused KO, for dungeon floor guardian
   applyKO(hero);
 }
@@ -3324,6 +3355,9 @@ function shouldUseSkill(hero, skillName, context) {
       }
       return false;
     }
+
+    case 'Astral Echo':
+      return true;  // Always use when KO'd — it's free value
   }
   return false;
 }
@@ -4348,6 +4382,35 @@ function hydraAttack(hero) {
       hero._berserkerUsed = false;
     }
 
+    // Astral Echo at Hydra: free attack on the head that beat you
+    if (isSkillReady(hero, 'Astral Echo')) {
+      useSkill(hero, 'Astral Echo');
+      trackSkill(hero.id, 'Astral Echo', 'activated');
+      log(`  ✨ Astral Echo! ${hero.name} strikes back at ${head.name}!`, 'flame');
+      const echoRoll = heroRollDie(hero);
+      const echoTotal = echoRoll.val + totalStr(hero);
+      if (echoTotal >= effectiveHeadStr) {
+        log(`    Astral Echo hits! (${echoTotal} vs ${effectiveHeadStr}) — ${head.name} is silenced as ${hero.name} falls!`, 'wonder');
+        head.destroyed = true;
+        recalcHydraStr();
+        const recycling = G._tweaks && G._tweaks.hydraRecycling;
+        if (!recycling) G.hydraMaxHeads--;
+        G.tracker.hydraHeadKillOrder.push({ head: head.name, turn: G.turn, killedBy: hero.id });
+        initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
+        trackHydraHead(head.name, 'destroyed');
+        // Check victory BEFORE KO growth
+        const allDown = recycling ? G.hydraHeads.every(h => h.destroyed) : G.hydraHeads.filter(h => !h.destroyed).length === 0;
+        if (allDown) {
+          G.victory = true;
+          G.gameOver = true;
+          log(`  🎉 THE HYDRA IS SLAIN! VICTORY!`, 'victory');
+          return;  // Don't apply KO, game is won
+        }
+      } else {
+        log(`    Astral Echo misses. (${echoTotal} vs ${effectiveHeadStr})`, 'ko');
+      }
+    }
+
     // === KO PREVENTION SKILLS AT HYDRA ===
     // At Hydra, always prevent KO (costs a relic otherwise)
     let hydraKOPrevented = false;
@@ -4512,6 +4575,22 @@ function runToHydra(hero) {
   // Spend BP at shelter before leaving
   if (isAtShelter(hero)) {
     bpSpendAtShelter(hero);
+    // Reality Warp rush: if hero has RW ready and running to Hydra, teleport directly
+    if (hero.runningToHydra && G.exitHex && isSkillReady(hero, 'Reality Warp')) {
+      useSkill(hero, 'Reality Warp');
+      trackSkill(hero.id, 'Reality Warp', 'activated');
+      hero.pos = { q: G.exitHex.q, r: G.exitHex.r };
+      hero.runningToHydra = false;
+      G.heroesInHydraArea.add(hero.id);
+      const distSaved = G.hexMap ? (G.hexMap.findPath ? (function() { const p = G.hexMap.findPath(0, 0, G.exitHex.q, G.exitHex.r); return p ? p.length - 1 : hexDistance(0, 0, G.exitHex.q, G.exitHex.r); })() : hexDistance(0, 0, G.exitHex.q, G.exitHex.r)) : 0;
+      G.tracker.realityWarpUses.push({
+        heroId: hero.id, targetId: hero.id, selfTarget: true,
+        distanceSaved: distSaved, purpose: 'rush_hydra', turn: G.turn
+      });
+      log(`  🌀 Reality Warp: ${hero.name} teleports directly to the Hydra!`, 'wonder');
+      arriveAtHydra();
+      return;
+    }
   }
 
   log(`  ${hero.name} sprints toward the Hydra (rolled ${moveVal})`, 'system');
