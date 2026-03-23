@@ -2518,7 +2518,10 @@ function downloadReportMD() {
   }
   const md = mdPrefix + htmlToMarkdown(reportEl.innerHTML);
   const date = new Date().toISOString().slice(0,16).replace('T','_').replace(':','-');
-  const filename = 'JUJU_Playtest_Report_' + date + '.md';
+  const activeHeroes = currentTweaks && currentTweaks.activeHeroes || {};
+  const heroNames = ['juju','gigi','lulu','eggo'].filter(id => activeHeroes[id] !== false);
+  const heroTag = heroNames.length === 4 ? '4P' : heroNames.map(n => n.charAt(0).toUpperCase() + n.slice(1)).join('+');
+  const filename = heroTag + '_JUJU_Report_' + date + '.md';
   const blob = new Blob([md], {type: 'text/markdown'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
