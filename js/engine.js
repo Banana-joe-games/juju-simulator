@@ -876,6 +876,14 @@ function runTurn() {
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
 
+  // Ogre stuck check: hero skips turn if pinned
+  if (hero.stuckAtOgre) {
+    log(`  ${hero.name} is pinned by the Ogre — skips turn!`, 'ko');
+    trace('turn_skip', 'ogre_stuck', {hero: hero.id, stuckSince: hero.stuckAtOgreTurn});
+    nextHero();
+    return;
+  }
+
   trace('turn_start', 'hero_state', {
     position: hero.pos,
     skills: hero.skills.map((s,i) => ({name: s.name, state: hero.skillStates[i]})),
@@ -988,11 +996,17 @@ function runTurn() {
 
   // Hound following from previous turn
   if (hero.houndFollowing) {
-    log(`  🐕 The Hound catches up to ${hero.name}!`, 'misfortune');
-    const hound = hero.houndFollowing;
-    hero.houndFollowing = null;
-    combat(hero, hound, 'misfortune');
-    if (G.gameOver || hero.ko) { if (!G.gameOver) nextHero(); return; }
+    const destTile = G.hexMap && hero.pos && hero.pos.q !== undefined ? G.hexMap.get(hero.pos.q, hero.pos.r) : null;
+    if (destTile && destTile.type === 'wonder') {
+      log(`  🐕 The Hound can't follow into a Wonder room — it retreats!`, 'wonder');
+      hero.houndFollowing = null;
+    } else {
+      log(`  🐕 The Hound catches up to ${hero.name}!`, 'misfortune');
+      const hound = hero.houndFollowing;
+      hero.houndFollowing = null;
+      combat(hero, hound, 'misfortune');
+      if (G.gameOver || hero.ko) { if (!G.gameOver) nextHero(); return; }
+    }
   }
 
   // === Existing Threat: enemy on hero's tile from monster movement ===
@@ -2099,15 +2113,17 @@ function combat(hero, enemyCard, tier) {
     if (tier === 'misfortune' && G._tweaks.misfortuneEnemyStrMod) enemyStr = Math.max(0, enemyStr + G._tweaks.misfortuneEnemyStrMod);
   }
 
-  // === SPECIAL ENEMY STR ===
+  // === SPECIAL ENEMY STR (calculated from game state, then tweak added on top) ===
+  const strTweakMod = (G._tweaks && tier === 'misfortune' && G._tweaks.misfortuneEnemyStrMod) ? G._tweaks.misfortuneEnemyStrMod : 0;
   if (enemyCard.effect === 'random_str') {
-    enemyStr = Math.floor(Math.random() * 6) + 1;
-    log(`    The Faceless One's STR: ${enemyStr}`, 'combat');
+    const faceRoll = Math.floor(Math.random() * 6) + 1;
+    enemyStr = faceRoll + strTweakMod;
+    log(`    The Faceless One's STR: ${enemyStr} (rolled ${faceRoll} + ${strTweakMod} tweak)`, 'combat');
   }
   if (enemyCard.effect === 'plus2_per_relic') {
     const totalRelics = G.heroes.reduce((s, h) => s + h.heldRelics.length, 0);
-    enemyStr = totalRelics * 2;  // overrides base STR entirely — no double-stacking with Misfortune modifier
-    log(`    Fishguard STR: ${enemyStr} (+2 per relic, party has ${totalRelics})`, 'combat');
+    enemyStr = (totalRelics * 2) + strTweakMod;
+    log(`    Fishguard STR: ${enemyStr} (${totalRelics} relics × 2 + ${strTweakMod} tweak)`, 'combat');
     if (!G.tracker.enemyEffectImpact['Fishguard']) G.tracker.enemyEffectImpact['Fishguard'] = { triggered:0, impactful:0, totalStr:0, fights:0 };
     G.tracker.enemyEffectImpact['Fishguard'].totalStr += enemyStr;
     G.tracker.enemyEffectImpact['Fishguard'].fights++;
@@ -2507,6 +2523,18 @@ function combat(hero, enemyCard, tier) {
   initHeroTracker(G.tracker, hero.id).enemiesKilled++;
   trace('combat', 'result', {hero: hero.id, enemy: enemyCard.name, won: true, margin: _lfr.margin || 0, bpEarned: 0});
   log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
+
+  // Ogre rescue: if the defeated enemy was an Ogre, free all stuck heroes on this tile
+  if (enemyCard.effect === 'no_respawn_on_loss') {
+    G.heroes.forEach(h => {
+      if (h.stuckAtOgre && h.pos && hero.pos && h.pos.q === hero.pos.q && h.pos.r === hero.pos.r) {
+        h.stuckAtOgre = null;
+        const turnsStuck = G.turn - (h.stuckAtOgreTurn || G.turn);
+        log(`    ${h.name} is freed from the Ogre! (stuck ${turnsStuck} turns)`, 'wonder');
+        trackEnemySideEffect('Ogre', 'otherEffects');
+      }
+    });
+  }
 
   // Cost of Victory: track resource drain on wins
   {
@@ -3169,6 +3197,13 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
 function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
   if (enemyStr === undefined) enemyStr = enemyCard.str || 0;
 
+  // Dragon: +1 STR on EVERY loss (before KO prevention checks)
+  if (enemyCard.effect === 'gains_str_on_loss') {
+    enemyCard.str = (enemyCard.str || 5) + 1;
+    trackEnemySideEffect('Dragon', 'otherEffects');
+    log(`    Dragon grows stronger! Now STR ${enemyCard.str}`, 'misfortune');
+  }
+
   // === Crown of Courage (bodyguard): another hero with the Crown fights in hero's place ===
   if (!G.crownUsedThisRound) {
     const crownHolder = G.heroes.find(h =>
@@ -3281,12 +3316,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     log(`    Berserker Helmet retry failed!`, 'ko');
   }
 
-  // Dragon: +1 STR on loss
-  if (enemyCard.effect === 'gains_str_on_loss') {
-    enemyCard.str = (enemyCard.str || 5) + 1;
-    trackEnemySideEffect('Dragon', 'otherEffects');
-    log(`    Dragon grows stronger! Now STR ${enemyCard.str}`, 'misfortune');
-  }
+  // Dragon +1 STR: moved to top of handleCombatLoss (triggers on every loss, even KO-prevented)
 
   // Hound: follows hero on loss
   if (enemyCard.effect === 'follows_on_loss') {
@@ -3296,7 +3326,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     return; // Hound doesn't KO, just follows
   }
 
-  // Ogre: no respawn, stay on tile
+  // Ogre: no respawn, stay on tile, skip turns until rescued
   if (enemyCard.effect === 'no_respawn_on_loss') {
     G.stats.ko++;
     if (!heroHasRelicFromOwner(hero, 'eggo')) {
@@ -3306,7 +3336,10 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
       G.tracker.relicEffects.cloak.safekeepCount++;
     }
     removeFollowers(hero);
-    log(`    Ogre pins ${hero.name}! No respawn — stuck until rescued.`, 'ko');
+    hero.stuckAtOgre = {...enemyCard};  // hero is stuck until rescued
+    hero.stuckAtOgreTurn = G.turn;
+    trackEnemySideEffect('Ogre', 'otherEffects');
+    log(`    Ogre pins ${hero.name}! Stuck on tile — cannot act until another hero defeats the Ogre.`, 'ko');
     return;
   }
 

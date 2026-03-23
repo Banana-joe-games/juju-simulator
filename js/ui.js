@@ -2149,6 +2149,12 @@ function runSilentGame() {
     hero.talentUsedThisTurn = false;
     hero.dodgeActive = false;
 
+    // Ogre stuck: skip turn
+    if (hero.stuckAtOgre) {
+      nextHero();
+      continue;
+    }
+
     // BP: spend at shelter
     bpSpendAtShelter(hero);
     hero._justRespawned = false;
