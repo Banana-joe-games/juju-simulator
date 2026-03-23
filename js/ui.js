@@ -1323,13 +1323,22 @@ function generateReport(results) {
       }
     });
 
+    // Aggregate cross-hero help per enemy from the new tracker
+    const allCrossHelp = {};
+    results.forEach(r => {
+      Object.entries(r.tracker.enemyCrossHeroHelp || {}).forEach(([enemy, count]) => {
+        allCrossHelp[enemy] = (allCrossHelp[enemy] || 0) + count;
+      });
+    });
+
     const engagementRows = Object.entries(enemyEngagement)
       .filter(([, e]) => e.fights >= 5)
       .map(([name, e]) => {
         const winPct = e.fights > 0 ? e.wins / e.fights * 100 : 0;
         const skillUsePct = e.fights > 0 ? e.skillUsed / e.fights * 100 : 0;
         const burnPct = e.fights > 0 ? e.skillBurned / e.fights * 100 : 0;
-        const crossHeroPct = e.fights > 0 ? e.crossHeroHelp / e.fights * 100 : 0;
+        const crossCount = allCrossHelp[name] || 0;
+        const crossHeroPct = e.fights > 0 ? crossCount / e.fights * 100 : 0;
         const depth = (skillUsePct + burnPct + crossHeroPct) / 3;
         return { name, fights: e.fights, winPct, skillUsePct, burnPct, crossHeroPct, depth };
       })

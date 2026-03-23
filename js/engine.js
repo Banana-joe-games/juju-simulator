@@ -292,6 +292,7 @@ function freshTracker() {
       cloak: { safekeepCount: 0, thirdSlotUsed: 0 }
     },
     spellMirrorDetails: { total: 0, cancelled: {}, atHydra: 0, atDungeon: 0 },
+    enemyCrossHeroHelp: {},  // { enemyName: count }
   };
 }
 
@@ -1892,6 +1893,9 @@ function combat(hero, enemyCard, tier) {
         if (jujuStr > heroStr + 2 && heroStr < enemyStr + 2) {
           useSkill(juju, 'Taunt');
           trackSkill('juju', 'Taunt', 'activated');
+          if (G.tracker.enemyCrossHeroHelp) {
+            G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+          }
           log(`  ⚔ Juju uses Taunt to protect ${hero.name}! Taking over the fight.`, 'flame');
           combat(juju, enemyCard, tier);
           return;
@@ -2071,6 +2075,9 @@ function combat(hero, enemyCard, tier) {
     useSkill(luluForSiphon, 'Siphon');
     enemyStr -= 2;
     trackSkill('lulu', 'Siphon', 'activated');
+    if (hero.id !== 'lulu' && G.tracker.enemyCrossHeroHelp) {
+      G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+    }
     const who = hero.id === 'lulu' ? '' : ` (helping ${hero.name})`;
     log(`    🔮 Siphon! Lulu${who} reduces enemy STR by 2 (now ${enemyStr})`, 'flame');
   }
@@ -2087,6 +2094,9 @@ function combat(hero, enemyCard, tier) {
       useSkill(eggoForCopy, 'Copycat');
       enemyStr -= 2;
       trackSkill('eggo', 'Copycat', 'activated');
+      if (hero.id !== 'eggo' && G.tracker.enemyCrossHeroHelp) {
+        G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+      }
       { const ccEntry = { copiedSkill: 'Siphon', won: false, context: 'dungeon' };
       G.tracker.copycatDetails.push(ccEntry);
       hero._lastCopycatEntry = ccEntry; }
@@ -2720,6 +2730,9 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
             G.stats.skillBurns++;
             initHeroTracker(G.tracker, helper.id).skillsBurned++;
             hero._allyBurned = true;
+            if (G.tracker.enemyCrossHeroHelp) {
+              G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+            }
             const oldHeroTotal = heroTotal;
             heroRoll = { val: allyRerollVal, isFlame: allyRerollFlame };
             G._lastHeroRollVal = allyRerollVal;
@@ -2744,6 +2757,9 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
             G.stats.skillBurns++;
             initHeroTracker(G.tracker, helper.id).skillsBurned++;
             hero._allyBurned = true;
+            if (G.tracker.enemyCrossHeroHelp) {
+              G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+            }
             const oldEnemyTotal = enemyTotal;
             enemyTotal = allyNewEnemyTotal;
             if (heroTotal < oldEnemyTotal + beatMargin && heroTotal >= enemyTotal + beatMargin) {
@@ -2804,6 +2820,9 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
         useSkill(jujuForNT, 'Not Today!');
         trackSkill('juju', 'Not Today!', 'activated');
         trackSkill('juju', 'Not Today!', 'turnedFight');
+        if (hero.id !== 'juju' && G.tracker.enemyCrossHeroHelp) {
+          G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+        }
         const who = hero.id === 'juju' ? '' : ` for ${hero.name}`;
         log(`    ⚔ NOT TODAY! Juju${who} turns a loss (margin ${margin}) into a win!`, 'flame');
         // Treat as win
@@ -2864,6 +2883,9 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
         const crownWon = !crownHolder.ko;
         if (crownWon) crownHolder.pos = savedPos;
         G.tracker.crownBodyguard.push({ turn: G.turn, protector: crownHolder.id, protected: hero.id, enemy: enemyCard.name, won: crownWon });
+        if (G.tracker.enemyCrossHeroHelp) {
+          G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+        }
         G.tracker.relicEffects.crown.bodyguardCount++;
         if (!G.tracker.relicEffects.crown.protected[hero.id]) G.tracker.relicEffects.crown.protected[hero.id] = 0;
         G.tracker.relicEffects.crown.protected[hero.id]++;
@@ -2883,6 +2905,9 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     useSkill(jujuForShield, 'Shield Wall');
     trackSkill('juju', 'Shield Wall', 'activated');
     trackSkill('juju', 'Shield Wall', 'savedFromKO');
+    if (hero.id !== 'juju' && G.tracker.enemyCrossHeroHelp) {
+      G.tracker.enemyCrossHeroHelp[enemyCard.name] = (G.tracker.enemyCrossHeroHelp[enemyCard.name] || 0) + 1;
+    }
     const who = hero.id === 'juju' ? '' : ` (saving ${hero.name})`;
     log(`    🛡 Shield Wall! Juju${who} prevents KO!`, 'flame');
     return;
@@ -3271,20 +3296,11 @@ function triggerTalent(hero, context) {
       }
       break;
     case 'gigi': {
-      // AI priority: self-gift is a real option, not just fallback
-      // Self-gift preferred when: Gigi has Grimoire (recharge 2 next turn),
-      // or Awakening could trigger (guarantees Flame for placement), or solo play
-      // Otherwise: Eggo (Dodge/Daredevil synergy) > Juju (+2 combat) > Lulu (Arcane Recharge) > self
-      // At Hydra: gift to whoever attacks next
+      // Value-based Nature's Gift target selection
       let target = hero; // default to self
-      const gigiHasGrimoire = heroHasRelicFromOwner(hero, 'lulu');
-      const gigiAwakeningPossible = G.tilesPlaced >= 10 && (G.relicPool.length > 0 || !G.exitPlaced);
-      const aliveAllies = G.heroes.filter(h => h.id !== 'gigi' && !h.ko);
-      const isSolo = aliveAllies.length === 0;
-      const preferSelf = isSolo || gigiHasGrimoire || gigiAwakeningPossible;
 
       if (G.hydraActive) {
-        // Gift to the next hero who will attack the Hydra
+        // At Hydra: gift to the next hero who will attack
         const heroOrder = G.heroes;
         const currentIdx = heroOrder.indexOf(hero);
         for (let i = 1; i <= heroOrder.length; i++) {
@@ -3294,16 +3310,52 @@ function triggerTalent(hero, context) {
             break;
           }
         }
-      } else if (preferSelf) {
-        target = hero; // self-gift is the strategic choice
       } else {
-        const eggo = G.heroes.find(h => h.id === 'eggo' && !h.ko);
-        const juju = G.heroes.find(h => h.id === 'juju' && !h.ko);
-        const lulu = G.heroes.find(h => h.id === 'lulu' && !h.ko);
-        if (eggo) target = eggo;
-        else if (juju) target = juju;
-        else if (lulu) target = lulu;
-        // else target stays as self (gigi)
+        // Value-based evaluation for dungeon phase
+        const candidates = G.heroes.filter(h => !h.giftedFlame);
+        let bestTarget = null;
+        let bestScore = -1;
+
+        candidates.forEach(h => {
+          let score = 0;
+
+          if (h.id === 'lulu') {
+            // Arcane Recharge: recharge 1 skill (or 2 with Grimoire)
+            const exhausted = h.skillStates.filter(s => s === 'exhausted').length;
+            const hasGrimoire = h.heldRelics && h.heldRelics.some(r => r.owner === 'lulu');
+            score = exhausted > 0 ? (hasGrimoire ? 10 : 8) : 1;
+          } else if (h.id === 'eggo') {
+            // Dodge: prevent KO. Very valuable if Eggo is likely to fight
+            const inDanger = h.pos !== 'entrance' && !G.heroesInHydraArea.has(h.id);
+            score = inDanger ? 7 : 4;
+            // Higher if Eggo has equipment/followers to protect
+            if (h.equipment.length >= 2) score += 2;
+          } else if (h.id === 'juju') {
+            // Unwavering Power: +2 STR. Moderate value
+            score = 5;
+            // Higher if Juju is about to fight a strong enemy or Hydra
+            if (G.heroesInHydraArea.has(h.id)) score += 2;
+          } else if (h.id === 'gigi') {
+            // Self-gift: only for Awakening
+            if (G.tilesPlaced >= 10 && !G.exitPlaced) {
+              score = 6; // Awakening is valuable
+            } else if (G.tilesPlaced >= 10 && G.relicRoomsPlaced < 4) {
+              score = 5; // Relic room placement
+            } else {
+              score = 1; // Self-gift has no combat value
+            }
+          }
+
+          // Slight randomness to avoid perfect predictability
+          score += Math.random() * 0.5;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestTarget = h;
+          }
+        });
+
+        target = bestTarget || hero; // fallback to self
       }
       target.giftedFlame = true;
       G.tracker.talentDetails.gigi.triggered++;
@@ -3735,6 +3787,9 @@ function hydraAttack(hero) {
     useSkill(luluForSiphon, 'Siphon');
     siphonSkillDrain += 2;
     trackSkill('lulu', 'Siphon', 'activated');
+    if (hero.id !== 'lulu' && G.tracker.enemyCrossHeroHelp) {
+      G.tracker.enemyCrossHeroHelp[head.name] = (G.tracker.enemyCrossHeroHelp[head.name] || 0) + 1;
+    }
     const who = hero.id === 'lulu' ? '' : ` (helping ${hero.name})`;
     log(`    🔮 Siphon! Lulu${who} weakens head by 2 STR`, 'flame');
   }
@@ -3759,6 +3814,9 @@ function hydraAttack(hero) {
         useSkill(eggo, 'Copycat');
         siphonSkillDrain += 2;
         trackSkill('eggo', 'Copycat', 'activated');
+        if (G.tracker.enemyCrossHeroHelp) {
+          G.tracker.enemyCrossHeroHelp[head.name] = (G.tracker.enemyCrossHeroHelp[head.name] || 0) + 1;
+        }
         { const ccEntry = { copiedSkill: 'Siphon', won: false, context: 'hydra' };
         G.tracker.copycatDetails.push(ccEntry);
         hero._lastCopycatEntry = ccEntry; }
@@ -3885,6 +3943,9 @@ function hydraAttack(hero) {
             exhaustOneSkill(helper, `Skill Burn for ${hero.name}`);
             G.stats.skillBurns++;
             initHeroTracker(G.tracker, helper.id).skillsBurned++;
+            if (G.tracker.enemyCrossHeroHelp) {
+              G.tracker.enemyCrossHeroHelp[head.name] = (G.tracker.enemyCrossHeroHelp[head.name] || 0) + 1;
+            }
             const oldHeroTotal = heroTotal;
             heroTotal = allyTotalH;
             isFlame = allyNewFlame;
@@ -4069,6 +4130,9 @@ function hydraAttack(hero) {
       useSkill(jujuShieldHydra, 'Shield Wall');
       trackSkill('juju', 'Shield Wall', 'activated');
       trackSkill('juju', 'Shield Wall', 'savedFromKO');
+      if (hero.id !== 'juju' && G.tracker.enemyCrossHeroHelp) {
+        G.tracker.enemyCrossHeroHelp[head.name] = (G.tracker.enemyCrossHeroHelp[head.name] || 0) + 1;
+      }
       const who = hero.id === 'juju' ? '' : ` (saving ${hero.name})`;
       log(`    🛡 Shield Wall! Juju${who} prevents KO at Hydra!`, 'flame');
       hydraKOPrevented = true;
