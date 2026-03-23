@@ -2565,12 +2565,13 @@ function combat(hero, enemyCard, tier) {
     G.tracker.enemyEffectImpact[enemyCard.name].triggered++;
   }
 
-  // Mindflayer: return to top of Misfortune deck on defeat
+  // Mindflayer: shuffle back into Misfortune deck on defeat (can be encountered again)
   if (enemyCard.effect === 'top_of_deck') {
     const idx = MISFORTUNE_CARDS.findIndex(c => c.name === 'Mindflayer');
     if (idx >= 0) {
-      G.misfortuneDeck.push(idx);  // push to top (deck pops from end)
-      log(`    Mindflayer returns to the top of the Misfortune deck!`, 'misfortune');
+      const pos = Math.floor(Math.random() * (G.misfortuneDeck.length + 1));
+      G.misfortuneDeck.splice(pos, 0, idx);
+      log(`    Mindflayer vanishes back into the Misfortune deck!`, 'misfortune');
     }
   }
 
