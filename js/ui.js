@@ -25,7 +25,7 @@ function renderHeroes() {
         <div class="name" style="color:${h.color}">${h.name} ${h.title}</div>
         <div class="stat">STR <b>${totalStr(h)}</b> (base ${h.str}) · 🔥 ${h.flameFaces.join(',')}</div>
         <div class="stat">Talent: <b>${h.talent}</b></div>
-        <div class="stat">${h.dodgeActive ? '🛡Dodge ' : ''}${h.runningToHydra ? '🏃Running' : ''}${gilEnabled() ? ' 💰 ' + h.gil + ' Gil' : ''}</div>
+        <div class="stat">${h.dodgeActive ? '🛡Dodge ' : ''}${h.runningToHydra ? '🏃Running' : ''}${bpEnabled() ? ' ⭐ ' + h.bp + ' BP' : ''}</div>
         <div style="margin-top:3px">Relics: ${relics}</div>
         <div style="margin-top:4px">${skills}</div>
         <div style="margin-top:3px">Equip: ${equip}</div>
@@ -58,14 +58,14 @@ function renderHexMap() {
   }
 
   const tileColors = {
-    entrance: '#d4a843',
+    shelter: '#d4a843',
     wonder: '#1a4a2a',
     common: '#1e1e2e',
     dread: '#4a1520',
     exit: '#2a1a3a'
   };
   const tileBorders = {
-    entrance: '#d4a843',
+    shelter: '#d4a843',
     wonder: '#2d8a4e',
     common: '#2a2a3a',
     dread: '#b02030',
@@ -123,13 +123,13 @@ function renderHexMap() {
     svg += `<polygon points="${hexPoints(cx, cy)}" fill="${fill}" stroke="${stroke}" stroke-width="1"/>`;
 
     // Tile type initial
-    if (tile.type !== 'entrance') {
+    if (tile.type !== 'shelter') {
       const label = tile.type === 'wonder' ? 'W' : tile.type === 'dread' ? 'D' : '';
       if (label) {
         svg += `<text x="${cx}" y="${cy + 3}" text-anchor="middle" fill="${stroke}" font-size="7" font-family="monospace" opacity="0.5">${label}</text>`;
       }
     } else {
-      svg += `<text x="${cx}" y="${cy + 3}" text-anchor="middle" fill="${tileColors.entrance}" font-size="7" font-family="monospace" font-weight="bold">E</text>`;
+      svg += `<text x="${cx}" y="${cy + 3}" text-anchor="middle" fill="${tileColors.shelter}" font-size="7" font-family="monospace" font-weight="bold">S</text>`;
     }
 
     // Enemies on tile
@@ -401,8 +401,8 @@ function generateReport(results) {
   heroIds.forEach(() => html += `<td style="color:var(--heal);font-size:9px">Win</td><td style="color:var(--ko);font-size:9px">Loss</td>`);
   html += `</tr>`;
 
-  const endStateMetrics = ['totalStr','equipCount','followerCount','readySkills','relics','gil'];
-  const endStateLabels = ['Total STR','Equipment','Followers','Ready Skills','Relics','Gil'];
+  const endStateMetrics = ['totalStr','equipCount','followerCount','readySkills','relics','bp'];
+  const endStateLabels = ['Total STR','Equipment','Followers','Ready Skills','Relics','BP'];
   endStateMetrics.forEach((metric, mi) => {
     html += `<tr><td style="color:var(--dim)">${endStateLabels[mi]}</td>`;
     heroIds.forEach(id => {
@@ -430,7 +430,7 @@ function generateReport(results) {
     {label: 'Ready Skills', key: 'readySkills'},
     {label: 'Followers', key: 'followerCount'},
     {label: 'Relics', key: 'relics'},
-    {label: 'Gil', key: 'gil'},
+    {label: 'BP', key: 'bp'},
     {label: 'Total STR', key: 'totalStr'}
   ];
 
@@ -918,36 +918,36 @@ function generateReport(results) {
   html += `</div>`;
 
   // ===================== SECTION 8: GIL ECONOMY =====================
-  html += `<div class="report-section"><h3>Gil Economy</h3>`;
-  const gilGames = results.filter(r => r.heroes.some(h => (h.gilEarned||0) > 0));
-  if (gilGames.length > 0) {
+  html += `<div class="report-section"><h3>BP Economy</h3>`;
+  const bpGames = results.filter(r => r.heroes.some(h => (h.bpEarned||0) > 0));
+  if (bpGames.length > 0) {
     html += `<div class="report-card">`;
     heroIds.forEach(id => {
-      const earned = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gilEarned||0 : 0; });
-      const spentSkill = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gilSpentSkill||0 : 0; });
-      const spentEquip = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gilSpentEquip||0 : 0; });
-      const unspent = avg(gilGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.gil||0 : 0; });
+      const earned = avg(bpGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.bpEarned||0 : 0; });
+      const spentSkill = avg(bpGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.bpSpentSkill||0 : 0; });
+      const spentEquip = avg(bpGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.bpSpentEquip||0 : 0; });
+      const unspent = avg(bpGames, r => { const h = r.heroes.find(x => x.id === id); return h ? h.bp||0 : 0; });
       const unspentPct = earned > 0 ? pct(unspent, earned) : '-';
       html += `<div style="margin-bottom:6px"><b style="color:var(--${id})">${heroNames[id]}</b>`;
       html += statRow('Avg Earned / game', fix1(earned));
       html += statRow('Avg Spent on Skills', fix1(spentSkill));
       html += statRow('Avg Spent on Equipment', fix1(spentEquip));
       html += statRow('Avg Unspent', `${fix1(unspent)} (${unspentPct}%)`);
-      if (earned > 0 && unspent / earned > 0.6) flag('gil', 'medium', `${heroNames[id]} leaves ${unspentPct}% of Gil unspent — Gil not useful enough or prices too high`);
+      if (earned > 0 && unspent / earned > 0.6) flag('bp', 'medium', `${heroNames[id]} leaves ${unspentPct}% of BP unspent — BP not useful enough or prices too high`);
       html += `</div>`;
     });
     html += `</div>`;
 
-    // Gil visits
-    const totalVoluntary = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.voluntary : 0), 0);
-    const totalKOVisits = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.koRespawn : 0), 0);
-    html += `<div class="report-card"><b>Entrance Visits</b>`;
-    html += statRow('Voluntary (to spend Gil)', totalVoluntary);
+    // BP visits
+    const totalVoluntary = results.reduce((s,r) => s + (r.tracker.bpVisits ? r.tracker.bpVisits.voluntary : 0), 0);
+    const totalKOVisits = results.reduce((s,r) => s + (r.tracker.bpVisits ? r.tracker.bpVisits.koRespawn : 0), 0);
+    html += `<div class="report-card"><b>Shelter Visits</b>`;
+    html += statRow('Voluntary (to spend BP)', totalVoluntary);
     html += statRow('KO Respawn', totalKOVisits);
-    if (totalVoluntary === 0 && totalKOVisits > 0) flag('gil', 'medium', 'No voluntary Gil spending visits — heroes only spend when KO respawning');
+    if (totalVoluntary === 0 && totalKOVisits > 0) flag('bp', 'medium', 'No voluntary BP spending visits — heroes only spend when KO respawning');
     html += `</div>`;
   } else {
-    html += `<div class="report-card" style="color:var(--dim)">Gil system not enabled in this batch.</div>`;
+    html += `<div class="report-card" style="color:var(--dim)">BP system not enabled in this batch.</div>`;
   }
   html += `</div>`;
 
@@ -1255,8 +1255,8 @@ function generateReport(results) {
   }
   html += `</div>`;
 
-  // ===================== SPELL MIRROR ANALYSIS =====================
-  html += `<div class="report-section"><h3>Spell Mirror Analysis</h3>`;
+  // ===================== ARCANE FAMILIAR ANALYSIS =====================
+  html += `<div class="report-section"><h3>Arcane Familiar Analysis</h3>`;
   {
     const sm = { total: 0, cancelled: {}, atHydra: 0, atDungeon: 0 };
     results.forEach(r => {
@@ -1271,7 +1271,7 @@ function generateReport(results) {
       }
     });
 
-    html += `<div class="report-card"><b>Spell Mirror Cancellations</b>`;
+    html += `<div class="report-card"><b>Arcane Familiar Cancellations</b>`;
     html += statRow('Total Cancellations', `${sm.total} (${fix1(sm.total/n)}/game)`);
     html += statRow('At Dungeon', `${sm.atDungeon} (${pct(sm.atDungeon, sm.total)}%)`);
     html += statRow('At Hydra', `${sm.atHydra} (${pct(sm.atHydra, sm.total)}%)`);
@@ -1633,33 +1633,33 @@ function generateTextualAnalysis(results, wins, losses, n, winRate, heroIds, her
   t += `</div>`;
 
   // ---- GIL ECONOMY ----
-  const gilGames = results.filter(r => r.heroes.some(h => (h.gilEarned||0) > 0));
-  if (gilGames.length > 0) {
+  const bpGames = results.filter(r => r.heroes.some(h => (h.bpEarned||0) > 0));
+  if (bpGames.length > 0) {
     t += `<div class="report-card" style="line-height:1.7;font-size:12px">`;
-    t += `<b style="font-size:14px">Gil Economy</b><br><br>`;
+    t += `<b style="font-size:14px">BP Economy</b><br><br>`;
 
-    const totalEarned = gilGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.gilEarned||0), 0), 0);
-    const totalSpent = gilGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.gilSpentSkill||0) + (h.gilSpentEquip||0), 0), 0);
-    const totalUnspent = gilGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.gil||0), 0), 0);
+    const totalEarned = bpGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.bpEarned||0), 0), 0);
+    const totalSpent = bpGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.bpSpentSkill||0) + (h.bpSpentEquip||0), 0), 0);
+    const totalUnspent = bpGames.reduce((s,r) => s + r.heroes.reduce((ss,h) => ss + (h.bp||0), 0), 0);
     const unspentPct = totalEarned > 0 ? (totalUnspent / totalEarned * 100).toFixed(0) : 0;
 
-    t += `Heroes earn <b>${fix1(totalEarned / gilGames.length)} Gil per game</b> across the whole party and leave <b>${unspentPct}% unspent</b>. `;
+    t += `Heroes earn <b>${fix1(totalEarned / bpGames.length)} BP per game</b> across the whole party and leave <b>${unspentPct}% unspent</b>. `;
 
     if (parseInt(unspentPct) > 70) {
-      t += `Most Gil goes to waste. Heroes either can't reach the Entrance to spend it, or the prices are too high relative to earnings. `;
-      t += `Consider: lowering recharge/equipment costs, allowing Gil spending at the Hydra, or giving heroes more reasons to visit the Entrance. `;
+      t += `Most BP goes to waste. Heroes either can't reach the Shelter to spend it, or the prices are too high relative to earnings. `;
+      t += `Consider: lowering recharge/equipment costs, allowing BP spending at the Hydra, or giving heroes more reasons to visit the Shelter. `;
     } else if (parseInt(unspentPct) > 40) {
-      t += `About half the Gil is being used. There's room to make Gil more impactful, but it's contributing to the economy. `;
+      t += `About half the BP is being used. There's room to make BP more impactful, but it's contributing to the economy. `;
     } else {
-      t += `Gil is being spent efficiently. Heroes are finding opportunities to convert Gil into skills and equipment. `;
+      t += `BP is being spent efficiently. Heroes are finding opportunities to convert BP into skills and equipment. `;
     }
 
-    const totalVoluntary = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.voluntary : 0), 0);
-    const totalKOVisits = results.reduce((s,r) => s + (r.tracker.gilVisits ? r.tracker.gilVisits.koRespawn : 0), 0);
+    const totalVoluntary = results.reduce((s,r) => s + (r.tracker.bpVisits ? r.tracker.bpVisits.voluntary : 0), 0);
+    const totalKOVisits = results.reduce((s,r) => s + (r.tracker.bpVisits ? r.tracker.bpVisits.koRespawn : 0), 0);
     if (totalVoluntary + totalKOVisits > 0) {
-      t += `Heroes visit the Entrance <b>${totalVoluntary} times voluntarily</b> and <b>${totalKOVisits} times from KO respawn</b>. `;
+      t += `Heroes visit the Shelter <b>${totalVoluntary} times voluntarily</b> and <b>${totalKOVisits} times from KO respawn</b>. `;
       if (totalVoluntary === 0) {
-        t += `No one ever goes back on purpose, meaning Gil is only spent by accident when heroes respawn. `;
+        t += `No one ever goes back on purpose, meaning BP is only spent by accident when heroes respawn. `;
       }
     }
     t += `</div>`;
@@ -1744,8 +1744,8 @@ function runSilentGame() {
     hero.talentUsedThisTurn = false;
     hero.dodgeActive = false;
 
-    // Gil: spend at entrance
-    gilSpendAtEntrance(hero);
+    // BP: spend at shelter
+    bpSpendAtShelter(hero);
     hero._justRespawned = false;
 
     // Track stalker turnsActive for all stalkers on this hero
@@ -1855,7 +1855,7 @@ function runSilentGame() {
       followerNames: h.followers.map(f => f.name),
       readySkills: readySkillCount(h),
       relics: h.heldRelics.length,
-      gil: h.gil || 0,
+      bp: h.bp || 0,
       stalkerCount: h.stalkers.length,
       ko: initHeroTracker(G.tracker, h.id).ko
     };
@@ -1881,10 +1881,10 @@ function runSilentGame() {
       totalStr:totalStr(h),
       readySkills:readySkillCount(h),
       ko:initHeroTracker(G.tracker,h.id).ko,
-      gil:h.gil||0,
-      gilEarned:h.gilEarned||0,
-      gilSpentSkill:h.gilSpentSkill||0,
-      gilSpentEquip:h.gilSpentEquip||0
+      bp:h.bp||0,
+      bpEarned:h.bpEarned||0,
+      bpSpentSkill:h.bpSpentSkill||0,
+      bpSpentEquip:h.bpSpentEquip||0
     })),
     defeatCause: !G.victory ? classifyDefeat(G) : null,
     roomsVisited: G.roomsVisited
@@ -1922,8 +1922,8 @@ function generateGameSummary(gameIndex) {
       combats: (initHeroTracker(G.tracker, h.id) || {}).combats || 0,
       wins: (initHeroTracker(G.tracker, h.id) || {}).wins || 0,
       ko: (initHeroTracker(G.tracker, h.id) || {}).ko || 0,
-      gilEarned: h.gilEarned || 0,
-      gilSpent: (h.gilSpentSkill||0) + (h.gilSpentEquip||0),
+      bpEarned: h.bpEarned || 0,
+      bpSpent: (h.bpSpentSkill||0) + (h.bpSpentEquip||0),
       totalStr: totalStr(h),
       readySkills: readySkillCount(h),
       equipment: h.equipment.map(e => e.name)
@@ -1970,7 +1970,7 @@ function formatTraceEvent(e) {
       s += '  EQUIPMENT: ' + (d.equipment.length ? d.equipment.map(function(eq) { return '[' + eq.name + ' ' + (eq.str >= 0 ? '+' : '') + eq.str + ']'; }).join(' ') : '(none)') + '\n';
       s += '  RELICS: ' + (d.relics.length ? d.relics.map(function(r) { return '[' + r.name + (r.owner === e.hero ? ' (owner)' : '') + ']'; }).join(' ') : '(none)') + '\n';
       s += '  FOLLOWERS: ' + (d.followers.length ? d.followers.map(function(f) { return '[' + f.name + ' +' + f.str + ']'; }).join(' ') : '(none)') + '\n';
-      s += '  GIL: ' + d.gil + ' | STR TOTAL: ' + d.totalStr + ' | READY SKILLS: ' + d.readySkills + '\n';
+      s += '  BP: ' + d.bp + ' | STR TOTAL: ' + d.totalStr + ' | READY SKILLS: ' + d.readySkills + '\n';
       return s;
     case 'grimoire_failsafe':
       return '  GRIMOIRE FAILSAFE: ' + d.hero + ' had 0 ready skills - recharged ' + d.recharged + '\n';
@@ -1999,7 +1999,7 @@ function formatTraceEvent(e) {
     case 'talent':
       return '    TALENT: ' + d.hero + ' -> ' + d.talent + (d.blocked ? ' [BLOCKED]' : '') + ': ' + d.effect + '\n';
     case 'result':
-      return '    RESULT: ' + (d.won ? 'WIN' : 'LOSS') + ' (margin ' + d.margin + ')' + (d.gilEarned ? '. Gil +' + d.gilEarned : '') + '\n';
+      return '    RESULT: ' + (d.won ? 'WIN' : 'LOSS') + ' (margin ' + d.margin + ')' + (d.bpEarned ? '. BP +' + d.bpEarned : '') + '\n';
     case 'applied':
       return '  KO: ' + d.hero + ' knocked out by ' + d.cause + (d.relicUsed ? ', relic saved' : '') + (d.shieldWall ? ', Shield Wall used' : '') + (d.dodge ? ', Dodge triggered' : '') + '\n    Equipment dropped: ' + ((d.equipmentDropped || []).join(', ') || 'none') + '. Followers lost: ' + ((d.followersLost || []).join(', ') || 'none') + '\n';
     case 'passive':
@@ -2026,7 +2026,7 @@ function formatBatchSummary(summary) {
   }
   s += '  Heads grown: ' + summary.headsGrown + '\n';
   summary.heroSummaries.forEach(function(h) {
-    s += '  ' + h.id + ': ' + h.combats + ' fights (' + h.wins + 'W), ' + h.ko + ' KOs, ' + h.gilEarned + ' Gil earned, ' + h.gilSpent + ' spent\n';
+    s += '  ' + h.id + ': ' + h.combats + ' fights (' + h.wins + 'W), ' + h.ko + ' KOs, ' + h.bpEarned + ' BP earned, ' + h.bpSpent + ' spent\n';
   });
   if (summary.keyMoments && summary.keyMoments.length) {
     s += '  KEY MOMENTS:\n';
@@ -2117,9 +2117,9 @@ function organizeReportTabs() {
   const tabMap = {
     'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
-    'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Spell Mirror'],
+    'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Arcane Familiar'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement'],
-    'tab-hydra-econ': ['Gil Economy','Hydra Fight'],
+    'tab-hydra-econ': ['BP Economy','Hydra Fight'],
     'tab-analysis': ['Textual Analysis']
   };
   const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ','tab-analysis'];
@@ -2384,8 +2384,8 @@ function generateSingleGameReport() {
     html += ` | 💀 KOs: <b>${ht.ko}</b>`;
     html += ` | 🔄 Skill Burns: <b>${ht.skillsBurned || 0}</b>`;
     html += ` | 💎 Relics Spent: <b>${ht.relicsSpent || 0}</b>`;
-    if (gilEnabled()) {
-      html += `<br>💰 Gil: earned <b>${hero.gilEarned}</b>, spent on skills <b>${hero.gilSpentSkill}</b>, spent on equip <b>${hero.gilSpentEquip}</b>, remaining <b>${hero.gil}</b>`;
+    if (bpEnabled()) {
+      html += `<br>⭐ BP: earned <b>${hero.bpEarned}</b>, spent on skills <b>${hero.bpSpentSkill}</b>, spent on equip <b>${hero.bpSpentEquip}</b>, remaining <b>${hero.bp}</b>`;
     }
     html += `</div>`;
 
@@ -2777,7 +2777,7 @@ function startGameInternal() {
   log('  JUJU\'S CASTLE — NEW GAME', 'turn-header');
   log('═══════════════════════════════════════', 'system');
   log(`Party: ${G.heroes.map(h => h.name + ' (STR ' + h.str + ')').join(', ')}`, 'system');
-  log('All heroes start at the Entrance. 36 rooms to explore.', 'system');
+  log('All heroes start at the Shelter. 36 rooms to explore.', 'system');
   if (diffs.length > 0) {
     log('⚙ Tweaks: ' + diffs.join(' | '), 'system');
   }
@@ -2843,9 +2843,15 @@ function resetGame() {
 }
 
 document.getElementById('statusBar').textContent = 'Ready.';
-// Gil toggle visibility
-document.getElementById('tw_gilEnabled').addEventListener('change', function() {
+// BP toggle visibility
+document.getElementById('tw_bpEnabled').addEventListener('change', function() {
   document.getElementById('tw_gilSettings').style.display = this.checked ? 'block' : 'none';
 });
+
+function updateSoloOverride() {
+  const count = parseInt(document.getElementById('tw_playerCount').value);
+  document.getElementById('soloOverrideRow').style.display = count === 1 ? 'flex' : 'none';
+}
+
 // Build equipment and hydra lists on home screen
 buildTweaksLists();

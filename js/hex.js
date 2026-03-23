@@ -1,5 +1,5 @@
 // ========== HEX GRID MODEL ==========
-// Axial coordinate system (q, r) with entrance at (0, 0)
+// Axial coordinate system (q, r) with shelter at (0, 0)
 
 const HEX_DIRS = [
   { q: 1, r: 0 },   // 0: East
@@ -128,7 +128,7 @@ function createHexMap(maxRadius) {
 }
 
 // Choose the best direction for exploration
-// Prefers directions with unexplored hexes, biased away from entrance
+// Prefers directions with unexplored hexes, biased away from shelter
 function chooseExploreDirection(hexMap, q, r) {
   const candidates = [];
 
@@ -198,8 +198,8 @@ function findExploreStep(hexMap, q, r, dirIndex) {
   return null; // completely stuck (very rare)
 }
 
-// Helper to check if a hero is at the entrance
-function isAtEntrance(hero) {
+// Helper to check if a hero is at the shelter
+function isAtShelter(hero) {
   if (hero.pos === 'hydra') return false;
   return hero.pos.q === 0 && hero.pos.r === 0;
 }
@@ -210,8 +210,8 @@ function heroHexTile(hero) {
   return G.hexMap ? G.hexMap.get(hero.pos.q, hero.pos.r) : null;
 }
 
-// Get distance from hero to entrance
-function heroDistanceToEntrance(hero) {
+// Get distance from hero to shelter
+function heroDistanceToShelter(hero) {
   if (hero.pos === 'hydra') return Infinity;
   return hexDistance(hero.pos.q, hero.pos.r, 0, 0);
 }

@@ -93,10 +93,14 @@ function resetTweaks() {
 
   if (document.getElementById('tw_battlecryRecharge')) document.getElementById('tw_battlecryRecharge').value = 2;
   if (document.getElementById('tw_battlecryRecharge_v')) document.getElementById('tw_battlecryRecharge_v').textContent = '2';
-  document.getElementById('tw_gilEnabled').checked = false;
+  if (document.getElementById('tw_playerCount')) { document.getElementById('tw_playerCount').value = 4; document.getElementById('tw_playerCount_v').textContent = '4'; }
+  if (document.getElementById('tw_soloHero')) document.getElementById('tw_soloHero').value = 'juju';
+  if (document.getElementById('soloOverrideRow')) document.getElementById('soloOverrideRow').style.display = 'none';
+  document.getElementById('tw_bpEnabled').checked = false;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
-  document.getElementById('tw_gilRechargeSkill').value = 2; document.getElementById('tw_gilRechargeSkill_v').textContent = '2';
-  document.getElementById('tw_gilBuyEquip').value = 4; document.getElementById('tw_gilBuyEquip_v').textContent = '4';
+  document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
+  document.getElementById('tw_gilBuyEquip').value = 6; document.getElementById('tw_gilBuyEquip_v').textContent = '6';
+  if (document.getElementById('tw_bpPurifyCost')) { document.getElementById('tw_bpPurifyCost').value = 4; document.getElementById('tw_bpPurifyCost_v').textContent = '4'; }
   document.getElementById('tw_gilSettings').style.display = 'none';
   document.getElementById('tw_debugMode').checked = false;
   // Reset per-equipment
@@ -158,15 +162,18 @@ function readTweaks() {
     followersEnabled: document.getElementById('tw_followers').checked,
     overflowGameOver: document.getElementById('tw_overflow').checked,
 
-    gilEnabled: document.getElementById('tw_gilEnabled').checked,
-    gilPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
-    gilRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 2,
-    gilBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 4,
+    bpEnabled: document.getElementById('tw_bpEnabled').checked,
+    bpPerStr: parseInt(document.getElementById('tw_gilPerStr').value) || 1,
+    bpRechargeSkillCost: parseInt(document.getElementById('tw_gilRechargeSkill').value) || 3,
+    bpBuyEquipCost: parseInt(document.getElementById('tw_gilBuyEquip').value) || 6,
+    bpPurifyCost: parseInt(document.getElementById('tw_bpPurifyCost') ? document.getElementById('tw_bpPurifyCost').value : 4),
     debugMode: document.getElementById('tw_debugMode').checked,
     hydraKOGrowth: document.getElementById('tw_hydraKOGrowth') ? document.getElementById('tw_hydraKOGrowth').checked : true,
     hydraStartingHeads: parseInt(document.getElementById('tw_hydraStartingHeads').value) || 2,
     hydraRecycling: document.getElementById('tw_hydraRecycling') ? document.getElementById('tw_hydraRecycling').checked : false,
-    battlecryRecharge: parseInt(document.getElementById('tw_battlecryRecharge') ? document.getElementById('tw_battlecryRecharge').value : 2)
+    battlecryRecharge: parseInt(document.getElementById('tw_battlecryRecharge') ? document.getElementById('tw_battlecryRecharge').value : 2),
+    playerCount: parseInt(document.getElementById('tw_playerCount') ? document.getElementById('tw_playerCount').value : 4),
+    soloHero: document.getElementById('tw_soloHero') ? document.getElementById('tw_soloHero').value : 'juju'
   };
 }
 
@@ -198,11 +205,13 @@ function getTweaksDiff(tweaks) {
   if (!tweaks.followersEnabled) diffs.push('Followers: DISABLED');
   if (!tweaks.overflowGameOver) diffs.push('Hydra Overflow: NOT game over (heads just stop growing)');
 
-  if (tweaks.gilEnabled) diffs.push('Gil System: ENABLED (earn ' + (tweaks.gilPerStr||1) + ' Gil per enemy STR, recharge skill = ' + (tweaks.gilRechargeSkillCost||2) + ' Gil, buy equip = ' + (tweaks.gilBuyEquipCost||4) + ' Gil)');
+  if (tweaks.bpEnabled) diffs.push('Bravery Points: ENABLED (earn ' + (tweaks.bpPerStr||1) + ' BP per enemy STR + skills/tiles, recharge skill = ' + (tweaks.bpRechargeSkillCost||3) + ' BP, buy equip = ' + (tweaks.bpBuyEquipCost||6) + ' BP, purify stalker = ' + (tweaks.bpPurifyCost||4) + ' BP)');
   if (tweaks.hydraKOGrowth === false) diffs.push('Hydra KO Growth: OFF (KO at Hydra does not grow heads)');
   if (tweaks.battlecryRecharge !== 2) diffs.push('Battlecry recharges: ' + tweaks.battlecryRecharge + ' (default 2)');
   if (tweaks.hydraRecycling) diffs.push('Hydra Recycling: ON (heads return to pool, victory = all 6 down)');
   if (tweaks.hydraStartingHeads && tweaks.hydraStartingHeads !== 2) diffs.push('Hydra Starting Heads: ' + tweaks.hydraStartingHeads);
+  if (tweaks.playerCount !== 4) diffs.push('Player Count: ' + tweaks.playerCount);
+  if (tweaks.playerCount === 1 && tweaks.soloHero !== 'juju') diffs.push('Solo Hero: ' + tweaks.soloHero);
   return diffs;
 }
 
@@ -268,7 +277,7 @@ function freshTracker() {
     enemyEffectImpact: {},
     decisionEnemies: {},
     enemiesAtGameEnd: [],
-    gilVisits: { voluntary:0, koRespawn:0 },
+    bpVisits: { voluntary:0, koRespawn:0 },
     skillRechargeSources: {},
     hydraStartingHeads: [],
     hydraHeadKillOrder: [],
@@ -433,13 +442,14 @@ function initState() {
       giftedFlame: false,
       runningToHydra: false,
       houndFollowing: null,
-      gil: 0,
-      gilEarned: 0,
-      gilSpentSkill: 0,
-      gilSpentEquip: 0
+      bp: 0,
+      bpEarned: 0,
+      bpSpentSkill: 0,
+      bpSpentEquip: 0,
+      bpSpentPurify: 0
     })),
     relicPool: shuffle([...RELICS]),
-    board: [{id:'entrance',type:'entrance',enemies:[],equipment:[]}],
+    board: [{id:'shelter',type:'shelter',enemies:[],equipment:[]}],
     enemiesOnBoard: [],
     gameOver: false,
     victory: false,
@@ -454,8 +464,43 @@ function initState() {
     trace: []
   };
   G = state;
+
+  // Player count filtering
+  const playerCount = tw.playerCount || 4;
+  const soloHero = tw.soloHero || 'juju';
+  if (playerCount === 1) {
+    G.heroes = G.heroes.filter(h => h.id === soloHero);
+  } else if (playerCount < 4) {
+    const heroOrder = ['juju', 'gigi', 'lulu', 'eggo'];
+    const activeIds = heroOrder.slice(0, playerCount);
+    G.heroes = G.heroes.filter(h => activeIds.includes(h.id));
+  }
+
+  // Relic distribution scaling
+  if (playerCount < 4) {
+    if (playerCount === 1) {
+      // Solo: give all 4 relics to the single hero
+      G.heroes[0].heldRelics = [...G.relicPool];
+      G.relicPool = [];
+    } else if (playerCount === 2) {
+      // 2 players: 2 relics each
+      G.heroes.forEach((h, i) => {
+        h.heldRelics.push(G.relicPool[i * 2]);
+        h.heldRelics.push(G.relicPool[i * 2 + 1]);
+      });
+      G.relicPool = [];
+    } else if (playerCount === 3) {
+      // 3 players: 1 each + 4th to hero with fewest (first hero)
+      G.heroes.forEach((h, i) => {
+        h.heldRelics.push(G.relicPool[i]);
+      });
+      G.heroes[0].heldRelics.push(G.relicPool[3]);
+      G.relicPool = [];
+    }
+  }
+
   G.hexMap = createHexMap(3); // confined map: 37 tiles (1+6+12+18), max 3 hexes from center
-  G.hexMap.set(0, 0, { q:0, r:0, type:'entrance', roomId:'entrance', tileIndex:0, enemies:[], equipment:[] });
+  G.hexMap.set(0, 0, { q:0, r:0, type:'shelter', roomId:'shelter', tileIndex:0, enemies:[], equipment:[] });
   G.exitHex = null;
   return state;
 }
@@ -533,6 +578,11 @@ function useSkill(hero, skillName) {
   if (idx >= 0 && hero.skillStates[idx] === 'ready') {
     hero.skillStates[idx] = 'exhausted';
     checkCursedArmour(hero);
+    // BP earned from using a skill (printed effect, not burn)
+    if (bpEnabled()) {
+      hero.bp = (hero.bp || 0) + 1;
+      hero.bpEarned = (hero.bpEarned || 0) + 1;
+    }
     return true;
   }
   return false;
@@ -646,46 +696,55 @@ function rechargeOneSkill(hero, source) {
   }
 }
 
-// === GIL SYSTEM ===
-function gilEnabled() {
-  return G._tweaks && G._tweaks.gilEnabled;
+// === BRAVERY POINTS SYSTEM ===
+function bpEnabled() {
+  return G._tweaks && G._tweaks.bpEnabled;
 }
-function gilReward(hero, enemyStr) {
-  if (!gilEnabled()) return;
-  const perStr = (G._tweaks && G._tweaks.gilPerStr) || 1;
+function bpReward(hero, enemyStr) {
+  if (!bpEnabled()) return;
+  const perStr = (G._tweaks && G._tweaks.bpPerStr) || 1;
   const earned = Math.max(1, Math.floor(enemyStr * perStr));
-  hero.gil += earned;
-  hero.gilEarned += earned;
-  log(`    💰 +${earned} Gil (total: ${hero.gil})`, 'legendary');
+  hero.bp += earned;
+  hero.bpEarned += earned;
+  log(`    ⭐ +${earned} BP (total: ${hero.bp})`, 'legendary');
 }
-function gilSpendAtEntrance(hero) {
-  if (!gilEnabled()) return;
-  if (!isAtEntrance(hero)) return;
+function bpSpendAtShelter(hero) {
+  if (!bpEnabled()) return;
+  if (!isAtShelter(hero)) return;
   // Track visit type
   if (G.tracker) {
     const wasKO = hero._justRespawned;
-    if (wasKO) G.tracker.gilVisits.koRespawn++;
-    else G.tracker.gilVisits.voluntary++;
+    if (wasKO) G.tracker.bpVisits.koRespawn++;
+    else G.tracker.bpVisits.voluntary++;
   }
   const tw = G._tweaks || {};
-  const rechargeCost = tw.gilRechargeSkillCost || 2;
-  const equipCost = tw.gilBuyEquipCost || 4;
-  // AI priority: buy equipment if no weapon AND can afford, else recharge skills
+  const rechargeCost = tw.bpRechargeSkillCost || 3;
+  const equipCost = tw.bpBuyEquipCost || 6;
+  const purifyCost = tw.bpPurifyCost || 4;
+  // AI priority: purify stalkers first, then buy equipment, then recharge skills
+  // Purify: remove a stalker
+  while (hero.bp >= purifyCost && hero.stalkers.length > 0) {
+    const removed = hero.stalkers.pop();
+    hero.bp -= purifyCost;
+    hero.bpSpentPurify = (hero.bpSpentPurify || 0) + purifyCost;
+    trackStalker(removed.name, 'removed');
+    log(`  ⭐ Purified ${removed.name} for ${purifyCost} BP! (${hero.bp} BP left)`, 'wonder');
+  }
   const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
   const exhaustedSkills = hero.skillStates.filter(s => s === 'exhausted').length;
   // Buy equip if affordable and need it
-  if (!hasWeapon && hero.gil >= equipCost && G.legendaryDeck.length > 0) {
-    hero.gil -= equipCost;
-    hero.gilSpentEquip += equipCost;
+  if (!hasWeapon && hero.bp >= equipCost && G.legendaryDeck.length > 0) {
+    hero.bp -= equipCost;
+    hero.bpSpentEquip += equipCost;
     drawLegendaryItem(hero);
-    log(`  💰 Spent ${equipCost} Gil → bought Legendary Equipment! (${hero.gil} Gil left)`, 'legendary');
+    log(`  ⭐ Spent ${equipCost} BP → bought Legendary Equipment! (${hero.bp} BP left)`, 'legendary');
   }
   // Recharge skills if affordable and have exhausted ones
-  while (hero.gil >= rechargeCost && exhaustedSkills > 0 && hero.skillStates.some(s => s === 'exhausted')) {
-    hero.gil -= rechargeCost;
-    hero.gilSpentSkill += rechargeCost;
-    rechargeOneSkill(hero, 'gil');
-    log(`  💰 Spent ${rechargeCost} Gil → recharged 1 Skill! (${hero.gil} Gil left)`, 'legendary');
+  while (hero.bp >= rechargeCost && exhaustedSkills > 0 && hero.skillStates.some(s => s === 'exhausted')) {
+    hero.bp -= rechargeCost;
+    hero.bpSpentSkill += rechargeCost;
+    rechargeOneSkill(hero, 'bp');
+    log(`  ⭐ Spent ${rechargeCost} BP → recharged 1 Skill! (${hero.bp} BP left)`, 'legendary');
   }
 }
 
@@ -756,7 +815,7 @@ function runTurn() {
     relics: hero.heldRelics.map(r => ({name: r.name, owner: r.owner})),
     followers: hero.followers.map(f => ({name: f.name, str: f.str || 0})),
     stalkers: hero.stalkers.map(s => s.name),
-    gil: hero.gil || 0,
+    bp: hero.bp || 0,
     totalStr: totalStr(hero),
     readySkills: readySkillCount(hero)
   });
@@ -764,8 +823,8 @@ function runTurn() {
   // Ancestral Grimoire base passive: Skill Burn flame-save (handled in combat code)
   // Old failsafe (recharge when all exhausted) removed — new effect saves burned skills on Flame reroll
 
-  // Gil: spend at entrance if at entrance
-  gilSpendAtEntrance(hero);
+  // BP: spend at shelter if at shelter
+  bpSpendAtShelter(hero);
   hero._justRespawned = false;
 
   // Turn-start: Wizard Hat
@@ -950,7 +1009,7 @@ function runTurn() {
 }
 
 function decideMovementIntent(hero, movePoints) {
-  const dist = heroDistanceToEntrance(hero);
+  const dist = heroDistanceToShelter(hero);
 
   // Can't return if already running to Hydra or at Hydra
   if (hero.runningToHydra || G.heroesInHydraArea.has(hero.id)) {
@@ -958,12 +1017,12 @@ function decideMovementIntent(hero, movePoints) {
     return { type: 'explore', dirIndex };
   }
 
-  // Gil spending decision — think like a player
-  if (gilEnabled() && dist > 0) {
+  // BP spending decision — think like a player
+  if (bpEnabled() && dist > 0) {
     const tw = G._tweaks || {};
-    const rechargeCost = tw.gilRechargeSkillCost || 2;
-    const equipCost = tw.gilBuyEquipCost || 4;
-    const gil = hero.gil;
+    const rechargeCost = tw.bpRechargeSkillCost || 3;
+    const equipCost = tw.bpBuyEquipCost || 6;
+    const bp = hero.bp;
 
     // What do I need?
     const totalSkills = hero.skillStates.length;
@@ -977,9 +1036,9 @@ function decideMovementIntent(hero, movePoints) {
     const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
 
     // What can I buy?
-    const canAffordRecharge = gil >= rechargeCost;
-    const canAffordEquip = gil >= equipCost && G.legendaryDeck.length > 0;
-    const rechargesAffordable = Math.floor(gil / rechargeCost);
+    const canAffordRecharge = bp >= rechargeCost;
+    const canAffordEquip = bp >= equipCost && G.legendaryDeck.length > 0;
+    const rechargesAffordable = Math.floor(bp / rechargeCost);
 
     // Is it worth going back?
     let reason = null;
@@ -996,12 +1055,12 @@ function decideMovementIntent(hero, movePoints) {
     else if (exhaustedSkills === totalSkills && canAffordRecharge) {
       reason = 'recharge_all_exhausted';
     }
-    // Priority 4: Most skills exhausted and have plenty of Gil
+    // Priority 4: Most skills exhausted and have plenty of BP
     else if (exhaustedSkills >= 2 && rechargesAffordable >= 2) {
       reason = 'recharge_multiple';
     }
     // Priority 5: Equipment slot open and can afford, plus some skill recharging
-    else if (!equipFull && canAffordEquip && exhaustedSkills >= 1 && gil >= equipCost + rechargeCost) {
+    else if (!equipFull && canAffordEquip && exhaustedSkills >= 1 && bp >= equipCost + rechargeCost) {
       reason = 'equip_and_recharge';
     }
     // Priority 6: Just enough for a recharge and really need it (only 1 ready skill left)
@@ -1011,7 +1070,7 @@ function decideMovementIntent(hero, movePoints) {
 
     if (reason) {
       // Is the trip feasible? Confined map = max ~3-4 hexes from center
-      // Entrance is always reachable in 1 turn (avg roll 3.5)
+      // Shelter is always reachable in 1 turn (avg roll 3.5)
       // Only return if 1 turn away — no multi-turn detours
       const turnsToReturn = Math.ceil(dist / 3.5);
       const maxTurns = 1;
@@ -1019,9 +1078,9 @@ function decideMovementIntent(hero, movePoints) {
       if (turnsToReturn <= maxTurns) {
         const path = G.hexMap.findPathAvoidDD(hero.pos.q, hero.pos.r, 0, 0);
         if (path && path.length > 1) {
-          if (G.tracker) G.tracker.gilVisits.voluntary++;
-          log(`  💭 ${hero.name} decides to return to Entrance (${reason.replace(/_/g, ' ')})`, 'system');
-          return { type: 'return_entrance' };
+          if (G.tracker) G.tracker.bpVisits.voluntary++;
+          log(`  💭 ${hero.name} decides to return to Shelter (${reason.replace(/_/g, ' ')})`, 'system');
+          return { type: 'return_shelter' };
         }
       }
     }
@@ -1234,6 +1293,11 @@ function movePhase(hero) {
       const tileType = G.tileDeck.pop();
       G.tilesPlaced++;
       placedNewTiles++;
+      // BP earned from placing new tile
+      if (bpEnabled()) {
+        hero.bp = (hero.bp || 0) + 1;
+        hero.bpEarned = (hero.bpEarned || 0) + 1;
+      }
       const tile = {
         q: scanQ, r: scanR, type: tileType,
         roomId: 'room_' + G.tilesPlaced, tileIndex: G.tilesPlaced,
@@ -1276,8 +1340,8 @@ function movePhase(hero) {
         }
       }
     }
-  } else if (intent.type === 'return_entrance') {
-    // Return to entrance: walk through explored tiles step by step
+  } else if (intent.type === 'return_shelter') {
+    // Return to shelter: walk through explored tiles step by step
     for (let step = 0; step < moveVal; step++) {
       const path = G.hexMap.findPathAvoidDD(currentQ, currentR, 0, 0);
       if (!path || path.length <= 1) break;
@@ -1286,9 +1350,9 @@ function movePhase(hero) {
       currentR = nextStep.r;
       destTileType = G.hexMap.get(currentQ, currentR)?.type || 'common';
 
-      // Arrived at entrance
+      // Arrived at shelter
       if (currentQ === 0 && currentR === 0) {
-        log(`  ${hero.name} returns to the Entrance!`, 'wonder');
+        log(`  ${hero.name} returns to the Shelter!`, 'wonder');
         break;
       }
     }
@@ -1297,9 +1361,9 @@ function movePhase(hero) {
   // Update hero position
   hero.pos = { q: currentQ, r: currentR };
 
-  // Spend Gil immediately if arrived at entrance
-  if (isAtEntrance(hero)) {
-    gilSpendAtEntrance(hero);
+  // Spend BP immediately if arrived at shelter
+  if (isAtShelter(hero)) {
+    bpSpendAtShelter(hero);
   }
 
   if (!destTileType) destTileType = 'common';
@@ -1665,9 +1729,9 @@ function resolveMisfortuneCard(hero, card) {
 
 function resolveTrap(hero, card) {
   trackTrap(card.name, 'triggered');
-  // Spell Mirror: cancel dangerous trap effects
+  // Arcane Familiar: cancel dangerous trap effects
   if (trySpellMirror(card.effect)) {
-    log(`    Trap effect cancelled by Spell Mirror! No harm done.`, 'wonder');
+    log(`    Trap effect cancelled by Arcane Familiar! No harm done.`, 'wonder');
     trackTrap(card.name, 'survived');
     return;
   }
@@ -1819,10 +1883,18 @@ function resolveTrap(hero, card) {
   }
 }
 
-// ========== SPELL MIRROR ==========
+// ========== ARCANE FAMILIAR (replaces Spell Mirror) ==========
 function trySpellMirror(context, atHydra) {
-    const lulu = G.heroes.find(h => h.id === 'lulu');
-    if (!lulu || !isSkillReady(lulu, 'Spell Mirror')) return false;
+    // Find any hero with an Arcane Familiar follower
+    let familiarHolder = null;
+    for (let i = 0; i < G.heroes.length; i++) {
+        const h = G.heroes[i];
+        if (h.followers.some(f => f.effect === 'cancel_effect')) {
+            familiarHolder = h;
+            break;
+        }
+    }
+    if (!familiarHolder) return false;
 
     const lethal = ['ko_or_exhaust_all','roll_1_3_ko','fewer_2_skills_ko','fight_self_4dice'];
     const dangerous = ['flame_counts_0','only_flame_hits','fight_twice','rolls_2_best_double_lose',
@@ -1830,19 +1902,22 @@ function trySpellMirror(context, atHydra) {
     const isLethal = lethal.includes(context);
     const isDangerous = dangerous.includes(context);
 
-    if (shouldUseSkill(lulu, 'Spell Mirror', { atHydra: !!atHydra, isLethal, isDangerous })) {
-        useSkill(lulu, 'Spell Mirror');
-        trackSkill('lulu', 'Spell Mirror', 'activated');
+    // Decision: use on lethal/dangerous effects, or always at Hydra
+    const shouldUse = !!atHydra || isLethal || isDangerous;
+    if (shouldUse) {
+        // Discard the Arcane Familiar follower
+        familiarHolder.followers = familiarHolder.followers.filter(f => f.effect !== 'cancel_effect');
+        trackFollower('Arcane Familiar', 'lost');
         G.tracker.spellMirrorDetails.total++;
         G.tracker.spellMirrorDetails.cancelled[context] = (G.tracker.spellMirrorDetails.cancelled[context] || 0) + 1;
         if (atHydra) G.tracker.spellMirrorDetails.atHydra++;
         else G.tracker.spellMirrorDetails.atDungeon++;
         if (atHydra) {
-            log(`  🪞 Spell Mirror: Lulu cancels the Hydra head ability!`, 'flame');
+            log(`  🔮 Arcane Familiar: ${familiarHolder.name} discards familiar to cancel the Hydra head ability!`, 'flame');
         } else if (isLethal) {
-            log(`  🪞 Spell Mirror: Lulu cancels the deadly effect!`, 'flame');
+            log(`  🔮 Arcane Familiar: ${familiarHolder.name} discards familiar to cancel the deadly effect!`, 'flame');
         } else {
-            log(`  🪞 Spell Mirror: Lulu cancels the special effect!`, 'flame');
+            log(`  🔮 Arcane Familiar: ${familiarHolder.name} discards familiar to cancel the special effect!`, 'flame');
         }
         return true;
     }
@@ -2243,13 +2318,13 @@ function combat(hero, enemyCard, tier) {
 
   // All rounds won
   G.stats.monstersKilled++;
-  gilReward(hero, enemyStr);
+  bpReward(hero, enemyStr);
   ht.wins++;
   trackEncounter(enemyCard.name, 'won');
   const _lfr = G._lastFightResult || {};
   G.tracker.combatLog.push({ hero:hero.name, heroId:hero.id, enemy:enemyCard.name, enemyStr:enemyCard.str||0, heroTotal:_lfr.heroTotal, enemyTotal:_lfr.enemyTotal, won:true, margin:_lfr.margin, tier, turn:G.turn, readySkills:readySkillCount(hero), equipCount:hero.equipment.length, followerCount:hero.followers.length, heroTotalStr:totalStr(hero) });
   initHeroTracker(G.tracker, hero.id).enemiesKilled++;
-  trace('combat', 'result', {hero: hero.id, enemy: enemyCard.name, won: true, margin: _lfr.margin || 0, gilEarned: 0});
+  trace('combat', 'result', {hero: hero.id, enemy: enemyCard.name, won: true, margin: _lfr.margin || 0, bpEarned: 0});
   log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
 
   // Update Copycat win tracking after fight resolves
@@ -2279,7 +2354,7 @@ function combat(hero, enemyCard, tier) {
     let converted = 0;
     adj.forEach(n => {
       const tile = G.hexMap.get(n.q, n.r);
-      if (tile && tile.type !== 'dread' && tile.type !== 'entrance') {
+      if (tile && tile.type !== 'dread' && tile.type !== 'shelter') {
         tile.type = 'dread';
         converted++;
       }
@@ -2343,12 +2418,12 @@ function combat(hero, enemyCard, tier) {
     }
   }
 
-  // Sacerdote Fishfolk: roll 1-2 go to entrance
+  // Sacerdote Fishfolk: roll 1-2 go to shelter
   if (enemyCard.effect === 'roll_1_2_entrance') {
     const r = Math.floor(Math.random() * 6) + 1;
     if (r <= 2) {
       hero.pos = {q:0, r:0};
-      log(`    Sacerdote curse: rolled ${r} — sent to entrance!`, 'misfortune');
+      log(`    Sacerdote curse: rolled ${r} — sent to Shelter!`, 'misfortune');
     }
   }
 
@@ -2828,7 +2903,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
         // Treat as win
         hero.equipment.forEach(e => trackEquip(e.name, 'wonWith'));
         G.stats.monstersKilled++;
-        gilReward(hero, enemyStr);
+        bpReward(hero, enemyStr);
         trackEncounter(enemyCard.name, 'won');
         if (frogmanSwallowed) { hero.equipment.push(frogmanSwallowed); log(`    Recovered ${frogmanSwallowed.name}!`, 'wonder'); }
         // Post-win effects
@@ -2935,7 +3010,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     trackFollower('Warden Angel', 'lost');
     log(`    👼 Warden Angel sacrifices himself! ${hero.name} wins instead!`, 'wonder');
     G.stats.monstersKilled++;
-    gilReward(hero, enemyStr);
+    bpReward(hero, enemyStr);
     if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
     trackSkill(hero.id, 'Warden Angel', 'activated');
     trackSkill(hero.id, 'Warden Angel', 'savedFromKO');
@@ -2966,7 +3041,7 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     if (retryTotal >= enemyRetryTotal) {
       log(`    Berserker Helmet wins the retry!`, 'wonder');
       G.stats.monstersKilled++;
-      gilReward(hero, enemyStr);
+      bpReward(hero, enemyStr);
       if (frogmanSwallowed) hero.equipment.push(frogmanSwallowed);
       hero._berserkerUsed = false;
       return;
@@ -3080,13 +3155,6 @@ function shouldUseSkill(hero, skillName, context) {
       // Use when Gigi has no equipment and is in combat
       return hero.equipment.length === 0;
 
-    case 'Spell Mirror':
-      if (atHydra) return true;
-      if (ctx.isLethal) return true;
-      if (phase === 'prehydra') return false;
-      if (ctx.isDangerous) return true; // early/mid: use on dangerous effects
-      return false;
-
     case 'Pack Leader':
       if (atHydra) return hero.followers.length > 0;
       // In dungeon: use if bonus is meaningful (1+ followers and enemy is not trivial)
@@ -3143,7 +3211,7 @@ function shouldUseSkill(hero, skillName, context) {
         const allies = G.heroes.filter(h => h.id !== hero.id);
         const hasUsefulAllySkill = allies.some(h =>
           isSkillReady(h, 'Siphon') || isSkillReady(h, 'Shield Wall') ||
-          isSkillReady(h, 'Spell Mirror') || isSkillReady(h, 'Not Today!') ||
+          isSkillReady(h, 'Not Today!') ||
           isSkillReady(h, 'Herbalist') || isSkillReady(h, 'Overload')
         );
         return hasUsefulAllySkill;
@@ -3265,7 +3333,7 @@ function applyKO(hero) {
   if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
   hero.ko = true;
   trace('ko', 'applied', {hero: hero.id, cause: 'combat', relicUsed: false, shieldWall: false, dodge: false, equipmentDropped: droppedEquip.split(', ').filter(s => s !== 'nothing'), followersLost: lostFollowerNames});
-  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}. Respawned at Entrance.`, 'ko');
+  log(`    ${hero.name} is KO'd! Dropped: ${droppedEquip}. Respawned at Shelter.`, 'ko');
 }
 
 // ========== TALENTS ==========
@@ -3326,7 +3394,7 @@ function triggerTalent(hero, context) {
             score = exhausted > 0 ? (hasGrimoire ? 10 : 8) : 1;
           } else if (h.id === 'eggo') {
             // Dodge: prevent KO. Very valuable if Eggo is likely to fight
-            const inDanger = h.pos !== 'entrance' && !G.heroesInHydraArea.has(h.id);
+            const inDanger = h.pos !== 'shelter' && !G.heroesInHydraArea.has(h.id);
             score = inDanger ? 7 : 4;
             // Higher if Eggo has equipment/followers to protect
             if (h.equipment.length >= 2) score += 2;
@@ -3393,7 +3461,7 @@ function awakenEffect(hero) {
     const hq = hero.pos.q, hr = hero.pos.r;
     const candidates = G.hexMap.unexploredNeighbors(hq, hr);
 
-    // Fallback: explored non-entrance neighbors
+    // Fallback: explored non-shelter neighbors
     if (candidates.length === 0) {
       const explored = [];
       HEX_DIRS.forEach(d => {
@@ -3520,16 +3588,18 @@ function spawnHydra() {
   const recycling = G._tweaks && G._tweaks.hydraRecycling;
   const pool = shuffle([...HYDRA_HEADS]);
 
+  const _playerCount = (G._tweaks && G._tweaks.playerCount) || 4;
+  const defaultStartHeads = _playerCount <= 2 ? 2 : 3;
   if (recycling) {
     // RECYCLING MODE: all 6 heads exist, some face-up some face-down
-    const startCount = (G._tweaks && G._tweaks.hydraStartingHeads) || 3;
+    const startCount = (G._tweaks && G._tweaks.hydraStartingHeads !== undefined) ? G._tweaks.hydraStartingHeads : defaultStartHeads;
     G.hydraHeads = pool.map(function(h, i) {
       var baseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[h.name] !== undefined) ? G._tweaks.hydraHeads[h.name] : h.str;
       return {...h, str: baseStr, destroyed: i >= startCount, effectiveStr: baseStr};
     });
   } else {
     // NON-RECYCLING: only pick startingHeads
-    const startingHeads = (G._tweaks && G._tweaks.hydraStartingHeads) || 2;
+    const startingHeads = (G._tweaks && G._tweaks.hydraStartingHeads !== undefined) ? G._tweaks.hydraStartingHeads : defaultStartHeads;
     G.hydraHeads = pool.slice(0, Math.min(startingHeads, 6)).map(function(h) {
       var baseStr = (G._tweaks && G._tweaks.hydraHeads && G._tweaks.hydraHeads[h.name] !== undefined) ? G._tweaks.hydraHeads[h.name] : h.str;
       return {...h, str: baseStr, destroyed: false, effectiveStr: baseStr};
@@ -3563,7 +3633,7 @@ function spawnHydra() {
       totalSkills: h.skills.length,
       followerCount: h.followers.length,
       relics: h.heldRelics.length,
-      gil: h.gil || 0,
+      bp: h.bp || 0,
       totalStr: totalStr(h)
     };
   });
@@ -3670,7 +3740,7 @@ function hydraAttack(hero) {
 
   const broodAlive = G.hydraHeads.some(h => h.name === 'The Brood' && !h.destroyed);
 
-  // Spell Mirror for Hydra head abilities
+  // Arcane Familiar for Hydra head abilities
   let hydraSpellMirrored = false;
   const hydraHeadEffectMap = {'The Fangs':'exhaust_2_or_minus2','The Maw':'exhaust_2_or_minus2','The Brood':'flame_counts_0'};
   if (hydraHeadEffectMap[head.name] && trySpellMirror(hydraHeadEffectMap[head.name], true)) {
@@ -4281,9 +4351,9 @@ function runToHydra(hero) {
   if (checkAssassin(hero, roll)) return;
   const moveVal = roll.val;
 
-  // Spend Gil at entrance before leaving
-  if (isAtEntrance(hero)) {
-    gilSpendAtEntrance(hero);
+  // Spend BP at shelter before leaving
+  if (isAtShelter(hero)) {
+    bpSpendAtShelter(hero);
   }
 
   log(`  ${hero.name} sprints toward the Hydra (rolled ${moveVal})`, 'system');
@@ -4398,6 +4468,11 @@ function runToHydra(hero) {
           if (G.tileDeck.length > 0) {
             const tileType = G.tileDeck.pop();
             G.tilesPlaced++;
+            // BP earned from placing new tile
+            if (bpEnabled()) {
+              hero.bp = (hero.bp || 0) + 1;
+              hero.bpEarned = (hero.bpEarned || 0) + 1;
+            }
             G.hexMap.set(bestNeighbor.q, bestNeighbor.r, {
               q: bestNeighbor.q, r: bestNeighbor.r, type: tileType,
               roomId: 'room_' + G.tilesPlaced, tileIndex: G.tilesPlaced,
@@ -4447,7 +4522,7 @@ function runToHydra(hero) {
 
     // Room resolution
     const destTile = G.hexMap.get(currentQ, currentR);
-    if (destTile && destTile.type && destTile.type !== 'entrance' && destTile.type !== 'exit') {
+    if (destTile && destTile.type && destTile.type !== 'shelter' && destTile.type !== 'exit') {
       resolveRoom(hero, destTile.type);
       if (G.gameOver) return;
     }

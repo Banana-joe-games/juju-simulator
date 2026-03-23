@@ -19,9 +19,8 @@ const HEROES = [
   { id:'lulu', name:'Lulu', title:'The Mage', str:1, flameFaces:[1,3,6], color:'var(--lulu)',
     talent:'Arcane Recharge', talentDesc:'Recharge 1 exhausted Skill',
     skills:[
-      {name:'Reality Warp',kind:'Utility',effect:'Move yourself or any ally to any revealed tile.'},
       {name:'Siphon',kind:'Combat',effect:'Give -2 STR to an enemy.'},
-      {name:'Spell Mirror',kind:'Reactive',effect:'Cancel special effect of Encounter, Trap, or Hydra Head.'},
+      {name:'Reality Warp',kind:'Utility',effect:'Move yourself or any ally to any revealed tile.'},
       {name:'Overload',kind:'Combat',effect:'Exhaust all remaining Ready Skills. Gain +2 STR for each.'}
     ]},
   { id:'eggo', name:'Eggo', title:'The Rogue', str:2, flameFaces:[1,2,3], color:'var(--eggo)',
@@ -53,7 +52,8 @@ const WONDER_CARDS = [
   {name:'Veteran',type:'follower',str:0,effect:'roll_2_keep_best'},
   {name:'Faithful Dog',type:'follower',str:0,effect:'reroll_flame'},
   {name:'Warden Angel',type:'follower',str:0,effect:'discard_win_fight'},
-  {name:'Monster Hunter',type:'follower',str:0,effect:'skip_move_fight_enemy'}
+  {name:'Monster Hunter',type:'follower',str:0,effect:'skip_move_fight_enemy'},
+  {name:'Arcane Familiar',type:'follower',str:0,effect:'cancel_effect',description:'Discard: Cancel the special effect of any Encounter, Trap, or Hydra Head. Combat still happens.'}
 ];
 
 const MISHAP_CARDS = [

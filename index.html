@@ -400,6 +400,8 @@ input[type=range] {
   </div>
   <div class="home-tweaks">
     <h4>Heroes</h4>
+    <div class="tweak-row"><label>Player Count</label><input type="range" id="tw_playerCount" min="1" max="4" value="4" oninput="twVal(this); updateSoloOverride()"><span class="tweak-val" id="tw_playerCount_v">4</span></div>
+    <div class="tweak-row" id="soloOverrideRow" style="display:none"><label>Solo Hero</label><select id="tw_soloHero" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:3px 6px;font-family:inherit;font-size:11px;border-radius:3px"><option value="juju">Juju</option><option value="gigi">Gigi</option><option value="lulu">Lulu</option><option value="eggo">Eggo</option></select></div>
     <div class="tweak-row"><label>Juju</label><input type="range" id="tw_juju" min="1" max="6" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_juju_v">3</span></div>
     <div class="tweak-row"><label>Gigi</label><input type="range" id="tw_gigi" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_gigi_v">2</span></div>
     <div class="tweak-row"><label>Lulu</label><input type="range" id="tw_lulu" min="1" max="6" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_lulu_v">1</span></div>
@@ -427,12 +429,13 @@ input[type=range] {
 
     <h4>Debug</h4>
     <div class="tweak-toggle"><input type="checkbox" id="tw_debugMode"><label for="tw_debugMode">Debug Trace (structured game log for verification)</label></div>
-    <h4>Gil System (experimental)</h4>
-    <div class="tweak-toggle"><input type="checkbox" id="tw_gilEnabled"><label for="tw_gilEnabled">Enable Gil (monsters drop gold, spend at entrance)</label></div>
+    <h4>Bravery Points</h4>
+    <div class="tweak-toggle"><input type="checkbox" id="tw_bpEnabled"><label for="tw_bpEnabled">Enable Bravery Points (earn from combat, skills, exploring)</label></div>
     <div id="tw_gilSettings" style="display:none">
-      <div class="tweak-row"><label>Gil per enemy STR point</label><input type="range" id="tw_gilPerStr" min="1" max="3" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_gilPerStr_v">1</span></div>
-      <div class="tweak-row"><label>Cost: Recharge 1 Skill</label><input type="range" id="tw_gilRechargeSkill" min="1" max="8" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_gilRechargeSkill_v">2</span></div>
-      <div class="tweak-row"><label>Cost: Buy Legendary Equip</label><input type="range" id="tw_gilBuyEquip" min="3" max="12" value="4" oninput="twVal(this)"><span class="tweak-val" id="tw_gilBuyEquip_v">4</span></div>
+      <div class="tweak-row"><label>BP per enemy STR point</label><input type="range" id="tw_gilPerStr" min="1" max="3" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_gilPerStr_v">1</span></div>
+      <div class="tweak-row"><label>Cost: Recharge 1 Skill</label><input type="range" id="tw_gilRechargeSkill" min="1" max="8" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_gilRechargeSkill_v">3</span></div>
+      <div class="tweak-row"><label>Cost: Buy Legendary Equip</label><input type="range" id="tw_gilBuyEquip" min="3" max="12" value="6" oninput="twVal(this)"><span class="tweak-val" id="tw_gilBuyEquip_v">6</span></div>
+      <div class="tweak-row"><label>Cost: Purify Stalker</label><input type="range" id="tw_bpPurifyCost" min="2" max="8" value="4" oninput="twVal(this)"><span class="tweak-val" id="tw_bpPurifyCost_v">4</span></div>
     </div>
   </div>
 </div>
