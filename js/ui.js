@@ -2211,7 +2211,31 @@ function runSilentGame() {
     }
 
     if (hero.runningToHydra) {
+      // Per-turn tracking for return trip breakdown
+      if (hero._hydraKOTurn && hero._returnTurnLog) {
+        const distToHydra = G.exitHex && hero.pos && hero.pos.q !== undefined ?
+          hexDistance(hero.pos.q, hero.pos.r, G.exitHex.q, G.exitHex.r) : -1;
+        hero._returnTurnLog.push({
+          turn: G.turn,
+          distToHydra: distToHydra,
+          atShelter: isAtShelter(hero),
+          readySkills: readySkillCount(hero),
+          equipCount: hero.equipment.length,
+          _prevCombats: hero._combatsEnRoute || 0
+        });
+      }
       runToHydra(hero);
+      // Update last turn log entry with what happened
+      if (hero.runningToHydra && hero._returnTurnLog && hero._returnTurnLog.length > 0) {
+        const lastEntry = hero._returnTurnLog[hero._returnTurnLog.length - 1];
+        const newDist = G.exitHex && hero.pos && hero.pos.q !== undefined ?
+          hexDistance(hero.pos.q, hero.pos.r, G.exitHex.q, G.exitHex.r) : -1;
+        lastEntry.distAfter = newDist;
+        lastEntry.activity = lastEntry.atShelter ? 'shelter_bp' :
+          (lastEntry.distToHydra === newDist ? 'stuck_dd' :
+          (newDist === 0 ? 'arrived' : 'moving'));
+        lastEntry.foughtEnemy = (hero._combatsEnRoute || 0) > (lastEntry._prevCombats || 0);
+      }
     } else if (G.hydraActive && G.heroesInHydraArea.has(hero.id)) {
       hydraAttack(hero);
     } else {
