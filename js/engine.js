@@ -331,6 +331,7 @@ function freshTracker() {
     shelterReturnTrips: [],  // {heroId, koTurn, returnTurn, turnsAway, headsGrown, bpSpent:{recharge:0,equip:0,purify:0}}
     shelterRespawnDetails: [],  // {heroId, bpAtRespawn, bpSpentBreakdown:{recharge:0,equip:0,purify:0}, skillsRechargedNames:[], skillsReadyAtLeave, skillsReadyAtArrival, combatsEnRoute, turn}
     relicSpendLog: [],  // {heroId, donorId, relicName, phase, enemy, turn, relicsRemaining}
+    bpEquipOutcomes: [],  // {heroId, equipName, purchaseTurn, lostTurn, heldAtHydra, heldAtEnd}
     // D: Overload deep dive
     overloadUses: [],  // {heroId, skillsExhausted, won, turn}
     // E: Reality Warp usage
@@ -754,10 +755,17 @@ function bpSpendAtShelter(hero) {
   const exhaustedSkills = hero.skillStates.filter(s => s === 'exhausted').length;
   // Buy equip if affordable and need it
   if (!hasWeapon && hero.bp >= equipCost && G.legendaryDeck.length > 0) {
+    const equipBefore = hero.equipment.map(e => e.name);
     hero.bp -= equipCost;
     hero.bpSpentEquip += equipCost;
     if (hero._bpSpentDetailSinceKO) hero._bpSpentDetailSinceKO.equip += equipCost;
     drawLegendaryItem(hero);
+    // Track BP-purchased equipment
+    const newEquip = hero.equipment.find(e => !equipBefore.includes(e.name));
+    if (newEquip) {
+      newEquip._bpPurchaseTurn = G.turn;
+      newEquip._bpPurchaseHero = hero.id;
+    }
     purchaseSeq.push('equipment');
     log(`  ⭐ Spent ${equipCost} BP → bought Legendary Equipment! (${hero.bp} BP left)`, 'legendary');
   }
@@ -3924,7 +3932,10 @@ function hydraAttack(hero) {
       if (removable.length > 0) {
         const removed = removable[removable.length - 1];
         hero.equipment = hero.equipment.filter(e => e !== removed);
-        log(`    The Maw devours ${removed.name}!`, 'misfortune');
+        // Drop guarded by The Maw (recoverable on defeat)
+        if (!head.guardedEquipment) head.guardedEquipment = [];
+        head.guardedEquipment.push(removed);
+        log(`    The Maw grabs ${removed.name}! (guarded — defeat The Maw to recover)`, 'misfortune');
       } else {
         log(`    The Maw: no equipment — hero gets -2!`, 'misfortune');
       }
@@ -4268,6 +4279,15 @@ function hydraAttack(hero) {
       log(`  ⚔ ${head.name} DESTROYED! (${G.hydraHeads.filter(h=>!h.destroyed).length} heads remain, max ${G.hydraMaxHeads})`, 'victory');
     }
 
+    // Release Maw-guarded equipment
+    if (head.guardedEquipment && head.guardedEquipment.length > 0) {
+      head.guardedEquipment.forEach(eq => {
+        G.hydraFloorEquipment.push(eq);
+      });
+      log(`    ${head.name} releases ${head.guardedEquipment.length} guarded equipment! (on Hydra floor)`, 'legendary');
+      head.guardedEquipment = [];
+    }
+
     // On Defeat effects
     if (head.skillType === 'onDefeat') {
       if (head.name === 'The Wail') {
@@ -4394,6 +4414,11 @@ function hydraAttack(hero) {
         initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
         recalcHydraStr();
         log(`    Berserker Helmet wins! ${head.name} DESTROYED!`, 'victory');
+        if (head.guardedEquipment && head.guardedEquipment.length > 0) {
+          head.guardedEquipment.forEach(eq => G.hydraFloorEquipment.push(eq));
+          log(`    ${head.name} releases ${head.guardedEquipment.length} guarded equipment!`, 'legendary');
+          head.guardedEquipment = [];
+        }
         hero._berserkerUsed = false;
         if (G.hydraHeads.every(h => h.destroyed)) {
           log(recyclingBerserker ? `\n  🎉🎉🎉 ALL HEADS SILENCED! VICTORY! 🎉🎉🎉` : `\n  🎉🎉🎉 THE HYDRA IS SLAIN! VICTORY! 🎉🎉🎉`, 'victory');
@@ -4423,6 +4448,11 @@ function hydraAttack(hero) {
         G.tracker.hydraHeadKillOrder.push({ head: head.name, turn: G.turn, killedBy: hero.id });
         initHeroTracker(G.tracker, hero.id).hydraHeadsDestroyed++;
         trackHydraHead(head.name, 'destroyed');
+        if (head.guardedEquipment && head.guardedEquipment.length > 0) {
+          head.guardedEquipment.forEach(eq => G.hydraFloorEquipment.push(eq));
+          log(`    ${head.name} releases ${head.guardedEquipment.length} guarded equipment!`, 'legendary');
+          head.guardedEquipment = [];
+        }
         // Check victory BEFORE KO growth
         const allDown = recycling ? G.hydraHeads.every(h => h.destroyed) : G.hydraHeads.filter(h => !h.destroyed).length === 0;
         if (allDown) {

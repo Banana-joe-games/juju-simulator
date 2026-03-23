@@ -1332,6 +1332,20 @@ function generateReport(results) {
       }
     });
 
+    // B: Equipment Purchase Outcomes
+    const equipOutcomes = results.flatMap(r => r.tracker.bpEquipOutcomes || []);
+    if (equipOutcomes.length > 0) {
+      const held = equipOutcomes.filter(e => e.heldAtEnd);
+      const heldHydra = equipOutcomes.filter(e => e.heldAtHydra);
+      const lost = equipOutcomes.filter(e => !e.heldAtEnd && e.lostTurn);
+      const avgTurnsHeld = lost.length > 0 ? fix1(lost.reduce((s,e) => s + (e.lostTurn - e.purchaseTurn), 0) / lost.length) : '-';
+      html += `<div class="report-card"><b>Equipment Purchase Outcomes</b> (${equipOutcomes.length} purchases)`;
+      html += statRow('Held at Hydra', `${heldHydra.length} (${pct(heldHydra.length, equipOutcomes.length)}%)`);
+      html += statRow('Held at game end', `${held.length} (${pct(held.length, equipOutcomes.length)}%)`);
+      html += statRow('Lost (avg turns held)', `${lost.length} lost, avg ${avgTurnsHeld} turns`);
+      html += `</div>`;
+    }
+
     html += `</div>`;
   }
 
@@ -2111,6 +2125,20 @@ function runSilentGame() {
       stalkerCount: h.stalkers.length,
       ko: initHeroTracker(G.tracker, h.id).ko
     };
+  });
+  // Track BP-purchased equipment outcomes
+  G.heroes.forEach(h => {
+    h.equipment.forEach(eq => {
+      if (eq._bpPurchaseTurn) {
+        G.tracker.bpEquipOutcomes.push({ heroId: h.id, equipName: eq.name, purchaseTurn: eq._bpPurchaseTurn, lostTurn: null, heldAtHydra: G.heroesInHydraArea.has(h.id), heldAtEnd: true });
+      }
+    });
+  });
+  // Check Hydra floor for BP-purchased equipment that was lost
+  (G.hydraFloorEquipment || []).forEach(eq => {
+    if (eq._bpPurchaseTurn) {
+      G.tracker.bpEquipOutcomes.push({ heroId: eq._bpPurchaseHero, equipName: eq.name, purchaseTurn: eq._bpPurchaseTurn, lostTurn: G.turn, heldAtHydra: false, heldAtEnd: false });
+    }
   });
   // Enemies still alive at game end
   G.tracker.enemiesAtGameEnd = (G.enemiesOnBoard || []).map(e => e.name || (e.card && e.card.name) || 'unknown');
