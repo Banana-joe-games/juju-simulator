@@ -1162,13 +1162,14 @@ function generateReport(results) {
   const trips = results.flatMap(r => r.tracker.shelterReturnTrips || []);
   if (trips.length > 0) {
     html += `<div class="report-card"><b>Shelter Return Trips</b> (${trips.length} total)`;
-    const avgTurns = fix1(trips.reduce((s,t) => s + t.turnsAway, 0) / trips.length);
+    const avgHeroTurns = fix1(trips.reduce((s,t) => s + t.turnsAway, 0) / trips.length);
+    const avgGameTurns = fix1(trips.reduce((s,t) => s + (t.gameTurnsAway || t.turnsAway), 0) / trips.length);
     const avgHeadsGrown = fix1(trips.reduce((s,t) => s + t.headsGrown, 0) / trips.length);
-    html += statRow('Avg turns away', avgTurns);
+    html += statRow('Avg hero turns away', `${avgHeroTurns} (${avgGameTurns} game turns)`);
     html += statRow('Avg heads grown while away', avgHeadsGrown);
     heroIds.forEach(id => {
       const ht = trips.filter(t => t.heroId === id);
-      if (ht.length > 0) html += statRow(heroNames[id], `${ht.length} trips, avg ${fix1(ht.reduce((s,t)=>s+t.turnsAway,0)/ht.length)} turns`);
+      if (ht.length > 0) html += statRow(heroNames[id], `${ht.length} trips, avg ${fix1(ht.reduce((s,t)=>s+t.turnsAway,0)/ht.length)} hero turns`);
     });
     html += `</div>`;
   }
@@ -1178,9 +1179,10 @@ function generateReport(results) {
   if (koDist.length > 0) {
     html += `<div class="report-card"><b>Hydra KO Distance</b>`;
     const avgBfs = fix1(koDist.reduce((s,d) => s + d.bfsDistance, 0) / koDist.length);
-    const avgReturn = fix1(koDist.reduce((s,d) => s + d.turnsToReturn, 0) / koDist.length);
-    html += statRow('Avg BFS distance Shelter\u2192Hydra', avgBfs);
-    html += statRow('Avg turns to return', avgReturn);
+    const avgHeroReturn = fix1(koDist.reduce((s,d) => s + d.turnsToReturn, 0) / koDist.length);
+    const avgGameReturn = fix1(koDist.reduce((s,d) => s + (d.gameTurnsToReturn || d.turnsToReturn), 0) / koDist.length);
+    html += statRow('Avg BFS distance Shelter\u2192Hydra', `${avgBfs} tiles`);
+    html += statRow('Avg hero turns to return', `${avgHeroReturn} (${avgGameReturn} game turns)`);
     html += `</div>`;
   }
 
@@ -1232,11 +1234,12 @@ function generateReport(results) {
     html += `<div class="report-section"><h3>Shelter Respawn Behavior</h3>`;
     html += `<div class="report-card"><b>Respawn Overview</b> (${respawnData.length} respawns across ${n} games)`;
     const avgBpAtRespawn = fix1(respawnData.reduce((s,d) => s + d.bpAtRespawn, 0) / respawnData.length);
-    const avgTurnsAway = fix1(respawnData.reduce((s,d) => s + d.turnsAway, 0) / respawnData.length);
+    const avgHeroTurnsAway = fix1(respawnData.reduce((s,d) => s + d.turnsAway, 0) / respawnData.length);
+    const avgGameTurnsAway = fix1(respawnData.reduce((s,d) => s + (d.gameTurnsAway || d.turnsAway), 0) / respawnData.length);
     const avgSkillsLeave = fix1(respawnData.reduce((s,d) => s + d.skillsReadyAtLeave, 0) / respawnData.length);
     const avgSkillsArrive = fix1(respawnData.reduce((s,d) => s + d.skillsReadyAtArrival, 0) / respawnData.length);
     html += statRow('Avg BP at respawn', avgBpAtRespawn);
-    html += statRow('Avg turns away', avgTurnsAway);
+    html += statRow('Avg hero turns away', `${avgHeroTurnsAway} (${avgGameTurnsAway} game turns)`);
     html += statRow('Avg skills ready leaving Shelter', avgSkillsLeave);
     html += statRow('Avg skills ready arriving Hydra', avgSkillsArrive);
     html += `</div>`;

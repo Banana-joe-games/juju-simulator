@@ -4729,11 +4729,13 @@ function runToHydra(hero) {
     G.heroesInHydraArea.add(hero.id);
     // C: Shelter return trip tracking
     if (hero._hydraKOTurn) {
+      const heroTurnsAway = hero._returnTurnLog ? hero._returnTurnLog.length : Math.ceil((G.turn - hero._hydraKOTurn) / G.heroes.length);
       G.tracker.shelterReturnTrips.push({
         heroId: hero.id,
         koTurn: hero._hydraKOTurn,
         returnTurn: G.turn,
-        turnsAway: G.turn - hero._hydraKOTurn,
+        turnsAway: heroTurnsAway,
+        gameTurnsAway: G.turn - hero._hydraKOTurn,
         headsGrown: G.hydraHeads.filter(h => !h.destroyed).length - (hero._headsAtKO || 0),
         bpSpent: { recharge: hero._bpSpentSinceKO || 0, equip: hero._bpSpentEquipSinceKO || 0 }
       });
@@ -4741,7 +4743,8 @@ function runToHydra(hero) {
       G.tracker.hydraKODistance.push({
         heroId: hero.id,
         bfsDistance: hero._hydraKOBfsDistance || 0,
-        turnsToReturn: G.turn - hero._hydraKOTurn,
+        turnsToReturn: heroTurnsAway,
+        gameTurnsToReturn: G.turn - hero._hydraKOTurn,
         turn: hero._hydraKOTurn
       });
       // Shelter respawn details
@@ -4753,7 +4756,8 @@ function runToHydra(hero) {
         skillsReadyAtLeave: hero._skillsReadyAtLeave || 0,
         skillsReadyAtArrival: readySkillCount(hero),
         combatsEnRoute: hero._combatsEnRoute || 0,
-        turnsAway: G.turn - hero._hydraKOTurn,
+        turnsAway: heroTurnsAway,
+        gameTurnsAway: G.turn - hero._hydraKOTurn,
         turn: hero._hydraKOTurn
       });
       // Save per-turn return breakdown
