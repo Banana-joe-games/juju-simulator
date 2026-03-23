@@ -876,8 +876,25 @@ function runTurn() {
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
 
-  // Ogre stuck check: hero skips turn if pinned
+  // Ogre stuck check: hero skips turn if pinned (but in solo, hero refights each turn)
   if (hero.stuckAtOgre) {
+    const activeHeroCount = G.heroes.length;
+    if (activeHeroCount <= 1) {
+      // Solo mode: hero must fight the Ogre again each turn
+      log(`  ${hero.name} is pinned by the Ogre — must fight again!`, 'ko');
+      const ogre = hero.stuckAtOgre;
+      hero.stuckAtOgre = null;
+      combat(hero, ogre, 'misfortune');
+      if (G.gameOver) return;
+      if (!hero.stuckAtOgre) {
+        // Won the fight or got KO'd (applyKO resets position)
+        nextHero();
+        return;
+      }
+      // Still stuck (lost again, stuckAtOgre was re-set by handleCombatLoss)
+      nextHero();
+      return;
+    }
     log(`  ${hero.name} is pinned by the Ogre — skips turn!`, 'ko');
     trace('turn_skip', 'ogre_stuck', {hero: hero.id, stuckSince: hero.stuckAtOgreTurn});
     nextHero();

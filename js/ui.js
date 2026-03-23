@@ -2151,6 +2151,14 @@ function runSilentGame() {
 
     // Ogre stuck: skip turn
     if (hero.stuckAtOgre) {
+      if (G.heroes.length <= 1) {
+        // Solo: refight Ogre each turn
+        const ogre = hero.stuckAtOgre;
+        hero.stuckAtOgre = null;
+        combat(hero, ogre, 'misfortune');
+        if (G.gameOver) break;
+        // Whether won or lost, move to next turn
+      }
       nextHero();
       continue;
     }
