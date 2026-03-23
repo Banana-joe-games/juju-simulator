@@ -2530,9 +2530,11 @@ function combat(hero, enemyCard, tier) {
 
   // Ogre rescue: if the defeated enemy was an Ogre, free all stuck heroes on this tile
   if (enemyCard.effect === 'no_respawn_on_loss') {
+    hero._ogreConsecutiveLosses = 0;  // winner resets their own counter
     G.heroes.forEach(h => {
       if (h.stuckAtOgre && h.pos && hero.pos && h.pos.q === hero.pos.q && h.pos.r === hero.pos.r) {
         h.stuckAtOgre = null;
+        h._ogreConsecutiveLosses = 0;
         const turnsStuck = G.turn - (h.stuckAtOgreTurn || G.turn);
         log(`    ${h.name} is freed from the Ogre! (stuck ${turnsStuck} turns)`, 'wonder');
         trackEnemySideEffect('Ogre', 'otherEffects');
@@ -3330,10 +3332,12 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     return; // Hound doesn't KO, just follows
   }
 
-  // Ogre: KO but respawn on same tile, must refight next turn
+  // Ogre: hero stays on tile, must refight. After 3 consecutive losses, hero escapes to Shelter.
   if (enemyCard.effect === 'no_respawn_on_loss') {
     G.stats.ko++;
     trackEnemySideEffect('Ogre', 'otherEffects');
+    initHeroTracker(G.tracker, hero.id).ko++;
+    if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
     // Drop equipment (unless Shadow Cloak)
     if (!heroHasRelicFromOwner(hero, 'eggo')) {
       hero.equipment = hero.equipment.filter(e => e.effect === 'cannot_remove_blocks_talent');
@@ -3342,13 +3346,25 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
       G.tracker.relicEffects.cloak.safekeepCount++;
     }
     removeFollowers(hero);
-    // Hero stays on this tile with the Ogre — must refight next turn
-    hero.stuckAtOgre = {...enemyCard};
-    hero.stuckAtOgreTurn = G.turn;
-    initHeroTracker(G.tracker, hero.id).ko++;
-    if (G.tracker.pacing.firstKO === 0) G.tracker.pacing.firstKO = G.turn;
-    log(`    Ogre pins ${hero.name}! KO'd but stays on tile — must fight again next turn.`, 'ko');
-    return;
+    // Track consecutive Ogre losses
+    hero._ogreConsecutiveLosses = (hero._ogreConsecutiveLosses || 0) + 1;
+    if (hero._ogreConsecutiveLosses >= 3) {
+      // Escape valve: after 3 consecutive losses, hero breaks free and respawns at Shelter
+      log(`    ${hero.name} breaks free from the Ogre after ${hero._ogreConsecutiveLosses} losses! Respawns at Shelter.`, 'ko');
+      hero._ogreConsecutiveLosses = 0;
+      hero.stuckAtOgre = null;
+      // Place Ogre on board as persistent enemy
+      if (hero.pos && hero.pos.q !== undefined) {
+        G.enemiesOnBoard.push({ card: {...enemyCard}, pos: {q: hero.pos.q, r: hero.pos.r}, tier: 'misfortune' });
+      }
+      // Fall through to normal applyKO below
+    } else {
+      // Stay on tile, refight next turn
+      hero.stuckAtOgre = {...enemyCard};
+      hero.stuckAtOgreTurn = G.turn;
+      log(`    Ogre pins ${hero.name}! (loss ${hero._ogreConsecutiveLosses}/3) Must fight again next turn.`, 'ko');
+      return;
+    }
   }
 
   // Post-Awakening: enemy persists on the board after defeating a hero
