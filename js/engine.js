@@ -1183,6 +1183,24 @@ function decideMovementIntent(hero, movePoints) {
   return { type: 'explore', dirIndex: dirIndex };
 }
 
+// Stone Golem area control: check if a tile is effectively a Dread Dungeon
+function isEffectiveDreadDungeon(q, r) {
+  const tile = G.hexMap.get(q, r);
+  if (!tile) return false;
+  if (tile.type === 'dread') return true;
+  // Stone Golem: while alive, adjacent tiles act as Dread Dungeons
+  if (G.enemiesOnBoard) {
+    return G.enemiesOnBoard.some(e => {
+      if (e.card && e.card.effect === 'adjacent_dread') {
+        const neighbors = hexNeighborCoords(e.pos.q, e.pos.r);
+        return neighbors.some(n => n.q === q && n.r === r);
+      }
+      return false;
+    });
+  }
+  return false;
+}
+
 function movePhase(hero) {
   // Monster Hunter: skip movement to fight weakest board enemy
   if (hero.followers.find(f => f.effect === 'skip_move_fight_enemy') && G.enemiesOnBoard.length > 0) {
@@ -1341,10 +1359,10 @@ function movePhase(hero) {
       stepsUsed++;
 
       if (G.hexMap.has(scanQ, scanR)) {
-        // Explored tile — check for Dread Dungeon
+        // Explored tile — check for Dread Dungeon (or Stone Golem area)
         const existing = G.hexMap.get(scanQ, scanR);
-        if (existing.type === 'dread') {
-          // Dread Dungeon always stops movement
+        if (isEffectiveDreadDungeon(scanQ, scanR)) {
+          // Dread Dungeon (or Stone Golem zone) always stops movement
           currentQ = scanQ;
           currentR = scanR;
           destTileType = 'dread';
@@ -2088,8 +2106,13 @@ function combat(hero, enemyCard, tier) {
   }
   if (enemyCard.effect === 'plus2_per_relic') {
     const totalRelics = G.heroes.reduce((s, h) => s + h.heldRelics.length, 0);
-    enemyStr = totalRelics * 2;
+    enemyStr = totalRelics * 2;  // overrides base STR entirely — no double-stacking with Misfortune modifier
     log(`    Fishguard STR: ${enemyStr} (+2 per relic, party has ${totalRelics})`, 'combat');
+    if (!G.tracker.enemyEffectImpact['Fishguard']) G.tracker.enemyEffectImpact['Fishguard'] = { triggered:0, impactful:0, totalStr:0, fights:0 };
+    G.tracker.enemyEffectImpact['Fishguard'].totalStr += enemyStr;
+    G.tracker.enemyEffectImpact['Fishguard'].fights++;
+    G.tracker.enemyEffectImpact['Fishguard'].triggered++;
+    if (enemyStr > 0) G.tracker.enemyEffectImpact['Fishguard'].impactful++;
   }
 
   // === TAUNT INTERCEPT: Juju protects weaker allies ===
@@ -2535,24 +2558,20 @@ function combat(hero, enemyCard, tier) {
     forestAmuletBonusDraw(hero);
   }
 
-  // Stone Golem: on defeat, adjacent tiles become Dread Dungeons
-  if (enemyCard.effect === 'adjacent_dread' && hero.pos !== 'hydra' && G.hexMap) {
-    const adj = G.hexMap.exploredNeighbors(hero.pos.q, hero.pos.r);
-    let converted = 0;
-    adj.forEach(n => {
-      const tile = G.hexMap.get(n.q, n.r);
-      if (tile && tile.type !== 'dread' && tile.type !== 'shelter') {
-        tile.type = 'dread';
-        converted++;
-      }
-    });
-    if (converted > 0) {
-      log(`    Stone Golem's death curse! ${converted} adjacent tile${converted > 1 ? 's become' : ' becomes'} Dread Dungeon${converted > 1 ? 's' : ''}!`, 'misfortune');
-      trackEnemySideEffect('Stone Golem', 'otherEffects');
-    }
+  // Stone Golem: dynamic area control ends on defeat (adjacent tiles return to normal)
+  if (enemyCard.effect === 'adjacent_dread') {
+    log(`    Stone Golem defeated! Adjacent tiles are no longer treated as Dread Dungeons.`, 'wonder');
     if (!G.tracker.enemyEffectImpact[enemyCard.name]) G.tracker.enemyEffectImpact[enemyCard.name] = { triggered:0, impactful:0 };
     G.tracker.enemyEffectImpact[enemyCard.name].triggered++;
-    if (converted > 0) G.tracker.enemyEffectImpact[enemyCard.name].impactful++;
+  }
+
+  // Mindflayer: return to top of Misfortune deck on defeat
+  if (enemyCard.effect === 'top_of_deck') {
+    const idx = MISFORTUNE_CARDS.findIndex(c => c.name === 'Mindflayer');
+    if (idx >= 0) {
+      G.misfortuneDeck.push(idx);  // push to top (deck pops from end)
+      log(`    Mindflayer returns to the top of the Misfortune deck!`, 'misfortune');
+    }
   }
 
   // Mimic: draw legendary on defeat
@@ -2653,11 +2672,17 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     log(`    ${enemyCard.name} (STR ${enemyStr}) rolls ${enemyRollResult.val} = ${enemyTotal}`, 'combat');
   }
 
-  // Mummy: if enemy rolls Flame, hero -2
+  // Mummy: pre-roll — Mummy rolls first, Flame result applies -2 STR before hero rolls
   let mummyPenalty = 0;
-  if (enemyCard.effect === 'flame_minus2' && enemyRollResult && enemyRollResult.isFlame) {
-    mummyPenalty = -2;
-    log(`    Mummy's Flame curse! ${hero.name} fights at -2`, 'misfortune');
+  if (enemyCard.effect === 'flame_minus2') {
+    log(`    Mummy rolls first...`, 'combat');
+    if (enemyRollResult && enemyRollResult.isFlame) {
+      mummyPenalty = -2;
+      log(`    Mummy's Flame curse! ${hero.name} fights at -2 STR`, 'misfortune');
+      trackEnemySideEffect('Mummy', 'strDebuff');
+    } else {
+      log(`    Mummy rolled ${enemyRollResult ? enemyRollResult.val : '?'} — no Flame, hero fights normally`, 'combat');
+    }
   }
 
   // Mud Golem margin
@@ -4824,9 +4849,9 @@ function runToHydra(hero) {
       // SAFE PATH: follow revealed tiles, enough to reach Hydra this turn
       for (let i = 1; i < revealedPath.length && i <= moveVal; i++) {
         const step = revealedPath[i];
-        // Check for DD on the path
+        // Check for DD (or Stone Golem area) on the path
         const tile = G.hexMap.get(step.q, step.r);
-        if (tile && tile.type === 'dread' && !(step.q === G.exitHex.q && step.r === G.exitHex.r)) {
+        if (isEffectiveDreadDungeon(step.q, step.r) && !(step.q === G.exitHex.q && step.r === G.exitHex.r)) {
           currentQ = step.q; currentR = step.r;
           hero.pos = { q: currentQ, r: currentR };
           log(`  ⚠ Dread Dungeon blocks the path! ${hero.name} stops.`, 'misfortune');
@@ -4850,7 +4875,7 @@ function runToHydra(hero) {
       for (let i = 1; i <= stepsToTake; i++) {
         const step = revealedPath[i];
         const tile = G.hexMap.get(step.q, step.r);
-        if (tile && tile.type === 'dread' && !(step.q === G.exitHex.q && step.r === G.exitHex.r)) {
+        if (isEffectiveDreadDungeon(step.q, step.r) && !(step.q === G.exitHex.q && step.r === G.exitHex.r)) {
           currentQ = step.q; currentR = step.r;
           hero.pos = { q: currentQ, r: currentR };
           log(`  ⚠ Dread Dungeon blocks the path! ${hero.name} stops.`, 'misfortune');
@@ -4898,7 +4923,7 @@ function runToHydra(hero) {
               roomId: 'room_' + G.tilesPlaced, tileIndex: G.tilesPlaced,
               enemies: [], equipment: []
             });
-            if (tileType === 'dread') {
+            if (isEffectiveDreadDungeon(bestNeighbor.q, bestNeighbor.r)) {
               currentQ = bestNeighbor.q; currentR = bestNeighbor.r;
               hero.pos = { q: currentQ, r: currentR };
               log(`  ⚠ Dread Dungeon! ${hero.name} stops here.`, 'misfortune');
@@ -4908,7 +4933,7 @@ function runToHydra(hero) {
           } else { break; }
         } else {
           const existing = G.hexMap.get(bestNeighbor.q, bestNeighbor.r);
-          if (existing.type === 'dread') {
+          if (isEffectiveDreadDungeon(bestNeighbor.q, bestNeighbor.r)) {
             currentQ = bestNeighbor.q; currentR = bestNeighbor.r;
             hero.pos = { q: currentQ, r: currentR };
             log(`  ⚠ Dread Dungeon blocks the path! ${hero.name} stops.`, 'misfortune');
