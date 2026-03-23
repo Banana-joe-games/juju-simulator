@@ -733,17 +733,21 @@ function bpSpendAtShelter(hero) {
     else G.tracker.bpVisits.voluntary++;
   }
   const tw = G._tweaks || {};
-  const rechargeCost = tw.bpRechargeSkillCost || 3;
-  const equipCost = tw.bpBuyEquipCost || 6;
-  const purifyCost = tw.bpPurifyCost || 4;
+  const rechargeCost = tw.bpRechargeSkillCost || 4;
+  const equipCost = tw.bpBuyEquipCost || 8;
+  const purifyCost = tw.bpPurifyCost || 5;
+  const bpBefore = hero.bp;
+  const purchaseSeq = [];  // Track purchase sequence
+  const hadEnoughForBoth = hero.bp >= equipCost && hero.bp >= rechargeCost;
+
   // AI priority: purify stalkers first, then buy equipment, then recharge skills
-  // Purify: remove a stalker
   while (hero.bp >= purifyCost && hero.stalkers.length > 0) {
     const removed = hero.stalkers.pop();
     hero.bp -= purifyCost;
     hero.bpSpentPurify = (hero.bpSpentPurify || 0) + purifyCost;
     if (hero._bpSpentDetailSinceKO) hero._bpSpentDetailSinceKO.purify += purifyCost;
     trackStalker(removed.name, 'removed');
+    purchaseSeq.push('purify:' + removed.name);
     log(`  ⭐ Purified ${removed.name} for ${purifyCost} BP! (${hero.bp} BP left)`, 'wonder');
   }
   const hasWeapon = hero.equipment.some(e => e.type === 'weapon');
@@ -754,6 +758,7 @@ function bpSpendAtShelter(hero) {
     hero.bpSpentEquip += equipCost;
     if (hero._bpSpentDetailSinceKO) hero._bpSpentDetailSinceKO.equip += equipCost;
     drawLegendaryItem(hero);
+    purchaseSeq.push('equipment');
     log(`  ⭐ Spent ${equipCost} BP → bought Legendary Equipment! (${hero.bp} BP left)`, 'legendary');
   }
   // Priority: recharge Reality Warp if running to Hydra
@@ -765,23 +770,36 @@ function bpSpendAtShelter(hero) {
       hero.skillStates[rwIdx] = 'ready';
       if (hero._bpSpentDetailSinceKO) { hero._bpSpentDetailSinceKO.recharge += rechargeCost; hero._skillsRechargedSinceKO.push('Reality Warp'); }
       if (G.tracker) { if (!G.tracker.skillRechargeSources['bp']) G.tracker.skillRechargeSources['bp'] = 0; G.tracker.skillRechargeSources['bp']++; }
+      purchaseSeq.push('recharge:Reality Warp');
       log(`  ⭐ Priority: recharged Reality Warp for Hydra rush! (${hero.bp} BP left)`, 'legendary');
     }
   }
-  // Recharge skills if affordable and have exhausted ones
+  // Recharge skills
   while (hero.bp >= rechargeCost && exhaustedSkills > 0 && hero.skillStates.some(s => s === 'exhausted')) {
-    // Track which skill will be recharged
     const rechargeIdx = hero.skillStates.findIndex(s => s === 'exhausted');
     const rechargedSkillName = (rechargeIdx >= 0 && hero.skills && hero.skills[rechargeIdx]) ? hero.skills[rechargeIdx].name : 'unknown';
     hero.bp -= rechargeCost;
     hero.bpSpentSkill += rechargeCost;
     rechargeOneSkill(hero, 'bp');
     if (hero._bpSpentDetailSinceKO) { hero._bpSpentDetailSinceKO.recharge += rechargeCost; hero._skillsRechargedSinceKO.push(rechargedSkillName); }
+    purchaseSeq.push('recharge:' + rechargedSkillName);
     log(`  ⭐ Spent ${rechargeCost} BP → recharged ${rechargedSkillName}! (${hero.bp} BP left)`, 'legendary');
   }
   // Track skills ready when leaving Shelter after respawn
   if (hero._hydraKOTurn && hero._justRespawned) {
     hero._skillsReadyAtLeave = readySkillCount(hero);
+  }
+  // Log shelter visit details
+  if (G.tracker) {
+    const bpSpentTotal = bpBefore - hero.bp;
+    const notSpentReason = bpSpentTotal === 0 ? (bpBefore < Math.min(rechargeCost, equipCost, purifyCost) ? 'not_enough' : (exhaustedSkills === 0 && hasWeapon && hero.stalkers.length === 0 ? 'fully_ready' : 'ai_skip')) : null;
+    G.tracker.shelterPurchases = G.tracker.shelterPurchases || [];
+    G.tracker.shelterPurchases.push({
+      heroId: hero.id, turn: G.turn, bpBefore, bpAfter: hero.bp,
+      sequence: purchaseSeq, hadEnoughForBoth,
+      firstChoice: purchaseSeq.length > 0 ? (purchaseSeq[0].startsWith('recharge') ? 'recharge' : purchaseSeq[0].startsWith('equip') ? 'equipment' : 'purify') : null,
+      notSpentReason
+    });
   }
 }
 

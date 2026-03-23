@@ -1278,6 +1278,63 @@ function generateReport(results) {
     html += `</div>`;
   }
 
+  // ===================== SHELTER PURCHASE DECISIONS =====================
+  const purchases = results.flatMap(r => r.tracker.shelterPurchases || []);
+  if (purchases.length > 0) {
+    html += `<div class="report-section"><h3>Shelter Purchase Decisions</h3>`;
+
+    // A: Purchase priority sequence
+    const seqCounts = {};
+    purchases.filter(p => p.sequence.length > 0).forEach(p => {
+      const key = p.sequence.join(' → ');
+      seqCounts[key] = (seqCounts[key]||0) + 1;
+    });
+    html += `<div class="report-card"><b>Top Purchase Sequences</b>`;
+    Object.entries(seqCounts).sort((a,b) => b[1]-a[1]).slice(0, 10).forEach(([seq, count]) => {
+      html += statRow(seq, `${count}x`);
+    });
+    html += `</div>`;
+
+    // C: BP not spent
+    const noSpend = purchases.filter(p => p.sequence.length === 0 && p.bpBefore > 0);
+    if (noSpend.length > 0) {
+      const reasons = {};
+      noSpend.forEach(p => { const r = p.notSpentReason || 'unknown'; reasons[r] = (reasons[r]||0) + 1; });
+      const avgUnspent = fix1(noSpend.reduce((s,p) => s + p.bpBefore, 0) / noSpend.length);
+      html += `<div class="report-card"><b>BP Not Spent</b> (${noSpend.length} visits with BP but no purchase)`;
+      html += statRow('Avg BP left unspent', avgUnspent);
+      Object.entries(reasons).sort((a,b) => b[1]-a[1]).forEach(([reason, count]) => {
+        const label = reason === 'not_enough' ? 'Not enough for any purchase' : reason === 'fully_ready' ? 'Already fully equipped/recharged' : reason === 'ai_skip' ? 'AI chose not to spend' : reason;
+        html += statRow(label, `${count} (${pct(count, noSpend.length)}%)`);
+      });
+      html += `</div>`;
+    }
+
+    // D: Recharge vs Equipment decision (8+ BP)
+    const bigBP = purchases.filter(p => p.hadEnoughForBoth && p.sequence.length > 0);
+    if (bigBP.length > 0) {
+      const firstChoices = {};
+      bigBP.forEach(p => { const c = p.firstChoice || 'unknown'; firstChoices[c] = (firstChoices[c]||0) + 1; });
+      html += `<div class="report-card"><b>With 8+ BP: First Purchase Choice</b> (${bigBP.length} decisions)`;
+      Object.entries(firstChoices).sort((a,b) => b[1]-a[1]).forEach(([choice, count]) => {
+        html += statRow(choice, `${count} (${pct(count, bigBP.length)}%)`);
+      });
+      html += `</div>`;
+    }
+
+    // Per hero
+    heroIds.forEach(id => {
+      const hp = purchases.filter(p => p.heroId === id);
+      if (hp.length > 0) {
+        const spent = hp.filter(p => p.sequence.length > 0);
+        const avgBpSpent = spent.length > 0 ? fix1(spent.reduce((s,p) => s + (p.bpBefore - p.bpAfter), 0) / spent.length) : '0';
+        html += `<div style="font-size:10px;color:var(--${id});margin:2px 0"><b>${heroNames[id]}</b>: ${hp.length} visits, ${spent.length} with purchases, avg ${avgBpSpent} BP spent/visit</div>`;
+      }
+    });
+
+    html += `</div>`;
+  }
+
   // ===================== SECTION 11: TRAP ANALYSIS =====================
   html += `<div class="report-section"><h3>Trap Analysis</h3>`;
 
@@ -2314,7 +2371,7 @@ function organizeReportTabs() {
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Arcane Familiar'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement'],
-    'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail','Shelter Respawn'],
+    'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail','Shelter Respawn','Shelter Purchase'],
     'tab-analysis': ['Textual Analysis']
   };
   const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ','tab-analysis'];
