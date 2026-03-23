@@ -598,15 +598,20 @@ function generateReport(results) {
   }
   // Gigi
   {
-    const gt = { triggered:0, giftTargets:{}, giftUsedFor:{combat:0,movement:0,awakening:0} };
-    results.forEach(r => { const d = r.tracker.talentDetails && r.tracker.talentDetails.gigi; if (d) { gt.triggered += (d.triggered||0); Object.entries(d.giftTargets||{}).forEach(([k,v]) => { gt.giftTargets[k] = (gt.giftTargets[k]||0) + v; }); Object.keys(gt.giftUsedFor).forEach(k => gt.giftUsedFor[k] += (d.giftUsedFor && d.giftUsedFor[k])||0); }});
+    const gt = { triggered:0, giftTargets:{}, giftUsedFor:{combat:0,movement:0,awakening:0,nothing:0}, giftValueByTarget:{} };
+    results.forEach(r => { const d = r.tracker.talentDetails && r.tracker.talentDetails.gigi; if (d) { gt.triggered += (d.triggered||0); Object.entries(d.giftTargets||{}).forEach(([k,v]) => { gt.giftTargets[k] = (gt.giftTargets[k]||0) + v; }); Object.keys(gt.giftUsedFor).forEach(k => gt.giftUsedFor[k] += (d.giftUsedFor && d.giftUsedFor[k])||0); Object.entries(d.giftValueByTarget||{}).forEach(([k,v]) => { gt.giftValueByTarget[k] = (gt.giftValueByTarget[k]||0) + v; }); }});
     html += `<div class="report-card" style="border-left:3px solid var(--gigi)"><b style="color:var(--gigi)">Gigi — Nature's Gift</b>`;
     html += statRow('Triggered', `${gt.triggered} (${fix1(gt.triggered/n)}/game)`);
     const targetEntries = Object.entries(gt.giftTargets).sort((a,b) => b[1]-a[1]);
-    targetEntries.forEach(([id, count]) => html += statRow(`Gifted to ${heroNames[id]||id}`, `${count} (${pct(count, gt.triggered)}%)`));
-    html += statRow('Context: Combat', gt.giftUsedFor.combat);
-    html += statRow('Context: Movement', gt.giftUsedFor.movement);
-    html += statRow('Context: Awakening', gt.giftUsedFor.awakening);
+    targetEntries.forEach(([id, count]) => {
+      const used = gt.giftValueByTarget[id] || 0;
+      html += statRow(`Gifted to ${heroNames[id]||id}`, `${count} (${pct(count, gt.triggered)}%) · used ${used}x`);
+    });
+    const totalUsed = gt.giftUsedFor.combat + gt.giftUsedFor.movement + gt.giftUsedFor.awakening + gt.giftUsedFor.nothing;
+    html += statRow('Used in Combat', `${gt.giftUsedFor.combat} (${pct(gt.giftUsedFor.combat, totalUsed)}%)`);
+    html += statRow('Used in Movement', `${gt.giftUsedFor.movement} (${pct(gt.giftUsedFor.movement, totalUsed)}%)`);
+    html += statRow('Used for Awakening', `${gt.giftUsedFor.awakening} (${pct(gt.giftUsedFor.awakening, totalUsed)}%)`);
+    if (gt.giftUsedFor.nothing > 0) html += statRow('Wasted (no effect)', `${gt.giftUsedFor.nothing} (${pct(gt.giftUsedFor.nothing, totalUsed)}%)`);
     html += `</div>`;
   }
   // Lulu
@@ -1159,6 +1164,188 @@ function generateReport(results) {
       html += `<tr><td>${name}</td><td style="text-align:center">${data.attached}</td><td style="text-align:center">${data.causedKO}</td><td style="text-align:center">${data.removed}</td></tr>`;
     });
     html += `</table></div>`;
+  }
+  html += `</div>`;
+
+  // ===================== EQUIPMENT POWER COMBOS =====================
+  html += `<div class="report-section"><h3>Equipment Power Combos</h3>`;
+  {
+    // Compare equipment pair presence in wins vs losses
+    const comboWins = {};
+    const comboLosses = {};
+    const extractCombos = (gameResults, target) => {
+      gameResults.forEach(r => {
+        heroIds.forEach(id => {
+          const es = r.tracker.heroEndState[id];
+          if (es && es.equipNames && es.equipNames.length >= 2) {
+            const sorted = [...es.equipNames].sort();
+            for (let i = 0; i < sorted.length; i++) {
+              for (let j = i+1; j < sorted.length; j++) {
+                const pair = sorted[i] + ' + ' + sorted[j];
+                target[pair] = (target[pair]||0) + 1;
+              }
+            }
+          }
+        });
+      });
+    };
+    extractCombos(wins, comboWins);
+    extractCombos(losses, comboLosses);
+
+    const allComboKeys = [...new Set([...Object.keys(comboWins), ...Object.keys(comboLosses)])];
+    const comboStats = allComboKeys.map(pair => {
+      const w = comboWins[pair] || 0;
+      const l = comboLosses[pair] || 0;
+      return { pair, wins: w, losses: l, total: w + l, winRate: (w + l) > 0 ? w / (w + l) * 100 : 0 };
+    }).filter(c => c.total >= 10);
+
+    if (comboStats.length > 0) {
+      comboStats.sort((a, b) => b.winRate - a.winRate);
+      const topCombos = comboStats.slice(0, 10);
+      const bottomCombos = comboStats.slice(-5).reverse();
+
+      html += `<div class="report-card"><b>Highest Win Rate Pairs (10+ occurrences)</b>`;
+      html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+      html += `<tr style="border-bottom:1px solid var(--border)"><th>Pair</th><th>Games</th><th>Win%</th></tr>`;
+      topCombos.forEach(c => {
+        const color = c.winRate >= 70 ? 'var(--wonder)' : c.winRate <= 40 ? 'var(--ko)' : 'inherit';
+        html += `<tr><td>${c.pair}</td><td style="text-align:center">${c.total}</td><td style="text-align:center;color:${color}">${c.winRate.toFixed(1)}%</td></tr>`;
+      });
+      html += `</table></div>`;
+
+      if (bottomCombos.length > 0 && bottomCombos[0].winRate < topCombos[topCombos.length - 1].winRate) {
+        html += `<div class="report-card"><b>Lowest Win Rate Pairs</b>`;
+        html += `<table style="width:100%;font-size:10px;border-collapse:collapse">`;
+        html += `<tr style="border-bottom:1px solid var(--border)"><th>Pair</th><th>Games</th><th>Win%</th></tr>`;
+        bottomCombos.forEach(c => {
+          html += `<tr><td>${c.pair}</td><td style="text-align:center">${c.total}</td><td style="text-align:center;color:var(--ko)">${c.winRate.toFixed(1)}%</td></tr>`;
+        });
+        html += `</table></div>`;
+      }
+    } else {
+      html += `<div class="report-card"><span style="color:var(--dim)">Not enough data (need 10+ fights per pair)</span></div>`;
+    }
+
+    // Doomhammer self-KO tracking
+    const doomhammerEquipped = allEquip['Doomhammer'] ? allEquip['Doomhammer'].equipped || 0 : 0;
+    if (doomhammerEquipped > 0) {
+      // Count Doomhammer KOs from combat logs: fights where hero had Doomhammer but didn't actually fight (pre-combat KO)
+      // We can approximate from hydraGrowthLog and the KO source
+      let doomhammerKOs = 0;
+      results.forEach(r => {
+        (r.tracker.hydraGrowthLog || []).forEach(g => {
+          if (g.source === 'hero_ko') {
+            // Check if any hero had Doomhammer equipped at that point — approximation
+          }
+        });
+      });
+      // Better approach: count from combat log entries where margin data suggests pre-combat KO
+      // Since engine doesn't log Doomhammer KOs separately, count from the log messages is not possible here.
+      // Instead, show equipment win/loss data for Doomhammer
+      const dh = allEquip['Doomhammer'];
+      const dhWins = dh.wonWith || 0;
+      const dhLosses = dh.lostWith || 0;
+      const dhTotal = dhWins + dhLosses;
+      html += `<div class="report-card"><b>Doomhammer Risk Profile</b>`;
+      html += statRow('Times Equipped', doomhammerEquipped);
+      html += statRow('Combat Win Rate', dhTotal > 0 ? `${pct(dhWins, dhTotal)}%` : '-');
+      html += statRow('Discarded', dh.discarded || 0);
+      html += `</div>`;
+    }
+  }
+  html += `</div>`;
+
+  // ===================== SPELL MIRROR ANALYSIS =====================
+  html += `<div class="report-section"><h3>Spell Mirror Analysis</h3>`;
+  {
+    const sm = { total: 0, cancelled: {}, atHydra: 0, atDungeon: 0 };
+    results.forEach(r => {
+      const d = r.tracker.spellMirrorDetails;
+      if (d) {
+        sm.total += (d.total || 0);
+        sm.atHydra += (d.atHydra || 0);
+        sm.atDungeon += (d.atDungeon || 0);
+        Object.entries(d.cancelled || {}).forEach(([k, v]) => {
+          sm.cancelled[k] = (sm.cancelled[k] || 0) + v;
+        });
+      }
+    });
+
+    html += `<div class="report-card"><b>Spell Mirror Cancellations</b>`;
+    html += statRow('Total Cancellations', `${sm.total} (${fix1(sm.total/n)}/game)`);
+    html += statRow('At Dungeon', `${sm.atDungeon} (${pct(sm.atDungeon, sm.total)}%)`);
+    html += statRow('At Hydra', `${sm.atHydra} (${pct(sm.atHydra, sm.total)}%)`);
+
+    const cancelledEntries = Object.entries(sm.cancelled).sort((a, b) => b[1] - a[1]);
+    if (cancelledEntries.length > 0) {
+      html += `<div style="margin-top:6px"><b style="font-size:10px">Effects Cancelled</b></div>`;
+      cancelledEntries.forEach(([effect, count]) => {
+        html += statRow(effect.replace(/_/g, ' '), `${count} (${pct(count, sm.total)}%)`);
+      });
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  // ===================== ENEMY ENGAGEMENT DEPTH =====================
+  html += `<div class="report-section"><h3>Enemy Engagement Patterns</h3>`;
+  {
+    const enemyEngagement = {};
+    allCombatLogs.forEach(c => {
+      if (!enemyEngagement[c.enemy]) enemyEngagement[c.enemy] = {
+        fights: 0, wins: 0,
+        skillUsed: 0,
+        skillBurned: 0,
+        crossHeroHelp: 0,
+        preSkills: 0, preEquip: 0
+      };
+      const e = enemyEngagement[c.enemy];
+      e.fights++;
+      if (c.won) e.wins++;
+      e.preSkills += c.readySkills || 0;
+      e.preEquip += c.equipCount || 0;
+    });
+
+    // Enrich with skill burn data from enemySideEffects
+    results.forEach(r => {
+      Object.entries(r.tracker.enemySideEffects || {}).forEach(([enemy, effects]) => {
+        if (enemyEngagement[enemy]) {
+          enemyEngagement[enemy].skillBurned += (effects.skillsExhausted || 0);
+        }
+      });
+    });
+
+    // Enrich with skill activation data from skill tracker (per enemy is not available, approximate from combatLog)
+    // Approximate skill usage: fights where readySkills > 0 (hero had skills available)
+    allCombatLogs.forEach(c => {
+      if (enemyEngagement[c.enemy] && (c.readySkills || 0) > 0) {
+        enemyEngagement[c.enemy].skillUsed++;
+      }
+    });
+
+    const engagementRows = Object.entries(enemyEngagement)
+      .filter(([, e]) => e.fights >= 5)
+      .map(([name, e]) => {
+        const winPct = e.fights > 0 ? e.wins / e.fights * 100 : 0;
+        const skillUsePct = e.fights > 0 ? e.skillUsed / e.fights * 100 : 0;
+        const burnPct = e.fights > 0 ? e.skillBurned / e.fights * 100 : 0;
+        const crossHeroPct = e.fights > 0 ? e.crossHeroHelp / e.fights * 100 : 0;
+        const depth = (skillUsePct + burnPct + crossHeroPct) / 3;
+        return { name, fights: e.fights, winPct, skillUsePct, burnPct, crossHeroPct, depth };
+      })
+      .sort((a, b) => b.depth - a.depth);
+
+    if (engagementRows.length > 0) {
+      html += `<table style="width:100%;font-size:9px;border-collapse:collapse">`;
+      html += `<tr style="border-bottom:1px solid var(--border)"><th>Enemy</th><th>Fights</th><th>Win%</th><th>Skill Use%</th><th>Burn%</th><th>Cross-Hero%</th><th>Depth</th></tr>`;
+      engagementRows.forEach(r => {
+        const depthColor = r.depth >= 50 ? 'var(--flame)' : r.depth >= 25 ? 'var(--mishap)' : 'var(--dim)';
+        html += `<tr><td>${r.name}</td><td style="text-align:center">${r.fights}</td><td style="text-align:center">${r.winPct.toFixed(1)}%</td><td style="text-align:center">${r.skillUsePct.toFixed(1)}%</td><td style="text-align:center">${r.burnPct.toFixed(1)}%</td><td style="text-align:center">${r.crossHeroPct.toFixed(1)}%</td><td style="text-align:center;color:${depthColor}">${r.depth.toFixed(1)}</td></tr>`;
+      });
+      html += `</table>`;
+    } else {
+      html += `<div class="report-card"><span style="color:var(--dim)">Not enough data (need 5+ fights per enemy)</span></div>`;
+    }
   }
   html += `</div>`;
 
@@ -1921,8 +2108,8 @@ function organizeReportTabs() {
   const tabMap = {
     'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
-    'tab-skills-equip': ['Skill Analysis','Equipment Analysis'],
-    'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower'],
+    'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Spell Mirror'],
+    'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement'],
     'tab-hydra-econ': ['Gil Economy','Hydra Fight'],
     'tab-analysis': ['Textual Analysis']
   };

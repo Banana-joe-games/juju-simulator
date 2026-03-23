@@ -281,16 +281,17 @@ function freshTracker() {
     crownBodyguard: [],  // {turn, protector, protected, enemy, won}
     talentDetails: {
       juju: { triggered: 0, combatsWithFlame: 0, winsWithFlame: 0, combatsWithoutFlame: 0, winsWithoutFlame: 0 },
-      gigi: { triggered: 0, giftTargets: {}, giftUsedFor: { combat: 0, movement: 0, awakening: 0 } },
+      gigi: { triggered: 0, giftTargets: {}, giftUsedFor: { combat: 0, movement: 0, awakening: 0, nothing: 0 }, giftValueByTarget: {} },
       lulu: { triggered: 0 },
       eggo: { triggered: 0, koPrevented: 0, dodgeActive: 0, dodgeNotActive: 0, koWithDodge: 0, koWithoutDodge: 0, flameSkilledBurnedAway: 0 }
     },
     relicEffects: {
       crown: { bodyguardCount: 0, protected: {}, outcomes: { won: 0, lost: 0 } },
       amulet: { pactPrevented: 0, bonusDraws: 0 },
-      grimoire: { failsafeCount: 0, doubleRechargeCount: 0 },
+      grimoire: { failsafeCount: 0, doubleRechargeCount: 0, skillSaveCount: 0, skillSaveByHero: {} },
       cloak: { safekeepCount: 0, thirdSlotUsed: 0 }
     },
+    spellMirrorDetails: { total: 0, cancelled: {}, atHydra: 0, atDungeon: 0 },
   };
 }
 
@@ -759,13 +760,8 @@ function runTurn() {
     readySkills: readySkillCount(hero)
   });
 
-  // Ancestral Grimoire base passive: if ALL skills exhausted at turn start, recharge 1
-  if (heroHasRelicFromOwner(hero, 'lulu') && readySkillCount(hero) === 0 && hero.skillStates.length > 0) {
-    rechargeOneSkill(hero, 'grimoire_failsafe');
-    trace('turn_start', 'grimoire_failsafe', {hero: hero.id, recharged: 'skill'});
-    G.tracker.relicEffects.grimoire.failsafeCount++;
-    log(`  📖 Ancestral Grimoire: ${hero.name} starts with 0 ready skills — recharges 1!`, 'legendary');
-  }
+  // Ancestral Grimoire base passive: Skill Burn flame-save (handled in combat code)
+  // Old failsafe (recharge when all exhausted) removed — new effect saves burned skills on Flame reroll
 
   // Gil: spend at entrance if at entrance
   gilSpendAtEntrance(hero);
@@ -1057,8 +1053,14 @@ function movePhase(hero) {
   let roll = heroRollDie(hero);
   if (checkAssassin(hero, roll)) return;
 
+  const _hadGiftedFlame = hero.giftedFlame;
   let isFlame = roll.isFlame || hero.giftedFlame;
   hero.giftedFlame = false;
+  if (_hadGiftedFlame) {
+    // Track whether this gifted flame triggers awakening (checked after talent trigger below)
+    hero._giftedFlameConsumed = true;
+    G.tracker.talentDetails.gigi.giftValueByTarget[hero.id] = (G.tracker.talentDetails.gigi.giftValueByTarget[hero.id] || 0) + 1;
+  }
   let moveVal = roll.val;
 
   // Mutt: rolled 1 — discard 1 equipment
@@ -1133,6 +1135,16 @@ function movePhase(hero) {
       const rr = G.relicRooms[G.relicRooms.length - 1];
       trace('movement', 'awakening', {type: 'relic_room', position: rr ? {q: rr.q, r: rr.r} : null});
     }
+  }
+
+  // Deferred Nature's Gift usage tracking: classify movement vs awakening
+  if (hero._giftedFlameConsumed) {
+    if (isFlame && G.tilesPlaced >= 10) {
+      G.tracker.talentDetails.gigi.giftUsedFor.awakening++;
+    } else {
+      G.tracker.talentDetails.gigi.giftUsedFor.movement++;
+    }
+    delete hero._giftedFlameConsumed;
   }
 
   // Darksight Helm: peek at face-down adjacent tiles (AI already has map info, log the effect)
@@ -1820,6 +1832,10 @@ function trySpellMirror(context, atHydra) {
     if (shouldUseSkill(lulu, 'Spell Mirror', { atHydra: !!atHydra, isLethal, isDangerous })) {
         useSkill(lulu, 'Spell Mirror');
         trackSkill('lulu', 'Spell Mirror', 'activated');
+        G.tracker.spellMirrorDetails.total++;
+        G.tracker.spellMirrorDetails.cancelled[context] = (G.tracker.spellMirrorDetails.cancelled[context] || 0) + 1;
+        if (atHydra) G.tracker.spellMirrorDetails.atHydra++;
+        else G.tracker.spellMirrorDetails.atDungeon++;
         if (atHydra) {
             log(`  🪞 Spell Mirror: Lulu cancels the Hydra head ability!`, 'flame');
         } else if (isLethal) {
@@ -2419,8 +2435,13 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   // Assassin check on combat roll
   if (checkAssassin(hero, heroRoll)) return 'loss';
 
+  const _hadGiftedFlameCombat = hero.giftedFlame;
   let isFlame = heroRoll.isFlame || hero.giftedFlame;
   hero.giftedFlame = false;
+  if (_hadGiftedFlameCombat) {
+    G.tracker.talentDetails.gigi.giftUsedFor.combat++;
+    G.tracker.talentDetails.gigi.giftValueByTarget[hero.id] = (G.tracker.talentDetails.gigi.giftValueByTarget[hero.id] || 0) + 1;
+  }
   G._lastHeroRollVal = heroRoll.val;
 
   // === ROLL MODIFIERS ===
@@ -2622,6 +2643,13 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
       }
       trace('skill', 'burn', {hero: hero.id, skill: 'Skill Burn', rerollType: 'hero', oldRoll: heroRoll.val, newRoll: rerollHeroVal, outcomeChanged: heroTotal >= enemyTotal + beatMargin});
       log(`    ⟲ Skill Burn! Rerolled own die to ${rerollHeroVal}${rerollHeroFlame ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
+      // Grimoire: if any party member holds the Grimoire and reroll shows Flame, undo the exhaustion
+      if (rerollHeroFlame && G.heroes.some(h => heroHasRelicFromOwner(h, 'lulu'))) {
+        rechargeOneSkill(hero, 'grimoire_save');
+        log(`    📖 Grimoire: Flame on reroll — burned Skill stays Ready!`, 'legendary');
+        G.tracker.relicEffects.grimoire.skillSaveCount++;
+        G.tracker.relicEffects.grimoire.skillSaveByHero[hero.id] = (G.tracker.relicEffects.grimoire.skillSaveByHero[hero.id] || 0) + 1;
+      }
     } else if (burnChoice === 'enemy' && newEnemyTotal < enemyTotal) {
       exhaustOneSkill(hero, "Skill Burn (reroll)");
       G.stats.skillBurns++;
@@ -2704,6 +2732,13 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
             }
             trace('skill', 'burn', {hero: helper.id, skill: 'Skill Burn (ally)', rerollType: 'hero', target: hero.id, oldRoll: heroRoll.val, newRoll: allyRerollVal, outcomeChanged: heroTotal >= enemyTotal + beatMargin});
             log(`    ⟲ ${helper.name} burns a skill to reroll ${hero.name}'s die: ${allyRerollVal}${allyRerollFlame ? ' 🔥' : ''} = ${heroTotal}`, 'flame');
+            // Grimoire: if any party member holds the Grimoire and reroll shows Flame, undo the exhaustion
+            if (allyRerollFlame && G.heroes.some(h => heroHasRelicFromOwner(h, 'lulu'))) {
+              rechargeOneSkill(helper, 'grimoire_save');
+              log(`    📖 Grimoire: Flame on reroll — ${helper.name}'s burned Skill stays Ready!`, 'legendary');
+              G.tracker.relicEffects.grimoire.skillSaveCount++;
+              G.tracker.relicEffects.grimoire.skillSaveByHero[helper.id] = (G.tracker.relicEffects.grimoire.skillSaveByHero[helper.id] || 0) + 1;
+            }
           } else if (allyBurnChoice === 'enemy' && allyNewEnemyTotal < enemyTotal) {
             exhaustOneSkill(helper, `Skill Burn for ${hero.name}`);
             G.stats.skillBurns++;
@@ -3274,9 +3309,7 @@ function triggerTalent(hero, context) {
       G.tracker.talentDetails.gigi.triggered++;
       if (!G.tracker.talentDetails.gigi.giftTargets[target.id]) G.tracker.talentDetails.gigi.giftTargets[target.id] = 0;
       G.tracker.talentDetails.gigi.giftTargets[target.id]++;
-      if (context === 'combat') G.tracker.talentDetails.gigi.giftUsedFor.combat++;
-      else if (context === 'movement') G.tracker.talentDetails.gigi.giftUsedFor.movement++;
-      else G.tracker.talentDetails.gigi.giftUsedFor.awakening++;
+      // giftUsedFor is tracked at consumption time (when the recipient uses the flame)
       log(`    🔥 Nature's Gift! ${hero.name} gifts Flame to ${target.name}'s next turn`, 'flame');
       break;
     }
@@ -3634,8 +3667,18 @@ function hydraAttack(hero) {
     return;
   }
 
+  const _hadGiftedFlameHydra = hero.giftedFlame;
   let isFlame = (heroRoll.isFlame || hero.giftedFlame) && (!broodAlive || hydraSpellMirrored);
   hero.giftedFlame = false;
+  if (_hadGiftedFlameHydra) {
+    if (!isFlame) {
+      // Brood suppressed the gifted flame — it had no effect
+      G.tracker.talentDetails.gigi.giftUsedFor.nothing++;
+    } else {
+      G.tracker.talentDetails.gigi.giftUsedFor.combat++;
+    }
+    G.tracker.talentDetails.gigi.giftValueByTarget[hero.id] = (G.tracker.talentDetails.gigi.giftValueByTarget[hero.id] || 0) + 1;
+  }
 
   if (isFlame && !hero.talentUsedThisTurn && !hasStalker(hero, 'no_flame_effect')) {
     triggerTalent(hero, 'combat');
@@ -3806,6 +3849,13 @@ function hydraAttack(hero) {
       if (hero.id === 'eggo' && newFlameA) hero.dodgeActive = true;
       if (hero.id === 'eggo' && !newFlameA) hero.dodgeActive = false;
       log(`    ⟲ Skill Burn! Rerolled: ${rerollH.val}${newFlameA ? ' 🔥' : ''} = ${heroTotal} vs ${effectiveHeadStr}`, 'flame');
+      // Grimoire: if any party member holds the Grimoire and reroll shows Flame, undo the exhaustion
+      if (newFlameA && G.heroes.some(h => heroHasRelicFromOwner(h, 'lulu'))) {
+        rechargeOneSkill(hero, 'grimoire_save');
+        log(`    📖 Grimoire: Flame on reroll — burned Skill stays Ready!`, 'legendary');
+        G.tracker.relicEffects.grimoire.skillSaveCount++;
+        G.tracker.relicEffects.grimoire.skillSaveByHero[hero.id] = (G.tracker.relicEffects.grimoire.skillSaveByHero[hero.id] || 0) + 1;
+      }
     }
   }
 
@@ -3845,6 +3895,13 @@ function hydraAttack(hero) {
             }
             trace('skill', 'burn', {hero: helper.id, skill: 'Skill Burn (ally)', rerollType: 'hero', target: hero.id, oldTotal: oldHeroTotal, newRoll: allyRerollH.val});
             log(`    ⟲ ${helper.name} burns a skill to reroll ${hero.name}'s die: ${allyRerollH.val}${allyNewFlame ? ' 🔥' : ''} = ${heroTotal} vs ${effectiveHeadStr}`, 'flame');
+            // Grimoire: if any party member holds the Grimoire and reroll shows Flame, undo the exhaustion
+            if (allyNewFlame && G.heroes.some(h => heroHasRelicFromOwner(h, 'lulu'))) {
+              rechargeOneSkill(helper, 'grimoire_save');
+              log(`    📖 Grimoire: Flame on reroll — ${helper.name}'s burned Skill stays Ready!`, 'legendary');
+              G.tracker.relicEffects.grimoire.skillSaveCount++;
+              G.tracker.relicEffects.grimoire.skillSaveByHero[helper.id] = (G.tracker.relicEffects.grimoire.skillSaveByHero[helper.id] || 0) + 1;
+            }
           }
         }
       }
