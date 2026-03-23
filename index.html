@@ -400,12 +400,10 @@ input[type=range] {
   </div>
   <div class="home-tweaks">
     <h4>Heroes</h4>
-    <div class="tweak-row"><label>Player Count</label><input type="range" id="tw_playerCount" min="1" max="4" value="4" oninput="twVal(this); updateSoloOverride()"><span class="tweak-val" id="tw_playerCount_v">4</span></div>
-    <div class="tweak-row" id="soloOverrideRow" style="display:none"><label>Solo Hero</label><select id="tw_soloHero" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:3px 6px;font-family:inherit;font-size:11px;border-radius:3px"><option value="juju">Juju</option><option value="gigi">Gigi</option><option value="lulu">Lulu</option><option value="eggo">Eggo</option></select></div>
-    <div class="tweak-row"><label>Juju</label><input type="range" id="tw_juju" min="1" max="6" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_juju_v">3</span></div>
-    <div class="tweak-row"><label>Gigi</label><input type="range" id="tw_gigi" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_gigi_v">2</span></div>
-    <div class="tweak-row"><label>Lulu</label><input type="range" id="tw_lulu" min="1" max="6" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_lulu_v">1</span></div>
-    <div class="tweak-row"><label>Eggo</label><input type="range" id="tw_eggo" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_eggo_v">2</span></div>
+    <div class="tweak-row"><input type="checkbox" id="tw_hero_juju" checked style="accent-color:var(--accent)"><label>Juju</label><input type="range" id="tw_juju" min="1" max="6" value="3" oninput="twVal(this)"><span class="tweak-val" id="tw_juju_v">3</span></div>
+    <div class="tweak-row"><input type="checkbox" id="tw_hero_gigi" checked style="accent-color:var(--accent)"><label>Gigi</label><input type="range" id="tw_gigi" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_gigi_v">2</span></div>
+    <div class="tweak-row"><input type="checkbox" id="tw_hero_lulu" checked style="accent-color:var(--accent)"><label>Lulu</label><input type="range" id="tw_lulu" min="1" max="6" value="1" oninput="twVal(this)"><span class="tweak-val" id="tw_lulu_v">1</span></div>
+    <div class="tweak-row"><input type="checkbox" id="tw_hero_eggo" checked style="accent-color:var(--accent)"><label>Eggo</label><input type="range" id="tw_eggo" min="1" max="6" value="2" oninput="twVal(this)"><span class="tweak-val" id="tw_eggo_v">2</span></div>
     <h4>Legendary Equipment</h4>
     <div id="tw_equipList" class="tweak-equip-list"></div>
     <h4>Hydra Heads</h4>

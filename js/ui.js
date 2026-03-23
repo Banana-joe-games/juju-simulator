@@ -2848,10 +2848,5 @@ document.getElementById('tw_bpEnabled').addEventListener('change', function() {
   document.getElementById('tw_gilSettings').style.display = this.checked ? 'block' : 'none';
 });
 
-function updateSoloOverride() {
-  const count = parseInt(document.getElementById('tw_playerCount').value);
-  document.getElementById('soloOverrideRow').style.display = count === 1 ? 'flex' : 'none';
-}
-
 // Build equipment and hydra lists on home screen
 buildTweaksLists();

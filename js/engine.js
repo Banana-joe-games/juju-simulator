@@ -93,9 +93,9 @@ function resetTweaks() {
 
   if (document.getElementById('tw_battlecryRecharge')) document.getElementById('tw_battlecryRecharge').value = 2;
   if (document.getElementById('tw_battlecryRecharge_v')) document.getElementById('tw_battlecryRecharge_v').textContent = '2';
-  if (document.getElementById('tw_playerCount')) { document.getElementById('tw_playerCount').value = 4; document.getElementById('tw_playerCount_v').textContent = '4'; }
-  if (document.getElementById('tw_soloHero')) document.getElementById('tw_soloHero').value = 'juju';
-  if (document.getElementById('soloOverrideRow')) document.getElementById('soloOverrideRow').style.display = 'none';
+  ['juju','gigi','lulu','eggo'].forEach(id => {
+    if (document.getElementById('tw_hero_' + id)) document.getElementById('tw_hero_' + id).checked = true;
+  });
   document.getElementById('tw_bpEnabled').checked = false;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
   document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
@@ -145,7 +145,7 @@ function readTweaks() {
     var inp = document.getElementById('tw_hd_' + i + '_str');
     hydraHeads[h.name] = inp ? parseInt(inp.value) || h.str : h.str;
   });
-  return {
+  var tweaks = {
     heroStr: {
       juju: parseInt(document.getElementById('tw_juju').value),
       gigi: parseInt(document.getElementById('tw_gigi').value),
@@ -172,9 +172,17 @@ function readTweaks() {
     hydraStartingHeads: parseInt(document.getElementById('tw_hydraStartingHeads').value) || 2,
     hydraRecycling: document.getElementById('tw_hydraRecycling') ? document.getElementById('tw_hydraRecycling').checked : false,
     battlecryRecharge: parseInt(document.getElementById('tw_battlecryRecharge') ? document.getElementById('tw_battlecryRecharge').value : 2),
-    playerCount: parseInt(document.getElementById('tw_playerCount') ? document.getElementById('tw_playerCount').value : 4),
-    soloHero: document.getElementById('tw_soloHero') ? document.getElementById('tw_soloHero').value : 'juju'
+    activeHeroes: {
+      juju: document.getElementById('tw_hero_juju') ? document.getElementById('tw_hero_juju').checked : true,
+      gigi: document.getElementById('tw_hero_gigi') ? document.getElementById('tw_hero_gigi').checked : true,
+      lulu: document.getElementById('tw_hero_lulu') ? document.getElementById('tw_hero_lulu').checked : true,
+      eggo: document.getElementById('tw_hero_eggo') ? document.getElementById('tw_hero_eggo').checked : true,
+    },
   };
+  // Ensure at least 1 hero
+  var ah = tweaks.activeHeroes;
+  if (!ah.juju && !ah.gigi && !ah.lulu && !ah.eggo) ah.juju = true;
+  return tweaks;
 }
 
 function getTweaksDiff(tweaks) {
@@ -210,8 +218,9 @@ function getTweaksDiff(tweaks) {
   if (tweaks.battlecryRecharge !== 2) diffs.push('Battlecry recharges: ' + tweaks.battlecryRecharge + ' (default 2)');
   if (tweaks.hydraRecycling) diffs.push('Hydra Recycling: ON (heads return to pool, victory = all 6 down)');
   if (tweaks.hydraStartingHeads && tweaks.hydraStartingHeads !== 2) diffs.push('Hydra Starting Heads: ' + tweaks.hydraStartingHeads);
-  if (tweaks.playerCount !== 4) diffs.push('Player Count: ' + tweaks.playerCount);
-  if (tweaks.playerCount === 1 && tweaks.soloHero !== 'juju') diffs.push('Solo Hero: ' + tweaks.soloHero);
+  const activeHeroes = tweaks.activeHeroes || {};
+  const inactiveHeroes = ['juju','gigi','lulu','eggo'].filter(id => activeHeroes[id] === false);
+  if (inactiveHeroes.length > 0) diffs.push('Disabled heroes: ' + inactiveHeroes.join(', '));
   return diffs;
 }
 
@@ -465,18 +474,13 @@ function initState() {
   };
   G = state;
 
-  // Player count filtering
-  const playerCount = tw.playerCount || 4;
-  const soloHero = tw.soloHero || 'juju';
-  if (playerCount === 1) {
-    G.heroes = G.heroes.filter(h => h.id === soloHero);
-  } else if (playerCount < 4) {
-    const heroOrder = ['juju', 'gigi', 'lulu', 'eggo'];
-    const activeIds = heroOrder.slice(0, playerCount);
-    G.heroes = G.heroes.filter(h => activeIds.includes(h.id));
-  }
+  // Hero filtering by active toggles
+  const activeHeroes = tw.activeHeroes || { juju:true, gigi:true, lulu:true, eggo:true };
+  G.heroes = G.heroes.filter(h => activeHeroes[h.id] !== false);
 
-  // Relic distribution scaling
+  const playerCount = G.heroes.length;
+
+  // Relic distribution scaling based on active hero count
   if (playerCount < 4) {
     if (playerCount === 1) {
       // Solo: give all 4 relics to the single hero
@@ -3588,7 +3592,7 @@ function spawnHydra() {
   const recycling = G._tweaks && G._tweaks.hydraRecycling;
   const pool = shuffle([...HYDRA_HEADS]);
 
-  const _playerCount = (G._tweaks && G._tweaks.playerCount) || 4;
+  const _playerCount = G.heroes ? G.heroes.length : 4;
   const defaultStartHeads = _playerCount <= 2 ? 2 : 3;
   if (recycling) {
     // RECYCLING MODE: all 6 heads exist, some face-up some face-down
