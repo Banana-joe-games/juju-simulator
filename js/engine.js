@@ -4628,7 +4628,7 @@ function nextHero() {
     }
   }
 
-  G.currentHero = (G.currentHero + 1) % 4;
+  G.currentHero = (G.currentHero + 1) % G.heroes.length;
   if (G.currentHero === 0) {
     G.round++;
     G.crownUsedThisRound = false;
