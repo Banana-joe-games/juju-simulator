@@ -112,7 +112,7 @@ const MISFORTUNE_CARDS = [
   {name:'Slayer',type:'enemy',str:4,effect:'fight_twice'},
   {name:'Mummy',type:'enemy',str:4,effect:'flame_minus2'},
   {name:'Hound',type:'enemy',str:4,effect:'follows_on_loss'},
-  {name:'Ogre',type:'enemy',str:5,effect:'no_respawn_on_loss'},
+  // {name:'Ogre',type:'enemy',str:5,effect:'no_respawn_on_loss'},  // DISABLED: causes infinite loop in sim, needs rework
   {name:'Dragon',type:'enemy',str:5,effect:'gains_str_on_loss'},
   {name:'Mycoid',type:'enemy',str:5,effect:'flame_counts_0'},
   {name:'Golem',type:'enemy',str:6,effect:'exact_3_follower'},
