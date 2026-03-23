@@ -1176,6 +1176,58 @@ function generateReport(results) {
 
   html += `</div>`;
 
+  // ===================== SHELTER RESPAWN BEHAVIOR =====================
+  const respawnData = results.flatMap(r => r.tracker.shelterRespawnDetails || []);
+  if (respawnData.length > 0) {
+    html += `<div class="report-section"><h3>Shelter Respawn Behavior</h3>`;
+    html += `<div class="report-card"><b>Respawn Overview</b> (${respawnData.length} respawns across ${n} games)`;
+    const avgBpAtRespawn = fix1(respawnData.reduce((s,d) => s + d.bpAtRespawn, 0) / respawnData.length);
+    const avgTurnsAway = fix1(respawnData.reduce((s,d) => s + d.turnsAway, 0) / respawnData.length);
+    const avgSkillsLeave = fix1(respawnData.reduce((s,d) => s + d.skillsReadyAtLeave, 0) / respawnData.length);
+    const avgSkillsArrive = fix1(respawnData.reduce((s,d) => s + d.skillsReadyAtArrival, 0) / respawnData.length);
+    html += statRow('Avg BP at respawn', avgBpAtRespawn);
+    html += statRow('Avg turns away', avgTurnsAway);
+    html += statRow('Avg skills ready leaving Shelter', avgSkillsLeave);
+    html += statRow('Avg skills ready arriving Hydra', avgSkillsArrive);
+    html += `</div>`;
+
+    // BP spent breakdown
+    const totalRecharge = respawnData.reduce((s,d) => s + (d.bpSpentBreakdown ? d.bpSpentBreakdown.recharge : 0), 0);
+    const totalEquip = respawnData.reduce((s,d) => s + (d.bpSpentBreakdown ? d.bpSpentBreakdown.equip : 0), 0);
+    const totalPurify = respawnData.reduce((s,d) => s + (d.bpSpentBreakdown ? d.bpSpentBreakdown.purify : 0), 0);
+    const spentAny = respawnData.filter(d => d.bpSpentBreakdown && (d.bpSpentBreakdown.recharge + d.bpSpentBreakdown.equip + d.bpSpentBreakdown.purify) > 0).length;
+    html += `<div class="report-card"><b>BP Spent at Shelter During Respawn</b>`;
+    html += statRow('Respawns with BP spending', `${spentAny} (${pct(spentAny, respawnData.length)}%)`);
+    html += statRow('Total BP on Recharge', totalRecharge);
+    html += statRow('Total BP on Equipment', totalEquip);
+    html += statRow('Total BP on Purify', totalPurify);
+    html += `</div>`;
+
+    // Skills recharged breakdown
+    const rechargedSkills = {};
+    respawnData.forEach(d => (d.skillsRechargedNames||[]).forEach(s => { rechargedSkills[s] = (rechargedSkills[s]||0) + 1; }));
+    if (Object.keys(rechargedSkills).length > 0) {
+      html += `<div class="report-card"><b>Skills Recharged at Shelter</b>`;
+      Object.entries(rechargedSkills).sort((a,b) => b[1]-a[1]).forEach(([skill, count]) => {
+        html += statRow(skill, `${count}x`);
+      });
+      html += `</div>`;
+    }
+
+    // Per hero
+    const heroRespawns = {};
+    respawnData.forEach(d => { if (!heroRespawns[d.heroId]) heroRespawns[d.heroId] = []; heroRespawns[d.heroId].push(d); });
+    Object.entries(heroRespawns).forEach(([id, trips]) => {
+      html += `<div class="report-card" style="border-left:3px solid var(--${id})"><b>${heroNames[id]}</b> (${trips.length} respawns)`;
+      html += statRow('Avg BP at respawn', fix1(trips.reduce((s,t) => s + t.bpAtRespawn, 0) / trips.length));
+      html += statRow('Avg turns to return', fix1(trips.reduce((s,t) => s + t.turnsAway, 0) / trips.length));
+      html += statRow('Avg skills ready at Shelter', fix1(trips.reduce((s,t) => s + t.skillsReadyAtLeave, 0) / trips.length));
+      html += statRow('Avg skills ready at Hydra', fix1(trips.reduce((s,t) => s + t.skillsReadyAtArrival, 0) / trips.length));
+      html += `</div>`;
+    });
+    html += `</div>`;
+  }
+
   // ===================== SECTION 11: TRAP ANALYSIS =====================
   html += `<div class="report-section"><h3>Trap Analysis</h3>`;
 
@@ -2212,7 +2264,7 @@ function organizeReportTabs() {
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Arcane Familiar'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement'],
-    'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail'],
+    'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail','Shelter Respawn'],
     'tab-analysis': ['Textual Analysis']
   };
   const tabOrder = ['tab-overview','tab-heroes','tab-skills-equip','tab-enemies','tab-hydra-econ','tab-analysis'];

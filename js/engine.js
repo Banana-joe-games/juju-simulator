@@ -329,6 +329,7 @@ function freshTracker() {
     hydraAttackSnapshots: [],  // {heroId, readySkills, equipCount, head, skillsUsed:[], totalStr, won}
     // C: Shelter return trips
     shelterReturnTrips: [],  // {heroId, koTurn, returnTurn, turnsAway, headsGrown, bpSpent:{recharge:0,equip:0,purify:0}}
+    shelterRespawnDetails: [],  // {heroId, bpAtRespawn, bpSpentBreakdown:{recharge:0,equip:0,purify:0}, skillsRechargedNames:[], skillsReadyAtLeave, skillsReadyAtArrival, combatsEnRoute, turn}
     // D: Overload deep dive
     overloadUses: [],  // {heroId, skillsExhausted, won, turn}
     // E: Reality Warp usage
@@ -740,6 +741,7 @@ function bpSpendAtShelter(hero) {
     const removed = hero.stalkers.pop();
     hero.bp -= purifyCost;
     hero.bpSpentPurify = (hero.bpSpentPurify || 0) + purifyCost;
+    if (hero._bpSpentDetailSinceKO) hero._bpSpentDetailSinceKO.purify += purifyCost;
     trackStalker(removed.name, 'removed');
     log(`  ⭐ Purified ${removed.name} for ${purifyCost} BP! (${hero.bp} BP left)`, 'wonder');
   }
@@ -749,15 +751,24 @@ function bpSpendAtShelter(hero) {
   if (!hasWeapon && hero.bp >= equipCost && G.legendaryDeck.length > 0) {
     hero.bp -= equipCost;
     hero.bpSpentEquip += equipCost;
+    if (hero._bpSpentDetailSinceKO) hero._bpSpentDetailSinceKO.equip += equipCost;
     drawLegendaryItem(hero);
     log(`  ⭐ Spent ${equipCost} BP → bought Legendary Equipment! (${hero.bp} BP left)`, 'legendary');
   }
   // Recharge skills if affordable and have exhausted ones
   while (hero.bp >= rechargeCost && exhaustedSkills > 0 && hero.skillStates.some(s => s === 'exhausted')) {
+    // Track which skill will be recharged
+    const rechargeIdx = hero.skillStates.findIndex(s => s === 'exhausted');
+    const rechargedSkillName = (rechargeIdx >= 0 && hero.skills && hero.skills[rechargeIdx]) ? hero.skills[rechargeIdx].name : 'unknown';
     hero.bp -= rechargeCost;
     hero.bpSpentSkill += rechargeCost;
     rechargeOneSkill(hero, 'bp');
-    log(`  ⭐ Spent ${rechargeCost} BP → recharged 1 Skill! (${hero.bp} BP left)`, 'legendary');
+    if (hero._bpSpentDetailSinceKO) { hero._bpSpentDetailSinceKO.recharge += rechargeCost; hero._skillsRechargedSinceKO.push(rechargedSkillName); }
+    log(`  ⭐ Spent ${rechargeCost} BP → recharged ${rechargedSkillName}! (${hero.bp} BP left)`, 'legendary');
+  }
+  // Track skills ready when leaving Shelter after respawn
+  if (hero._hydraKOTurn && hero._justRespawned) {
+    hero._skillsReadyAtLeave = readySkillCount(hero);
   }
 }
 
@@ -3370,6 +3381,11 @@ function applyKO(hero) {
     hero._headsAtKO = G.hydraHeads.filter(h => !h.destroyed).length;
     hero._bpSpentSinceKO = 0;
     hero._bpSpentEquipSinceKO = 0;
+    hero._bpAtRespawn = hero.bp || 0;
+    hero._bpSpentDetailSinceKO = { recharge: 0, equip: 0, purify: 0 };
+    hero._skillsRechargedSinceKO = [];
+    hero._skillsReadyAtLeave = 0;
+    hero._combatsEnRoute = 0;
     // G: Compute BFS distance from shelter to Hydra exit
     if (G.exitHex && G.hexMap) {
       const path = G.hexMap.findPath(0, 0, G.exitHex.q, G.exitHex.r);
@@ -4519,6 +4535,18 @@ function runToHydra(hero) {
         heroId: hero.id,
         bfsDistance: hero._hydraKOBfsDistance || 0,
         turnsToReturn: G.turn - hero._hydraKOTurn,
+        turn: hero._hydraKOTurn
+      });
+      // Shelter respawn details
+      G.tracker.shelterRespawnDetails.push({
+        heroId: hero.id,
+        bpAtRespawn: hero._bpAtRespawn || 0,
+        bpSpentBreakdown: hero._bpSpentDetailSinceKO || {recharge:0, equip:0, purify:0},
+        skillsRechargedNames: hero._skillsRechargedSinceKO || [],
+        skillsReadyAtLeave: hero._skillsReadyAtLeave || 0,
+        skillsReadyAtArrival: readySkillCount(hero),
+        combatsEnRoute: hero._combatsEnRoute || 0,
+        turnsAway: G.turn - hero._hydraKOTurn,
         turn: hero._hydraKOTurn
       });
       hero._hydraKOTurn = null;
