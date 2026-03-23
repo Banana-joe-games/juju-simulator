@@ -25,6 +25,16 @@ const TWEAK_DEFAULTS = {
 function twVal(el) {
   document.getElementById(el.id + '_v').textContent = el.value;
 }
+function clampRooms() {
+  var w = parseInt(document.getElementById('tw_wonderCount').value) || 0;
+  var d = parseInt(document.getElementById('tw_dreadCount').value) || 0;
+  if (w + d > 36) {
+    d = 36 - w;
+    document.getElementById('tw_dreadCount').value = d;
+    document.getElementById('tw_dreadCount_v').textContent = d;
+  }
+  document.getElementById('tw_commonCount_v').textContent = 36 - w - d;
+}
 
 function buildTweaksLists() {
   // Equipment list
@@ -82,8 +92,9 @@ function resetTweaks() {
   document.getElementById('tw_eggo').value = 2; document.getElementById('tw_eggo_v').textContent = '2';
   document.getElementById('tw_mishapEnemy').value = 0; document.getElementById('tw_mishapEnemy_v').textContent = '0';
   document.getElementById('tw_misfortuneEnemy').value = 0; document.getElementById('tw_misfortuneEnemy_v').textContent = '0';
-  document.getElementById('tw_wonderPct').value = 30; document.getElementById('tw_wonderPct_v').textContent = '30';
-  document.getElementById('tw_dreadPct').value = 25; document.getElementById('tw_dreadPct_v').textContent = '25';
+  document.getElementById('tw_wonderCount').value = 12; document.getElementById('tw_wonderCount_v').textContent = '12';
+  document.getElementById('tw_dreadCount').value = 12; document.getElementById('tw_dreadCount_v').textContent = '12';
+  if (document.getElementById('tw_commonCount_v')) document.getElementById('tw_commonCount_v').textContent = '12';
   document.getElementById('tw_skills').checked = true;
   document.getElementById('tw_followers').checked = true;
   document.getElementById('tw_overflow').checked = true;
@@ -154,8 +165,8 @@ function readTweaks() {
     },
     equipment: equipment,
     hydraHeads: hydraHeads,
-    wonderPct: parseInt(document.getElementById('tw_wonderPct').value) || 30,
-    dreadPct: parseInt(document.getElementById('tw_dreadPct').value) || 25,
+    wonderCount: parseInt(document.getElementById('tw_wonderCount') ? document.getElementById('tw_wonderCount').value : 12),
+    dreadCount: parseInt(document.getElementById('tw_dreadCount') ? document.getElementById('tw_dreadCount').value : 12),
     mishapEnemyStrMod: parseInt(document.getElementById('tw_mishapEnemy').value),
     misfortuneEnemyStrMod: parseInt(document.getElementById('tw_misfortuneEnemy').value),
     skillsEnabled: document.getElementById('tw_skills').checked,
@@ -206,7 +217,8 @@ function getTweaksDiff(tweaks) {
       diffs.push(h.name + ' STR: ' + h.str + ' \u2192 ' + tweakedStr);
     }
   });
-  // Tile distribution is now fixed 12/12/12 — wonderPct/dreadPct tweaks removed
+  const wc = tweaks.wonderCount || 12, dc = tweaks.dreadCount || 12, cc = 36 - wc - dc;
+  if (wc !== 12 || dc !== 12) diffs.push('Rooms: ' + wc + 'W / ' + cc + 'C / ' + dc + 'D');
   if (tweaks.mishapEnemyStrMod !== 0) diffs.push('Mishap enemy STR: ' + (tweaks.mishapEnemyStrMod > 0 ? '+' : '') + tweaks.mishapEnemyStrMod);
   if (tweaks.misfortuneEnemyStrMod !== 0) diffs.push('Misfortune enemy STR: ' + (tweaks.misfortuneEnemyStrMod > 0 ? '+' : '') + tweaks.misfortuneEnemyStrMod);
   if (!tweaks.skillsEnabled) diffs.push('Skills: DISABLED (Skill Burn only)');
@@ -409,10 +421,13 @@ function trackHydraHead(name, field) {
 
 function initState() {
   const tw = (typeof currentTweaks !== 'undefined' && currentTweaks) || {};
+  const wonderCount = (tw.wonderCount !== undefined) ? tw.wonderCount : 12;
+  const dreadCount = (tw.dreadCount !== undefined) ? tw.dreadCount : 12;
+  const commonCount = Math.max(0, 36 - wonderCount - dreadCount);
   const tileDeck = [];
-  for (let i = 0; i < 12; i++) tileDeck.push('wonder');
-  for (let i = 0; i < 12; i++) tileDeck.push('common');
-  for (let i = 0; i < 12; i++) tileDeck.push('dread');
+  for (let i = 0; i < wonderCount; i++) tileDeck.push('wonder');
+  for (let i = 0; i < commonCount; i++) tileDeck.push('common');
+  for (let i = 0; i < dreadCount; i++) tileDeck.push('dread');
   shuffle(tileDeck);
   const state = {
     phase: 'idle',
