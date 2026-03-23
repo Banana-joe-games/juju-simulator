@@ -109,9 +109,9 @@ function resetTweaks() {
   });
   document.getElementById('tw_bpEnabled').checked = true;
   document.getElementById('tw_gilPerStr').value = 1; document.getElementById('tw_gilPerStr_v').textContent = '1';
-  document.getElementById('tw_gilRechargeSkill').value = 3; document.getElementById('tw_gilRechargeSkill_v').textContent = '3';
-  document.getElementById('tw_gilBuyEquip').value = 6; document.getElementById('tw_gilBuyEquip_v').textContent = '6';
-  if (document.getElementById('tw_bpPurifyCost')) { document.getElementById('tw_bpPurifyCost').value = 4; document.getElementById('tw_bpPurifyCost_v').textContent = '4'; }
+  document.getElementById('tw_gilRechargeSkill').value = 4; document.getElementById('tw_gilRechargeSkill_v').textContent = '4';
+  document.getElementById('tw_gilBuyEquip').value = 8; document.getElementById('tw_gilBuyEquip_v').textContent = '8';
+  if (document.getElementById('tw_bpPurifyCost')) { document.getElementById('tw_bpPurifyCost').value = 5; document.getElementById('tw_bpPurifyCost_v').textContent = '5'; }
   document.getElementById('tw_gilSettings').style.display = 'block';
   document.getElementById('tw_debugMode').checked = true;
   // Reset per-equipment
@@ -495,28 +495,8 @@ function initState() {
 
   const playerCount = G.heroes.length;
 
-  // Relic distribution scaling based on active hero count
-  if (playerCount < 4) {
-    if (playerCount === 1) {
-      // Solo: give all 4 relics to the single hero
-      G.heroes[0].heldRelics = [...G.relicPool];
-      G.relicPool = [];
-    } else if (playerCount === 2) {
-      // 2 players: 2 relics each
-      G.heroes.forEach((h, i) => {
-        h.heldRelics.push(G.relicPool[i * 2]);
-        h.heldRelics.push(G.relicPool[i * 2 + 1]);
-      });
-      G.relicPool = [];
-    } else if (playerCount === 3) {
-      // 3 players: 1 each + 4th to hero with fewest (first hero)
-      G.heroes.forEach((h, i) => {
-        h.heldRelics.push(G.relicPool[i]);
-      });
-      G.heroes[0].heldRelics.push(G.relicPool[3]);
-      G.relicPool = [];
-    }
-  }
+  // Relics stay in pool — collected via Relic Rooms during the game
+  // Distribution happens at collection time (awakenEffect → relic room entry)
 
   G.hexMap = createHexMap(3); // confined map: 37 tiles (1+6+12+18), max 3 hexes from center
   G.hexMap.set(0, 0, { q:0, r:0, type:'shelter', roomId:'shelter', tileIndex:0, enemies:[], equipment:[] });
