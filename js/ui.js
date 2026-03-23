@@ -1624,6 +1624,88 @@ function generateReport(results) {
   }
   html += `</div>`;
 
+  // ===================== COST OF VICTORY =====================
+  html += `<div class="report-section"><h3>Cost of Victory</h3>`;
+  {
+    const covAgg = {};
+    results.forEach(r => {
+      Object.entries(r.tracker.costOfVictory || {}).forEach(([enemy, data]) => {
+        if (!covAgg[enemy]) covAgg[enemy] = { fights:0, preReadySkills:0, postReadySkills:0, totalDrain:0, equipLost:0 };
+        const a = covAgg[enemy];
+        a.fights += data.fights;
+        a.preReadySkills += data.preReadySkills;
+        a.postReadySkills += data.postReadySkills;
+        a.totalDrain += data.totalDrain;
+        a.equipLost += data.equipLost;
+      });
+    });
+
+    const covRows = Object.entries(covAgg)
+      .filter(([, d]) => d.fights >= 3)
+      .map(([name, d]) => ({
+        name,
+        fights: d.fights,
+        avgDrain: d.fights > 0 ? d.totalDrain / d.fights : 0,
+        avgPre: d.fights > 0 ? d.preReadySkills / d.fights : 0,
+        avgPost: d.fights > 0 ? d.postReadySkills / d.fights : 0,
+        avgEquipLost: d.fights > 0 ? d.equipLost / d.fights : 0
+      }))
+      .sort((a, b) => b.avgDrain - a.avgDrain);
+
+    if (covRows.length > 0) {
+      html += `<div class="report-card insight" style="font-size:10px;margin-bottom:6px">Per-enemy resource drain when hero wins. Higher drain = more expensive victory.</div>`;
+      html += `<table style="width:100%;font-size:9px;border-collapse:collapse">`;
+      html += `<tr style="border-bottom:1px solid var(--border)"><th>Enemy</th><th>Wins</th><th>Avg Drain</th><th>Pre Skills</th><th>Post Skills</th><th>Equip Lost</th></tr>`;
+      covRows.slice(0, 15).forEach(r => {
+        const drainColor = r.avgDrain >= 2 ? 'var(--flame)' : r.avgDrain >= 1 ? 'var(--mishap)' : 'var(--dim)';
+        html += `<tr><td>${r.name}</td><td style="text-align:center">${r.fights}</td><td style="text-align:center;color:${drainColor}">${r.avgDrain.toFixed(2)}</td><td style="text-align:center">${r.avgPre.toFixed(1)}</td><td style="text-align:center">${r.avgPost.toFixed(1)}</td><td style="text-align:center">${r.avgEquipLost.toFixed(2)}</td></tr>`;
+      });
+      html += `</table>`;
+    } else {
+      html += `<div class="report-card"><span style="color:var(--dim)">Not enough data (need 3+ wins per enemy)</span></div>`;
+    }
+  }
+  html += `</div>`;
+
+  // ===================== CASCADING IMPACT =====================
+  html += `<div class="report-section"><h3>Cascading Impact</h3>`;
+  {
+    const cascadeAgg = {};
+    results.forEach(r => {
+      (r.tracker.cascadingImpact || []).forEach(c => {
+        if (!cascadeAgg[c.enemy1]) cascadeAgg[c.enemy1] = { pairs: 0, secondWins: 0, secondLosses: 0 };
+        const a = cascadeAgg[c.enemy1];
+        a.pairs++;
+        if (c.won2) a.secondWins++;
+        else a.secondLosses++;
+      });
+    });
+
+    const cascadeRows = Object.entries(cascadeAgg)
+      .filter(([, d]) => d.pairs >= 3)
+      .map(([name, d]) => ({
+        name,
+        pairs: d.pairs,
+        secondWinRate: d.pairs > 0 ? d.secondWins / d.pairs * 100 : 0,
+        secondLosses: d.secondLosses
+      }))
+      .sort((a, b) => a.secondWinRate - b.secondWinRate);
+
+    if (cascadeRows.length > 0) {
+      html += `<div class="report-card insight" style="font-size:10px;margin-bottom:6px">When hero fights a second enemy within 3 turns of the first. Lower 2nd win rate = first fight leaves hero more vulnerable.</div>`;
+      html += `<table style="width:100%;font-size:9px;border-collapse:collapse">`;
+      html += `<tr style="border-bottom:1px solid var(--border)"><th>First Enemy</th><th>Sequences</th><th>2nd Fight Win%</th><th>2nd Losses</th></tr>`;
+      cascadeRows.slice(0, 10).forEach(r => {
+        const winColor = r.secondWinRate < 50 ? 'var(--flame)' : r.secondWinRate < 70 ? 'var(--mishap)' : 'var(--dim)';
+        html += `<tr><td>${r.name}</td><td style="text-align:center">${r.pairs}</td><td style="text-align:center;color:${winColor}">${r.secondWinRate.toFixed(1)}%</td><td style="text-align:center">${r.secondLosses}</td></tr>`;
+      });
+      html += `</table>`;
+    } else {
+      html += `<div class="report-card"><span style="color:var(--dim)">Not enough data (need 3+ cascading sequences per enemy)</span></div>`;
+    }
+  }
+  html += `</div>`;
+
   // ===================== SECTION 13: GAP ANALYSIS =====================
   html += `<div class="report-section"><h3>Gap Analysis</h3>`;
 
@@ -2398,7 +2480,7 @@ function organizeReportTabs() {
     'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Arcane Familiar'],
-    'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement'],
+    'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement','Cost of Victory','Cascading Impact'],
     'tab-hydra-econ': ['BP Economy','Hydra Fight','Hydra Combat Detail','Shelter Respawn','Shelter Purchase'],
     'tab-analysis': ['Textual Analysis']
   };

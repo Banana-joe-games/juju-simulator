@@ -111,6 +111,45 @@ function createHexMap(maxRadius) {
     return findPath(fromQ, fromR, toQ, toR);
   }
 
+  // Find path avoiding tiles that have enemies on them (except start and end)
+  // enemyPositions is a Set of hexKey strings where enemies stand
+  function findPathAvoidEnemies(fromQ, fromR, toQ, toR, enemyPositions) {
+    if (!has(fromQ, fromR) || !has(toQ, toR)) return null;
+    if (!enemyPositions || enemyPositions.size === 0) return findPath(fromQ, fromR, toQ, toR);
+    const startKey = hexKey(fromQ, fromR);
+    const endKey = hexKey(toQ, toR);
+    if (startKey === endKey) return [{ q: fromQ, r: fromR }];
+
+    const visited = new Set([startKey]);
+    const queue = [{ q: fromQ, r: fromR, path: [{ q: fromQ, r: fromR }] }];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const nbrs = hexNeighborCoords(current.q, current.r);
+
+      for (const n of nbrs) {
+        const nKey = hexKey(n.q, n.r);
+        if (visited.has(nKey)) continue;
+        if (!has(n.q, n.r)) continue;
+
+        const newPath = [...current.path, { q: n.q, r: n.r }];
+        if (nKey === endKey) return newPath;
+
+        // Skip tiles with enemies as intermediate steps
+        if (enemyPositions.has(nKey)) continue;
+
+        // Also skip Dread Dungeon tiles (hero must stop there)
+        const tile = get(n.q, n.r);
+        if (tile && tile.type === 'dread') continue;
+
+        visited.add(nKey);
+        queue.push({ q: n.q, r: n.r, path: newPath });
+      }
+    }
+    // Fallback: try path avoiding just DD (enemies are unavoidable)
+    return findPathAvoidDD(fromQ, fromR, toQ, toR);
+  }
+
   function allExplored() {
     return Object.values(tiles);
   }
@@ -122,7 +161,7 @@ function createHexMap(maxRadius) {
   return {
     tiles, get, set, has,
     isInBounds, neighbors, exploredNeighbors, unexploredNeighbors,
-    findPath, findPathAvoidDD, allExplored, exploredCount,
+    findPath, findPathAvoidDD, findPathAvoidEnemies, allExplored, exploredCount,
     maxRadius: radius
   };
 }

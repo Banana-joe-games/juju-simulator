@@ -340,6 +340,10 @@ function freshTracker() {
     siphonImpact: [],  // {heroId, enemy, heroTotal, enemyTotal, siphonActive, won, wouldWinWithout}
     // G: Distance to Hydra at KO
     hydraKODistance: [],  // {heroId, bfsDistance, turnsToReturn, turn}
+    // H: Cost of Victory — per-enemy resource drain on wins
+    costOfVictory: {},  // { enemyName: { fights:0, preReadySkills:0, postReadySkills:0, totalDrain:0 } }
+    // I: Cascading Impact — back-to-back fights within 3 turns
+    cascadingImpact: [],  // { enemy1, turn1, won1, enemy2, turn2, won2 }
   };
 }
 
@@ -2039,6 +2043,9 @@ function combat(hero, enemyCard, tier) {
   G.stats.combats++;
   const ht = initHeroTracker(G.tracker, hero.id);
   ht.combats++;
+  // Cost of Victory: snapshot pre-combat skills
+  const _covPreSkills = readySkillCount(hero);
+  const _covPreEquip = hero.equipment.length;
   trackEncounter(enemyCard.name, 'drawn');
   let enemyStr = enemyCard.str || 0;
   trace('combat', 'start', {hero: hero.id, enemy: enemyCard.name, enemyStr: enemyStr, enemyEffect: enemyCard.effect || null, tier: tier, heroTotalStr: totalStr(hero)});
@@ -2427,7 +2434,17 @@ function combat(hero, enemyCard, tier) {
     if (result === 'win') {
       totalWins++;
     } else {
-      // Lost — stop fighting
+      // Lost — track cascading impact for losses too
+      if (!hero._lastFights) hero._lastFights = [];
+      const recent = hero._lastFights.filter(f => G.turn - f.turn > 0 && G.turn - f.turn <= 3);
+      recent.forEach(prev => {
+        G.tracker.cascadingImpact.push({
+          enemy1: prev.enemy, turn1: prev.turn, won1: prev.won,
+          enemy2: enemyCard.name, turn2: G.turn, won2: false
+        });
+      });
+      hero._lastFights.push({ enemy: enemyCard.name, turn: G.turn, won: false });
+      if (hero._lastFights.length > 5) hero._lastFights.shift();
       return;
     }
   }
@@ -2442,6 +2459,35 @@ function combat(hero, enemyCard, tier) {
   initHeroTracker(G.tracker, hero.id).enemiesKilled++;
   trace('combat', 'result', {hero: hero.id, enemy: enemyCard.name, won: true, margin: _lfr.margin || 0, bpEarned: 0});
   log(`  ✓ ${hero.name} defeats ${enemyCard.name}!`, 'wonder');
+
+  // Cost of Victory: track resource drain on wins
+  {
+    const postSkills = readySkillCount(hero);
+    const postEquip = hero.equipment.length;
+    const eName = enemyCard.name;
+    if (!G.tracker.costOfVictory[eName]) G.tracker.costOfVictory[eName] = { fights:0, preReadySkills:0, postReadySkills:0, totalDrain:0, equipLost:0 };
+    const cv = G.tracker.costOfVictory[eName];
+    cv.fights++;
+    cv.preReadySkills += _covPreSkills;
+    cv.postReadySkills += postSkills;
+    cv.totalDrain += (_covPreSkills - postSkills);
+    cv.equipLost += Math.max(0, _covPreEquip - postEquip);
+  }
+
+  // Cascading Impact: track back-to-back fights within 3 turns
+  {
+    if (!hero._lastFights) hero._lastFights = [];
+    const fightRecord = { enemy: enemyCard.name, turn: G.turn, won: true };
+    const recent = hero._lastFights.filter(f => G.turn - f.turn > 0 && G.turn - f.turn <= 3);
+    recent.forEach(prev => {
+      G.tracker.cascadingImpact.push({
+        enemy1: prev.enemy, turn1: prev.turn, won1: prev.won,
+        enemy2: enemyCard.name, turn2: G.turn, won2: true
+      });
+    });
+    hero._lastFights.push(fightRecord);
+    if (hero._lastFights.length > 5) hero._lastFights.shift();
+  }
 
   // Update Copycat win tracking after fight resolves
   if (hero._lastCopycatEntry) {
@@ -4623,31 +4669,31 @@ function growHydraHead(source) {
 function runToHydra(hero) {
   if (hero.pos === 'hydra') return;
 
+  // Priority #1: Reality Warp teleport to Hydra BEFORE spending a move turn
+  // Check at Shelter first (spend BP to recharge RW if needed), then check anywhere
+  if (isAtShelter(hero)) {
+    bpSpendAtShelter(hero); // may recharge Reality Warp via BP
+  }
+  if (hero.runningToHydra && G.exitHex && isSkillReady(hero, 'Reality Warp')) {
+    useSkill(hero, 'Reality Warp');
+    trackSkill(hero.id, 'Reality Warp', 'activated');
+    hero.pos = { q: G.exitHex.q, r: G.exitHex.r };
+    hero.runningToHydra = false;
+    G.heroesInHydraArea.add(hero.id);
+    const distSaved = G.hexMap ? (G.hexMap.findPath ? (function() { const p = G.hexMap.findPath(isAtShelter(hero) ? 0 : hero.pos.q, isAtShelter(hero) ? 0 : hero.pos.r, G.exitHex.q, G.exitHex.r); return p ? p.length - 1 : hexDistance(0, 0, G.exitHex.q, G.exitHex.r); })() : hexDistance(0, 0, G.exitHex.q, G.exitHex.r)) : 0;
+    G.tracker.realityWarpUses.push({
+      heroId: hero.id, targetId: hero.id, selfTarget: true,
+      distanceSaved: distSaved, purpose: 'rush_hydra', turn: G.turn
+    });
+    log(`  🌀 Reality Warp: ${hero.name} teleports directly to the Hydra!`, 'wonder');
+    arriveAtHydra();
+    return;
+  }
+
   // Roll die for movement
   const roll = heroRollDie(hero);
   if (checkAssassin(hero, roll)) return;
   const moveVal = roll.val;
-
-  // Spend BP at shelter before leaving
-  if (isAtShelter(hero)) {
-    bpSpendAtShelter(hero);
-    // Reality Warp rush: if hero has RW ready and running to Hydra, teleport directly
-    if (hero.runningToHydra && G.exitHex && isSkillReady(hero, 'Reality Warp')) {
-      useSkill(hero, 'Reality Warp');
-      trackSkill(hero.id, 'Reality Warp', 'activated');
-      hero.pos = { q: G.exitHex.q, r: G.exitHex.r };
-      hero.runningToHydra = false;
-      G.heroesInHydraArea.add(hero.id);
-      const distSaved = G.hexMap ? (G.hexMap.findPath ? (function() { const p = G.hexMap.findPath(0, 0, G.exitHex.q, G.exitHex.r); return p ? p.length - 1 : hexDistance(0, 0, G.exitHex.q, G.exitHex.r); })() : hexDistance(0, 0, G.exitHex.q, G.exitHex.r)) : 0;
-      G.tracker.realityWarpUses.push({
-        heroId: hero.id, targetId: hero.id, selfTarget: true,
-        distanceSaved: distSaved, purpose: 'rush_hydra', turn: G.turn
-      });
-      log(`  🌀 Reality Warp: ${hero.name} teleports directly to the Hydra!`, 'wonder');
-      arriveAtHydra();
-      return;
-    }
-  }
 
   log(`  ${hero.name} sprints toward the Hydra (rolled ${moveVal})`, 'system');
 
@@ -4707,8 +4753,17 @@ function runToHydra(hero) {
     const startQ = hero.pos.q, startR = hero.pos.r;
     const straightDist = hexDistance(startQ, startR, G.exitHex.q, G.exitHex.r);
 
-    // Calculate BFS distance through revealed tiles (safe path)
-    const revealedPath = G.hexMap.findPath(startQ, startR, G.exitHex.q, G.exitHex.r);
+    // Build enemy position set for avoidance pathfinding
+    const enemyPositions = new Set();
+    if (G.enemiesOnBoard) {
+      G.enemiesOnBoard.forEach(e => {
+        if (e.pos) enemyPositions.add(hexKey(e.pos.q, e.pos.r));
+      });
+    }
+
+    // Calculate BFS distance through revealed tiles, preferring enemy-free routes
+    const safePath = G.hexMap.findPathAvoidEnemies ? G.hexMap.findPathAvoidEnemies(startQ, startR, G.exitHex.q, G.exitHex.r, enemyPositions) : null;
+    const revealedPath = safePath || G.hexMap.findPath(startQ, startR, G.exitHex.q, G.exitHex.r);
     const revealedDist = revealedPath ? revealedPath.length - 1 : Infinity;
 
     // Decision: revealed path or cut through unexplored?
@@ -4844,11 +4899,14 @@ function runToHydra(hero) {
       if (G.gameOver) return;
     }
 
-    // Room resolution
-    const destTile = G.hexMap.get(currentQ, currentR);
-    if (destTile && destTile.type && destTile.type !== 'shelter' && destTile.type !== 'exit') {
-      resolveRoom(hero, destTile.type);
-      if (G.gameOver) return;
+    // Room resolution: skip when rushing to Hydra on revealed tiles (no exploring)
+    // Heroes only resolve rooms on tiles they newly placed (shortcut path)
+    if (useShortcut) {
+      const destTile = G.hexMap.get(currentQ, currentR);
+      if (destTile && destTile.type && destTile.type !== 'shelter' && destTile.type !== 'exit') {
+        resolveRoom(hero, destTile.type);
+        if (G.gameOver) return;
+      }
     }
 
     const remaining = hexDistance(currentQ, currentR, G.exitHex.q, G.exitHex.r);
