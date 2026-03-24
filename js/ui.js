@@ -344,6 +344,80 @@ function generateReport(results) {
   if (parseFloat(winRate) > 85) flag('balance', 'high', `Win rate ${winRate}% is very high — game may be too easy`);
   html += `</div>`;
 
+  // ===================== RELIC SURGE SECTION =====================
+  const allRelicSurge = { normal: 0, lastStand: 0, skillsRecharged: 0 };
+  results.forEach(r => {
+    const rs = r.tracker.relicSurge;
+    if (rs) {
+      allRelicSurge.normal += rs.normal || 0;
+      allRelicSurge.lastStand += rs.lastStand || 0;
+      allRelicSurge.skillsRecharged += rs.skillsRecharged || 0;
+    }
+  });
+  if (allRelicSurge.normal + allRelicSurge.lastStand > 0) {
+    html += `<div class="report-section"><h3>Relic Surge</h3>`;
+    html += `<div class="report-card">`;
+    html += statRow('Normal Surges (recharge 1)', allRelicSurge.normal);
+    html += statRow('Last Stand triggers (recharge 2 + STR)', allRelicSurge.lastStand);
+    html += statRow('Total skills recharged', allRelicSurge.skillsRecharged);
+    html += statRow('Avg surges per game', fix1((allRelicSurge.normal + allRelicSurge.lastStand) / n));
+    if (allRelicSurge.lastStand > 0) {
+      const lastStandGames = results.filter(r => r.tracker.relicSurge && r.tracker.relicSurge.lastStand > 0);
+      const lastStandWins = lastStandGames.filter(r => r.victory).length;
+      html += statRow('Games with Last Stand', `${lastStandGames.length} (win rate: ${pct(lastStandWins, lastStandGames.length)}%)`);
+    }
+    html += `</div></div>`;
+  }
+
+  // ===================== ENGAGEMENT ANALYSIS SECTION =====================
+  html += `<div class="report-section"><h3>Engagement Analysis</h3>`;
+
+  const totalEngagement = { decisions: 0, group: 0, effects: 0, closeCalls: 0, burns: 0, surges: 0, deadTurns: 0, totalTurns: 0 };
+  results.forEach(r => {
+    const e = r.tracker.engagement || {};
+    totalEngagement.decisions += e.decisionMoments || 0;
+    totalEngagement.group += e.groupInvolvement || 0;
+    totalEngagement.effects += e.specialEffectTriggers || 0;
+    totalEngagement.closeCalls += e.closeCalls || 0;
+    totalEngagement.deadTurns += e.deadTurns || 0;
+    totalEngagement.totalTurns += e.totalTurns || 0;
+    totalEngagement.burns += r.stats.skillBurns || 0;
+    const rs = r.tracker.relicSurge;
+    if (rs) totalEngagement.surges += (rs.normal || 0) + (rs.lastStand || 0);
+  });
+
+  const avgDecisions = fix1(totalEngagement.decisions / n);
+  const avgGroup = fix1(totalEngagement.group / n);
+  const avgEffects = fix1(totalEngagement.effects / n);
+  const avgCloseCalls = fix1(totalEngagement.closeCalls / n);
+  const avgBurns2 = fix1(totalEngagement.burns / n);
+  const avgSurges = fix1(totalEngagement.surges / n);
+  const deadPct = totalEngagement.totalTurns > 0 ? pct(totalEngagement.deadTurns, totalEngagement.totalTurns) : '0.0';
+
+  // Earned Victory Score
+  const evs = totalEngagement.totalTurns > 0 ? (
+    totalEngagement.decisions * 2 +
+    totalEngagement.group * 1.5 +
+    totalEngagement.effects * 1 +
+    totalEngagement.burns * 1 +
+    totalEngagement.surges * 3 +
+    totalEngagement.closeCalls * 2
+  ) / totalEngagement.totalTurns : 0;
+
+  html += `<div class="report-card" style="border-left:3px solid var(--accent)">`;
+  html += `<b style="font-size:14px">Earned Victory Score: ${fix1(evs)} per turn</b>`;
+  html += `<div style="font-size:10px;color:var(--dim);margin-top:2px">Target: >2.0 = engaging game. <1.0 = autopilot.</div>`;
+  html += statRow('Decision Moments', `${avgDecisions}/game`);
+  html += statRow('Group Involvement', `${avgGroup}/game`);
+  html += statRow('Special Effects', `${avgEffects}/game`);
+  html += statRow('Close Calls (margin \u22642)', `${avgCloseCalls}/game`);
+  html += statRow('Skill Burns', `${avgBurns2}/game`);
+  html += statRow('Relic Surges', `${avgSurges}/game`);
+  html += statRow('Dead Turns', `${deadPct}% (target: <5%)`);
+  html += `</div>`;
+
+  html += `</div>`;
+
   // ===================== SECTION 2: HERO PERFORMANCE =====================
   html += `<div class="report-section"><h3>Hero Performance</h3>`;
 
@@ -2569,7 +2643,7 @@ function organizeReportTabs() {
 
   // Map section titles to tabs
   const tabMap = {
-    'tab-overview': ['Overview','Game Pacing','Gap Analysis'],
+    'tab-overview': ['Overview','Relic Surge','Engagement Analysis','Game Pacing','Gap Analysis'],
     'tab-heroes': ['Hero Performance','Hero State','Hero Arrival','Hero × Enemy','Hero × Hydra','Talent Activations','Relic Effects'],
     'tab-skills-equip': ['Skill Analysis','Equipment Analysis','Equipment Power Combos','Arcane Familiar'],
     'tab-enemies': ['Enemy Design','Enemy Side Effects','Trap Analysis','Follower','Enemy Engagement','Cost of Victory','Cascading Impact'],

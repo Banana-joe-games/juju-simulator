@@ -353,6 +353,14 @@ function freshTracker() {
     shelterBlocker: { timesBlocked: 0, turnsBlocked: 0 },
     dodgeChain: [],            // { dodges, finalHeroId, strBonus }
     thieflingChase: { caughtFirst: 0, escaped: 0, turnsToRecover: [] },
+    engagement: {
+      decisionMoments: 0,
+      groupInvolvement: 0,
+      specialEffectTriggers: 0,
+      closeCalls: 0,
+      deadTurns: 0,
+      totalTurns: 0
+    },
   };
 }
 
@@ -902,6 +910,7 @@ function runTurn() {
   hero.dodgeActive = false;
   hero.ko = false;
   hero._faithfulDogUsedThisTurn = false;
+  hero._turnHadEvent = false;
 
   log(`━━━ Turn ${G.turn} — ${hero.name} ${hero.title} ━━━`, 'turn-header');
 
@@ -1143,6 +1152,11 @@ function runTurn() {
   }
 
   if (!G.gameOver) {
+    // Track dead turns and total turns for engagement metrics
+    if (G.tracker) {
+      G.tracker.engagement.totalTurns++;
+      if (!hero._turnHadEvent) G.tracker.engagement.deadTurns++;
+    }
     nextHero();
   }
 }
@@ -1791,6 +1805,7 @@ function drawDread(hero) {
 
 // ========== CARD RESOLUTION ==========
 function resolveWonderCard(hero, card) {
+  hero._turnHadEvent = true;
   switch(card.type) {
     case 'encounter':
       if (card.effect === 'recharge_all_skills') {
@@ -1854,6 +1869,7 @@ function resolveWonderCard(hero, card) {
       } else if (card.effect === 'recharge_all_1') {
         G.heroes.forEach(h => rechargeOneSkill(h, 'echo_of_victory'));
         log(`    Echo of Victory: all heroes recharge 1 Skill!`, 'wonder');
+        if (G.tracker) G.tracker.engagement.groupInvolvement++;
       } else {
         log(`    ${card.name} effect applied.`, 'wonder');
       }
@@ -1930,6 +1946,7 @@ function resolveWonderCard(hero, card) {
 }
 
 function resolveMishapCard(hero, card) {
+  hero._turnHadEvent = true;
   switch(card.type) {
     case 'encounter':
       if (card.effect === 'move_2_extra') {
@@ -1987,17 +2004,24 @@ function resolveMishapCard(hero, card) {
     case 'global':
       // v5.3 global effects
       if (card.effect === 'global_skill_exhaust') {
+        trackTrap("Hydra's Roar", 'triggered');
         log(`    🐉 Hydra's Roar echoes through the dungeon!`, 'misfortune');
+        let exhaustedCount = 0;
         G.heroes.forEach(h => {
           const roll = Math.floor(Math.random() * 6) + 1;
           if (roll <= 2) {
             exhaustOneSkill(h, "Hydra's Roar");
+            exhaustedCount++;
             log(`      ${h.name} rolled ${roll} — exhausts 1 Skill!`, 'ko');
           } else {
             log(`      ${h.name} rolled ${roll} — safe`, 'system');
           }
         });
+        if (exhaustedCount > 0) trackTrapResource("Hydra's Roar", 'skillsExhausted');
+        if (G.tracker) G.tracker.engagement.groupInvolvement++;
+        if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
       } else if (card.effect === 'fog_next_movement') {
+        trackTrap('Thick Fog', 'triggered');
         hero._fogNextMove = true;
         log(`    Thick Fog! ${hero.name}'s next movement direction will be random!`, 'misfortune');
       }
@@ -2006,6 +2030,7 @@ function resolveMishapCard(hero, card) {
 }
 
 function resolveMisfortuneCard(hero, card) {
+  hero._turnHadEvent = true;
   switch(card.type) {
     case 'stalker':
       hero.stalkers.push({name: card.name, effect: card.effect});
@@ -2022,6 +2047,7 @@ function resolveMisfortuneCard(hero, card) {
 }
 
 function resolveTrap(hero, card) {
+  hero._turnHadEvent = true;
   trackTrap(card.name, 'triggered');
   // Arcane Familiar: cancel dangerous trap effects
   if (trySpellMirror(card.effect)) {
@@ -2045,6 +2071,7 @@ function resolveTrap(hero, card) {
       break;
     }
     case 'exhaust_or_ko': {
+      if (G.tracker) G.tracker.engagement.decisionMoments++;
       if (readySkillCount(hero) > 0) {
         exhaustOneSkill(hero, "Skill Burn (reroll)");
         trackTrapResource('Giant Web', 'skillsExhausted');
@@ -2072,6 +2099,7 @@ function resolveTrap(hero, card) {
       break;
     }
     case 'ko_or_exhaust_all': {
+      if (G.tracker) G.tracker.engagement.decisionMoments++;
       if (readySkillCount(hero) > 0) {
         const exhaustedByTribute = readySkillCount(hero);
         hero.skillStates = hero.skillStates.map(() => 'exhausted');
@@ -2213,6 +2241,7 @@ function trySpellMirror(context, atHydra) {
         } else {
             log(`  🔮 Arcane Familiar: ${familiarHolder.name} discards familiar to cancel the special effect!`, 'flame');
         }
+        if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
         return true;
     }
     return false;
@@ -2220,6 +2249,7 @@ function trySpellMirror(context, atHydra) {
 
 // ========== COMBAT ==========
 function combat(hero, enemyCard, tier) {
+  hero._turnHadEvent = true;
   G.stats.combats++;
   const ht = initHeroTracker(G.tracker, hero.id);
   ht.combats++;
@@ -2397,6 +2427,7 @@ function combat(hero, enemyCard, tier) {
   // === PRE-COMBAT EFFECTS ===
   // Sacerdote Fishfolk v2: roll 1-3 = exhaust 1 skill then fight, 4-6 = recharge 1 skill and leaves
   if (!spellMirrored && enemyCard.effect === 'pre_roll_skill') {
+    if (G.tracker) G.tracker.engagement.decisionMoments++;
     const sacRoll = Math.floor(Math.random() * 6) + 1;
     if (sacRoll <= 3) {
       exhaustOneSkill(hero, "Sacerdote Fishfolk");
@@ -2420,6 +2451,8 @@ function combat(hero, enemyCard, tier) {
       const r = heroRollDie(h);
       if (r.val <= 2) { exhaustOneSkill(h, "Stormcaller AoE"); trackEnemySideEffect('Stormcaller', 'skillsExhausted'); log(`    Stormcaller: ${h.name} loses a skill!`, 'misfortune'); }
     });
+    if (G.tracker) G.tracker.engagement.groupInvolvement++;
+    if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
   }
 
   // Mana Leech: exhaust 2 or -2
@@ -2445,17 +2478,19 @@ function combat(hero, enemyCard, tier) {
     hero.equipment = [];
     trackEnemySideEffect('Blob', 'equipLost');
     log(`    Blob absorbs ALL equipment! ${hero.name} fights with base STR only!`, 'misfortune');
+    if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
   }
 
   // Squelette v2 (mirror_equipment): STR = sum of hero's equipment STR bonuses
   if (!spellMirrored && enemyCard.effect === 'mirror_equipment') {
     const equipStr = hero.equipment.reduce((s, e) => s + (e.str || 0), 0);
-    enemyStr = Math.max(1, equipStr);
-    log(`    Squelette mirrors equipment! STR = ${enemyStr} (sum of hero equipment STR)`, 'combat');
+    enemyStr = (enemyCard.str || 2) + equipStr;
+    log(`    Squelette mirrors equipment! STR = ${enemyStr} (base ${enemyCard.str || 2} + equip ${equipStr})`, 'combat');
   }
 
   // Stone Gargoyle v2 (dormant_sneak): roll without Flame = pass safely
   if (!spellMirrored && enemyCard.effect === 'dormant_sneak') {
+    if (G.tracker) G.tracker.engagement.decisionMoments++;
     const gargRoll = heroRollDie(hero);
     if (!gargRoll.isFlame) {
       log(`    Stone Gargoyle: rolled ${gargRoll.val} (no Flame) — passes safely!`, 'wonder');
@@ -2490,9 +2525,11 @@ function combat(hero, enemyCard, tier) {
 
   // Bully v2 (bp_extortion): demands 3 BP
   if (!spellMirrored && enemyCard.effect === 'bp_extortion') {
+    if (G.tracker) G.tracker.engagement.decisionMoments++;
     if (bpEnabled() && hero.bp >= 3) {
       hero.bp -= 3;
       log(`    Bully demands tribute! ${hero.name} pays 3 BP (${hero.bp} left) — Bully leaves.`, 'mishap');
+      if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
       trackEncounter(enemyCard.name, 'avoided');
       return;
     }
@@ -2502,8 +2539,12 @@ function combat(hero, enemyCard, tier) {
   // Mad Berserker v2 (dodge_chain): fight or dodge to next hero
   if (!spellMirrored && enemyCard.effect === 'dodge_chain') {
     if (!G.tracker.decisionEnemies[enemyCard.name]) G.tracker.decisionEnemies[enemyCard.name] = { choiceA:0, choiceB:0 };
-    // AI: dodge if hero is weak, fight if strong
-    if (totalStr(hero) < enemyStr + 1) {
+    if (G.tracker) G.tracker.engagement.decisionMoments++;
+    // AI: dodge if estimated win chance < 60%, fight if strong
+    const heroExpected = totalStr(hero) + 3.5;
+    const enemyExpected = enemyStr + 3.5;
+    const estWinChance = heroExpected / (heroExpected + enemyExpected);
+    if (estWinChance < 0.6) {
       // Try to dodge to next hero in turn order
       const heroIdx = G.heroes.indexOf(hero);
       let dodgeCount = 0;
@@ -2512,7 +2553,9 @@ function combat(hero, enemyCard, tier) {
       for (let i = 1; i <= G.heroes.length; i++) {
         const nextHero = G.heroes[(heroIdx + i) % G.heroes.length];
         if (nextHero.ko || nextHero.id === hero.id) continue;
-        if (totalStr(nextHero) >= enemyStr + 1) {
+        const nextExpected = totalStr(nextHero) + 3.5;
+        const nextWinChance = nextExpected / (enemyStr + 3.5 + nextExpected);
+        if (nextWinChance >= 0.6) {
           // This hero fights
           allDodged = false;
           currentFighter = nextHero;
@@ -2526,9 +2569,11 @@ function combat(hero, enemyCard, tier) {
         enemyStr += 2;
         log(`    Mad Berserker: all heroes dodged! Returns with +2 STR (now ${enemyStr})!`, 'misfortune');
         G.tracker.dodgeChain.push({ dodges: dodgeCount, finalHeroId: hero.id, strBonus: 2 });
+        if (dodgeCount > 0 && G.tracker) G.tracker.engagement.groupInvolvement++;
       } else if (currentFighter !== hero) {
         G.tracker.decisionEnemies[enemyCard.name].choiceA++;
         G.tracker.dodgeChain.push({ dodges: dodgeCount, finalHeroId: currentFighter.id, strBonus: 0 });
+        if (dodgeCount > 0 && G.tracker) G.tracker.engagement.groupInvolvement++;
         log(`    Mad Berserker: ${hero.name} dodges! ${currentFighter.name} fights instead!`, 'combat');
         combat(currentFighter, enemyCard, tier);
         return;
@@ -2554,6 +2599,7 @@ function combat(hero, enemyCard, tier) {
         }
       });
       log(`    Dragon's arrival shakes the dungeon! All board enemies advance 1 tile!`, 'misfortune');
+      if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
     }
   }
 
@@ -2575,6 +2621,7 @@ function combat(hero, enemyCard, tier) {
       const targetTiles = ddTiles.slice(0, 3);
       seedsPlaced = targetTiles.length;
       log(`    Mindflayer seeds ${seedsPlaced} Misfortune cards across the dungeon!`, 'misfortune');
+      if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
     }
     if (!G.tracker.enemyEffectImpact[enemyCard.name]) G.tracker.enemyEffectImpact[enemyCard.name] = { triggered:0, impactful:0, seedsPlaced:0 };
     G.tracker.enemyEffectImpact[enemyCard.name].triggered++;
@@ -2597,6 +2644,8 @@ function combat(hero, enemyCard, tier) {
     shuffle(G.legendaryDeck);
     if (G.tracker) G.tracker.frogmanImpact.equipLost += totalLost;
     log(`    FROGman: ALL heroes lose equipment! (${totalLost} items shuffled back)`, 'misfortune');
+    if (G.tracker) G.tracker.engagement.groupInvolvement++;
+    if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
   }
 
   // Thiefling Rats v2 (steal_equipment): steal all equip, Flame = catch immediately
@@ -2609,6 +2658,7 @@ function combat(hero, enemyCard, tier) {
       if (catchRoll.isFlame) {
         log(`    Thiefling Rats steal equipment! Rolled ${catchRoll.val} 🔥 — caught immediately!`, 'wonder');
         if (G.tracker) G.tracker.thieflingChase.caughtFirst++;
+        if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
         // Fight with base only (equipment already removed)
       } else {
         log(`    Thiefling Rats steal equipment and escape! Rolled ${catchRoll.val} — no Flame.`, 'misfortune');
@@ -2622,6 +2672,7 @@ function combat(hero, enemyCard, tier) {
 
   // Jack o' Lantern v2 (deal_or_stalker): has followers? Discard 1 = vanishes
   if (!spellMirrored && enemyCard.effect === 'deal_or_stalker') {
+    if (G.tracker) G.tracker.engagement.decisionMoments++;
     if (hero.followers.length > 0) {
       // AI: discard cheapest follower
       const cheapest = hero.followers.reduce((best, f, i) => {
@@ -2945,6 +2996,7 @@ function combat(hero, enemyCard, tier) {
     G.shelterBlockedBy = 'Wandering Shadow';
     if (G.tracker) G.tracker.shelterBlocker.timesBlocked++;
     log(`    Wandering Shadow retreats to the Shelter! Blocks BP spending until defeated.`, 'misfortune');
+    if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
   }
 
   // Thiefling Rats v2: recover stolen equipment on win
@@ -3472,6 +3524,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     heroTotal += extraRoll;
     hero._faithfulDogUsedThisTurn = true;
     log(`    🐕 Faithful Dog: rolls ${extraRoll}, hero total now ${heroTotal}!`, 'wonder');
+    if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
   }
 
   // === RESOLUTION ===
@@ -3487,6 +3540,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
   });
   if (heroTotal >= enemyTotal + beatMargin) {
     const margin = heroTotal - (enemyTotal + beatMargin);
+    if (Math.abs(margin) <= 2 && G.tracker) G.tracker.engagement.closeCalls++;
     initHeroTracker(G.tracker, hero.id).damageDealt += margin;
     if (hero.id === 'juju') {
       if (isFlame && hero.talentUsedThisTurn) G.tracker.talentDetails.juju.winsWithFlame++;
@@ -3515,6 +3569,7 @@ function singleFight(hero, enemyCard, tier, enemyStr, bonuses) {
     return 'win';
   } else {
     const margin = (enemyTotal + beatMargin) - heroTotal;
+    if (margin <= 2 && G.tracker) G.tracker.engagement.closeCalls++;
     const ht = initHeroTracker(G.tracker, hero.id);
     ht.losses++;
     ht.damageTaken += margin;
@@ -3723,6 +3778,8 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
       });
       log(`    Longlegs Spider bounces to ${nearest.name}!`, 'misfortune');
       if (G.tracker) G.tracker.bouncingEnemies.push({ enemy: enemyCard.name, chainLength: 1, finalHero: nearest.id });
+      if (G.tracker) G.tracker.engagement.groupInvolvement++;
+      if (G.tracker) G.tracker.engagement.specialEffectTriggers++;
       combat(nearest, {...enemyCard}, tier);
       return;
     }
@@ -3850,6 +3907,8 @@ function triggerRelicSurge() {
       G.tracker.relicSurge = G.tracker.relicSurge || { normal: 0, lastStand: 0, skillsRecharged: 0 };
       G.tracker.relicSurge.lastStand++;
       G.tracker.relicSurge.skillsRecharged += G.heroes.length * 2;
+      G.tracker.engagement.groupInvolvement++;
+      G.tracker.engagement.specialEffectTriggers++;
     }
   } else {
     // NORMAL SURGE: recharge 1
@@ -3859,6 +3918,8 @@ function triggerRelicSurge() {
       G.tracker.relicSurge = G.tracker.relicSurge || { normal: 0, lastStand: 0, skillsRecharged: 0 };
       G.tracker.relicSurge.normal++;
       G.tracker.relicSurge.skillsRecharged += G.heroes.length;
+      G.tracker.engagement.groupInvolvement++;
+      G.tracker.engagement.specialEffectTriggers++;
     }
   }
 }
@@ -4835,6 +4896,7 @@ function hydraAttack(hero) {
   attackLog.finalHeroTotal = heroTotal;
   attackLog.won = heroTotal >= effectiveHeadStr;
   attackLog.margin = heroTotal - effectiveHeadStr;
+  if (Math.abs(attackLog.margin) <= 2 && G.tracker) G.tracker.engagement.closeCalls++;
   G.tracker.hydraCombatLog.push(attackLog);
 
   trace('hydra', 'attack', {hero: hero.id, head: head.name, headStr: effectiveHeadStr, heroTotal: heroTotal, won: heroTotal >= effectiveHeadStr, headDestroyed: heroTotal >= effectiveHeadStr, daredevilAutoWin: false});
