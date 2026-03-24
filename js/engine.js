@@ -512,6 +512,7 @@ function initState() {
     stats: { turns:0, combats:0, ko:0, monstersKilled:0, skillBurns:0, relicsSpent:0 },
     tracker: freshTracker(),
     roomsVisited: { wonder: 0, common: 0, dread: 0 },
+    shelterBlockedBy: null,
     crownUsedThisRound: false,
     relicRooms: [],
     debugMode: (tw.debugMode === true),
@@ -741,6 +742,24 @@ function bpReward(hero, enemyStr) {
 function bpSpendAtShelter(hero) {
   if (!bpEnabled()) return;
   if (!isAtShelter(hero)) return;
+  // Wandering Shadow / Bully blocks BP spending at Shelter
+  if (G.shelterBlockedBy) {
+    const blockerName = G.shelterBlockedBy;
+    log(`  ❌ ${blockerName} blocks the Shelter! ${hero.name} must fight it!`, 'misfortune');
+    const blockerCard = MISFORTUNE_CARDS.find(c => c.name === blockerName) || { name: blockerName, str: 3, type: 'enemy' };
+    const bStr = (blockerCard.str || 3) + ((G._tweaks && G._tweaks.misfortuneStr) || 0);
+    const winsBeforeFight = initHeroTracker(G.tracker, hero.id).wins;
+    combat(hero, {...blockerCard, str: bStr, effect: null}, 'misfortune'); // null effect to avoid re-triggering shelter_blocker
+    const winsAfterFight = initHeroTracker(G.tracker, hero.id).wins;
+    if (winsAfterFight > winsBeforeFight) {
+      log(`  ✅ ${blockerName} defeated! Shelter is open again.`, 'wonder');
+      G.shelterBlockedBy = null;
+      // Now spend BP normally
+    } else {
+      if (G.tracker) G.tracker.shelterBlocker.turnsBlocked++;
+      return; // Lost — still blocked, can't spend BP
+    }
+  }
   // Track visit type
   if (G.tracker) {
     const wasKO = hero._justRespawned;
@@ -2923,6 +2942,7 @@ function combat(hero, enemyCard, tier) {
 
   // Wandering Shadow: moves to Shelter as blocker after combat
   if (enemyCard.effect === 'shelter_blocker') {
+    G.shelterBlockedBy = 'Wandering Shadow';
     if (G.tracker) G.tracker.shelterBlocker.timesBlocked++;
     log(`    Wandering Shadow retreats to the Shelter! Blocks BP spending until defeated.`, 'misfortune');
   }
@@ -3774,6 +3794,15 @@ function handleCombatLoss(hero, enemyCard, tier, frogmanSwallowed, enemyStr) {
     } else {
       log(`    Astral Echo misses. (${echoTotal} vs ${echoEnemyTotal})`, 'ko');
     }
+  }
+
+  // Bully v2: on loss, takes ALL BP and moves to Shelter as blocker
+  if (enemyCard.effect === 'bp_extortion' && bpEnabled()) {
+    const stolenBP = hero.bp;
+    hero.bp = 0;
+    G.shelterBlockedBy = 'Bully';
+    if (G.tracker) G.tracker.shelterBlocker.timesBlocked++;
+    log(`    Bully takes ALL ${stolenBP} BP and moves to the Shelter! Shelter blocked!`, 'ko');
   }
 
   hero._lastKOEnemy = enemyCard;  // Store which enemy caused KO, for dungeon floor guardian
